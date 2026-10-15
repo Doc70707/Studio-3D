@@ -1,0 +1,14 @@
+{
+  "name": "@studio3d/viewport",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "3D display and camera controls. Displays geometry; never changes it.",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0"
+  }
+}
