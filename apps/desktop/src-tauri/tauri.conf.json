@@ -29,7 +29,7 @@
     "active": true,
     "targets": ["nsis", "msi"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "category": "Graphics",
+    "category": "GraphicsAndDesign",
     "shortDescription": "Beginner-first 3D design for 3D printing",
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" }
