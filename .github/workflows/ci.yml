@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, tests, licences (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Install Chromium for browser tests
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/desktop
+      - run: npm run test:e2e
+      - name: Licence check (npm + Rust) and notices up to date
+        run: |
+          npm run licenses
+          git diff --exit-code THIRD_PARTY_NOTICES.md || (echo "::error::THIRD_PARTY_NOTICES.md is out of date. Run 'npm run licenses' and commit it." && exit 1)
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/desktop/playwright-report
+          retention-days: 7
+
+  windows:
+    name: Windows installer + launch test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - name: Build Windows installers
+        run: npm run desktop:build
+      - name: Launch the app and confirm its window opens
+        shell: pwsh
+        run: |
+          $exe = "apps/desktop/src-tauri/target/release/studio3d.exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          $deadline = (Get-Date).AddSeconds(60)
+          do {
+            Start-Sleep -Seconds 2
+            $p.Refresh()
+            if ($p.HasExited) { throw "Studio 3D exited early with code $($p.ExitCode)" }
+          } until ($p.MainWindowTitle -eq "Studio 3D" -or (Get-Date) -gt $deadline)
+          if ($p.MainWindowTitle -ne "Studio 3D") { throw "No 'Studio 3D' window appeared within 60 seconds" }
+          Start-Sleep -Seconds 10
+          $p.Refresh()
+          if ($p.HasExited) { throw "Studio 3D crashed after opening (exit code $($p.ExitCode))" }
+          Write-Host "Studio 3D window opened and stayed running."
+          Stop-Process -Id $p.Id
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-3d-windows-installer
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 30

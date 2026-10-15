@@ -1,0 +1,22 @@
+{
+  "name": "studio-3d",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "npm run dev -w @studio3d/desktop",
+    "build": "npm run build -w @studio3d/desktop",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:e2e": "npm run test:e2e -w @studio3d/desktop",
+    "licenses": "node scripts/check-licenses.mjs",
+    "desktop:dev": "npm run tauri -w @studio3d/desktop -- dev",
+    "desktop:build": "npm run tauri -w @studio3d/desktop -- build"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

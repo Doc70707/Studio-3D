@@ -1,0 +1,21 @@
+kernel init 210 ms
+PASS  exact solid box volume  72000 mm³ (expected 72000)
+PASS  exact box bounds  60 x 40 x 30
+PASS  open box (shell) volume  15552.0000 vs 15552
+PASS  boolean cut volume  15350.9381 vs 15350.9381 (rebuild 77 ms)
+PASS  width 60→80 rebuild  19190.9381 vs 19190.9381
+PASS  save/reopen parameters → same geometry  19190.9381
+PASS  save/reopen exact B-rep  19190.9381
+PASS  STL written  52284 bytes, 1044 triangles
+PASS  STEP written  38861 bytes
+PASS  kernel behaviour on wall=50 recorded  kernel returned volume 91978.76140340505 (solid box = 96000), no error
+PASS  guard rejects wall=50 with a plain message, keeps last valid model  Walls of 50 mm would fill the whole box. Use less than 20 mm.
+11/11 checks passed
+trimesh: triangles 1044 watertight True winding_consistent True volume 19191.021 extents [80.0, 40.0, 30.0] euler -2
+numpy-stl: volume 19191.065
+kernel exact volume 19190.938; tessellation error 0.000%
+RESULT PASS
+native OCCT  valid True volume 19190.9381 expected 19190.9381
+RESULT PASS
+manifold status NoError volume 19191.021 genus 2
+mesh boolean on imported STL: volume 18991.021
