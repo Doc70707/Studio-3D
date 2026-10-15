@@ -3,6 +3,7 @@ import { Viewport, isWebGLAvailable, type CameraState, type StandardView } from 
 import { GeometryClient, createGeometryWorker, type Measurements } from "@studio3d/geometry";
 import { hasErrors, validateBox, type BoxFeature, type Issue } from "@studio3d/document";
 import { BoxPanel } from "./BoxPanel";
+import { Icon } from "./Icon";
 import { platform } from "./platform";
 import { useProject } from "./useProject";
 
@@ -21,6 +22,9 @@ export function App() {
   const { doc, box, dirty, dirtyRef, name, notice, setNotice, busy, run } = project;
 
   const hostRef = useRef<HTMLDivElement>(null);
+  const topbarRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const statusRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<Viewport | null>(null);
   const geometryRef = useRef<GeometryClient | null>(null);
   const [camera, setCamera] = useState<CameraState | null>(null);
@@ -46,6 +50,29 @@ export function App() {
       vp.dispose();
       viewportRef.current = null;
     };
+  }, []);
+
+  // The 3D view fills the window and the panels float over it, so keep the scene centred in the open space.
+  useEffect(() => {
+    const update = () => {
+      const vp = viewportRef.current;
+      const host = hostRef.current;
+      if (!vp || !host) return;
+      const h = host.getBoundingClientRect();
+      const top = topbarRef.current?.getBoundingClientRect();
+      const panel = panelRef.current?.getBoundingClientRect();
+      const status = statusRef.current?.getBoundingClientRect();
+      vp.setSafeArea({
+        top: top ? top.bottom - h.top : 0,
+        left: panel ? panel.right - h.left : 0,
+        bottom: status ? h.bottom - status.top : 0,
+        right: 0,
+      });
+    };
+    const ro = new ResizeObserver(update);
+    for (const el of [hostRef.current, topbarRef.current, panelRef.current, statusRef.current]) if (el) ro.observe(el);
+    update();
+    return () => ro.disconnect();
   }, []);
 
   // Geometry engine
@@ -150,34 +177,73 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <span className="brand">Studio 3D</span>
-        <nav className="group" aria-label="File">
-          <button type="button" onClick={() => void project.newProject()} disabled={busy} title="New project (Ctrl+N)">
-            New
-          </button>
-          <button type="button" onClick={() => void project.openProject()} disabled={busy} title="Open a project (Ctrl+O)">
-            Open…
-          </button>
-          <button type="button" onClick={() => void project.save(false)} disabled={busy} title={`${saveLabel} (Ctrl+S)`}>
-            {saveLabel}
-          </button>
-          {platform.capabilities.saveInPlace && (
-            <button type="button" onClick={() => void project.save(true)} disabled={busy} title="Save as a new file (Ctrl+Shift+S)">
-              Save as…
+      <main
+        className="viewport-host"
+        ref={hostRef}
+        data-camera-view={camera?.view ?? ""}
+        data-camera-position={camera ? camera.position.join(",") : ""}
+        data-geometry={engine === "ready" ? (upToDate ? "current" : building ? "building" : "stale") : engine}
+      >
+        {webglError && (
+          <div className="notice glass" role="alert">
+            <h2>3D view can't start</h2>
+            <p>
+              Your computer's graphics (WebGL 2) aren't available to the app. Updating your graphics driver usually fixes this. On
+              Windows, also make sure Microsoft Edge WebView2 is installed.
+            </p>
+          </div>
+        )}
+        {engine === "failed" && (
+          <div className="notice glass" role="alert">
+            <h2>The geometry engine couldn't start</h2>
+            <p>{engineError}</p>
+          </div>
+        )}
+        {notice && (
+          <div className={`toast glass ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
+            <Icon name={notice.kind === "error" ? "alert" : "check"} />
+            <span>{notice.text}</span>
+            <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
+              <Icon name="close" />
             </button>
-          )}
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void exportStl()}
-            disabled={busy || !upToDate}
-            title={upToDate ? "Export a mesh for your slicer" : "Fix the highlighted values to export"}
-          >
-            Export STL
-          </button>
-        </nav>
-        <nav className="group" aria-label="Camera views">
+          </div>
+        )}
+      </main>
+
+      <header className="topbar" ref={topbarRef}>
+        <div className="glass bar">
+          <span className="brand">
+            <span className="logo" aria-hidden="true" />
+            Studio 3D
+          </span>
+          <span className="divider" aria-hidden="true" />
+          <nav className="group" aria-label="File">
+            <button type="button" onClick={() => void project.newProject()} disabled={busy} title="New project (Ctrl+N)">
+              <Icon name="new" />
+              New
+            </button>
+            <button type="button" onClick={() => void project.openProject()} disabled={busy} title="Open a project (Ctrl+O)">
+              <Icon name="open" />
+              Open…
+            </button>
+            <button type="button" onClick={() => void project.save(false)} disabled={busy} title={`${saveLabel} (Ctrl+S)`}>
+              <Icon name="save" />
+              {saveLabel}
+            </button>
+            {platform.capabilities.saveInPlace && (
+              <button
+                type="button"
+                onClick={() => void project.save(true)}
+                disabled={busy}
+                title="Save as a new file (Ctrl+Shift+S)"
+              >
+                Save as…
+              </button>
+            )}
+          </nav>
+        </div>
+
+        <nav className="glass bar segmented" aria-label="Camera views">
           {VIEW_BUTTONS.map((b) => (
             <button
               key={b.view}
@@ -191,58 +257,44 @@ export function App() {
             </button>
           ))}
         </nav>
+
+        <button
+          type="button"
+          className="primary"
+          onClick={() => void exportStl()}
+          disabled={busy || !upToDate}
+          title={upToDate ? "Export a mesh for your slicer" : "Fix the highlighted values to export"}
+        >
+          <Icon name="export" />
+          Export STL
+        </button>
       </header>
 
-      <div className="workspace">
-        <BoxPanel
-          box={box}
-          issues={issues}
-          measurements={built?.measurements ?? null}
-          builtBox={built?.box ?? null}
-          onChange={project.updateBox}
-          stale={!upToDate && built !== null}
-        />
-        <main
-          className="viewport-host"
-          ref={hostRef}
-          data-camera-view={camera?.view ?? ""}
-          data-camera-position={camera ? camera.position.join(",") : ""}
-          data-geometry={engine === "ready" ? (upToDate ? "current" : building ? "building" : "stale") : engine}
-        >
-          {webglError && (
-            <div className="notice" role="alert">
-              <h2>3D view can't start</h2>
-              <p>
-                Your computer's graphics (WebGL 2) aren't available to the app. Updating your graphics driver usually fixes
-                this. On Windows, also make sure Microsoft Edge WebView2 is installed.
-              </p>
-            </div>
-          )}
-          {engine === "failed" && (
-            <div className="notice" role="alert">
-              <h2>The geometry engine couldn't start</h2>
-              <p>{engineError}</p>
-            </div>
-          )}
-          {notice && (
-            <div className={`toast ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
-              <span>{notice.text}</span>
-              <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
-                ×
-              </button>
-            </div>
-          )}
-        </main>
-      </div>
+      <BoxPanel
+        ref={panelRef}
+        box={box}
+        issues={issues}
+        measurements={built?.measurements ?? null}
+        builtBox={built?.box ?? null}
+        onChange={project.updateBox}
+        stale={!upToDate && built !== null}
+      />
 
-      <footer className="statusbar">
-        <span data-testid="save-status">
+      <footer className="statusbar glass" ref={statusRef}>
+        <span data-testid="save-status" className={dirty ? "unsaved" : undefined}>
+          <span className="dot" aria-hidden="true" />
           {name} · {saveStatus}
         </span>
-        <span className="muted">
-          {engine === "starting" ? "Starting geometry engine…" : engine === "failed" ? "Geometry engine unavailable" : building ? "Updating model…" : "Model up to date"}
-          {" · "}Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view
+        <span className="engine">
+          {engine === "starting"
+            ? "Starting geometry engine…"
+            : engine === "failed"
+              ? "Geometry engine unavailable"
+              : building
+                ? "Updating model…"
+                : "Model up to date"}
         </span>
+        <span className="hint">Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view</span>
       </footer>
     </div>
   );
