@@ -1,0 +1,8 @@
+{
+  "name": "@studio3d/document",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The project document: parameters and features (the source of truth), file format, validation and migrations.",
+  "exports": { ".": "./src/index.ts" }
+}

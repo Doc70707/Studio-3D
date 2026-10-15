@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "outDir": "../../node_modules/.tsc/viewport", "rootDir": "src" },
+  "compilerOptions": { "outDir": "../../node_modules/.tsc/viewport", "tsBuildInfoFile": "../../node_modules/.tsc/viewport.tsbuildinfo", "rootDir": "src" },
   "include": ["src"]
 }

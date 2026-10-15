@@ -31,6 +31,13 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/desktop
       - run: npm run test:e2e
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Independent STL check (trimesh) on files exported by the tests
+        run: |
+          python -m pip install --quiet trimesh==5.1.1 numpy
+          python -I scripts/verify_stl.py test-output
       - name: Licence check (npm + Rust) and notices up to date
         run: |
           npm run licenses
@@ -56,20 +63,26 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
       - run: npm ci
+      - name: Rust tests (safe file writes) on a real Windows filesystem
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Build Windows installers
         run: npm run desktop:build
-      - name: Launch the app and confirm its window opens
+      - name: Launch the app and confirm the interface and geometry engine load
+        # The window starts titled "Studio 3D". The interface renames it to "Untitled — Studio 3D" only after
+        # the OCCT geometry engine has loaded, so that title proves the app and kernel both run inside WebView2.
         shell: pwsh
         run: |
           $exe = "apps/desktop/src-tauri/target/release/studio3d.exe"
+          $loaded = "Untitled $([char]0x2014) Studio 3D"
           $p = Start-Process -FilePath $exe -PassThru
           $deadline = (Get-Date).AddSeconds(60)
           do {
             Start-Sleep -Seconds 2
             $p.Refresh()
             if ($p.HasExited) { throw "Studio 3D exited early with code $($p.ExitCode)" }
-          } until ($p.MainWindowTitle -eq "Studio 3D" -or (Get-Date) -gt $deadline)
-          if ($p.MainWindowTitle -ne "Studio 3D") { throw "No 'Studio 3D' window appeared within 60 seconds" }
+          } until ($p.MainWindowTitle -eq $loaded -or (Get-Date) -gt $deadline)
+          if ($p.MainWindowTitle -ne $loaded) { throw "The interface and geometry engine did not load within 60 seconds (title: '$($p.MainWindowTitle)')" }
+          Write-Host "Window title: $($p.MainWindowTitle)"
           Start-Sleep -Seconds 10
           $p.Refresh()
           if ($p.HasExited) { throw "Studio 3D crashed after opening (exit code $($p.ExitCode))" }

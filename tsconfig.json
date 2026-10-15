@@ -1,4 +1,9 @@
 {
   "files": [],
-  "references": [{ "path": "packages/viewport" }, { "path": "apps/desktop" }]
+  "references": [
+    { "path": "packages/viewport" },
+    { "path": "packages/document" },
+    { "path": "packages/geometry" },
+    { "path": "apps/desktop" }
+  ]
 }
