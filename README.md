@@ -21,6 +21,10 @@ What works today:
   of the previous version. You're asked before unsaved changes are thrown away or the window closes.
 - Export STL for your slicer. Tests check every exported mesh is watertight with exact dimensions, independently with trimesh.
 - 3D view of a 256 × 256 mm build plate with orbit, pan, zoom and standard views (keys 0–3).
+- A clean frosted-glass interface: the 3D view fills the window and the controls float over it. Text contrast is
+  checked by a test, and the app respects Windows' reduced motion, reduced transparency and high contrast settings.
+
+![Studio 3D](docs/ui/glass-default.png)
 
 Not yet: guided workflow, undo/redo, more shapes, print preparation.
 

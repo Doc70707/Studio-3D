@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { forwardRef, useEffect, useId, useState } from "react";
 import { hasErrors, type BoxFeature, type Issue } from "@studio3d/document";
 import type { Measurements } from "@studio3d/geometry";
 
@@ -22,31 +22,39 @@ interface Props {
   onChange: (patch: Partial<BoxFeature>) => void;
 }
 
-export function BoxPanel({ box, issues, measurements, builtBox, stale, onChange }: Props) {
+export const BoxPanel = forwardRef<HTMLElement, Props>(function BoxPanel(
+  { box, issues, measurements, builtBox, stale, onChange },
+  ref,
+) {
   const general = issues.filter((i) => i.field === null);
   return (
-    <aside className="panel" aria-label="Box settings">
-      <h2>Box</h2>
-      {FIELDS.map((f) => (
-        <NumberField
-          key={f.key}
-          label={f.label}
-          help={f.help}
-          value={box[f.key]}
-          issue={issues.find((i) => i.field === f.key)}
-          onCommit={(v) => onChange({ [f.key]: v })}
-        />
-      ))}
-      {general.map((i) => (
-        <p key={i.message} className={`issue ${i.severity}`} role="alert">
-          {i.message}
-        </p>
-      ))}
-      {stale && hasErrors(issues) && <p className="help">The 3D view shows your last valid box until the values above are fixed.</p>}
+    <aside className="panel glass" aria-label="Box settings" ref={ref}>
+      <div className="panel-scroll">
+        <h2>Box</h2>
+        <p className="lead">Type a size and the box updates as you go.</p>
+        {FIELDS.map((f) => (
+          <NumberField
+            key={f.key}
+            label={f.label}
+            help={f.help}
+            value={box[f.key]}
+            issue={issues.find((i) => i.field === f.key)}
+            onCommit={(v) => onChange({ [f.key]: v })}
+          />
+        ))}
+        {general.map((i) => (
+          <p key={i.message} className={`issue ${i.severity}`} role="alert">
+            {i.message}
+          </p>
+        ))}
+        {stale && hasErrors(issues) && (
+          <p className="help">The 3D view shows your last valid box until the values above are fixed.</p>
+        )}
+      </div>
       {builtBox && <Facts box={builtBox} measurements={measurements} />}
     </aside>
   );
-}
+});
 
 function NumberField(props: { label: string; help: string; value: number; issue?: Issue; onCommit: (v: number) => void }) {
   const id = useId();

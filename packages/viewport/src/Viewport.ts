@@ -16,6 +16,14 @@ export interface DisplayMesh {
   edges: Float32Array;
 }
 
+/** Pixels along each edge of the view that floating panels cover. The scene is centred and fitted in the rest. */
+export interface SafeArea {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 export interface CameraState {
   view: StandardView | "custom";
   position: [number, number, number];
@@ -49,18 +57,21 @@ export class Viewport {
   private frameRequested = false;
   private listeners = new Set<(s: CameraState) => void>();
   private model: THREE.Group | null = null;
+  private safeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
+  /** Vertical field of view and aspect of the uncovered area, used to fit standard views. */
+  private fit = { fov: FOV, aspect: 1 };
 
   constructor(private readonly container: HTMLElement, options: ViewportOptions = {}) {
     const w = options.plateWidth ?? 256;
     const d = options.plateDepth ?? 256;
     this.plateBounds = { min: [-w / 2, -d / 2, 0], max: [w / 2, d / 2, 0] };
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    this.renderer.setClearColor(0x000000, 0); // transparent: the page's background shows behind the scene
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.domElement.setAttribute("data-testid", "viewport-canvas");
     container.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(0x1d2026);
     this.camera.up.set(0, 0, 1);
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
@@ -85,7 +96,7 @@ export class Viewport {
   }
 
   setView(view: StandardView): void {
-    const p = placeCamera(view, this.plateBounds, FOV, this.camera.aspect);
+    const p = placeCamera(view, this.plateBounds, this.fit.fov, this.fit.aspect);
     this.camera.up.set(...p.up);
     this.camera.position.set(...p.position);
     this.controls.target.set(...p.target);
@@ -111,16 +122,25 @@ export class Viewport {
       g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
       const surface = new THREE.Mesh(
         g,
-        new THREE.MeshStandardMaterial({ color: 0x4c9aff, roughness: 0.55, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+        new THREE.MeshStandardMaterial({ color: 0x6cb4ff, roughness: 0.45, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
       );
       group.add(surface);
       const e = new THREE.BufferGeometry();
       e.setAttribute("position", new THREE.BufferAttribute(mesh.edges, 3));
-      group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x0b2a55 })));
+      group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x123a6b })));
       this.scene.add(group);
       this.model = group;
     }
     this.requestRender();
+  }
+
+  /** Keeps the scene centred in the part of the view that floating panels don't cover. */
+  setSafeArea(area: SafeArea): void {
+    const same = (Object.keys(area) as (keyof SafeArea)[]).every((k) => Math.round(area[k]) === Math.round(this.safeArea[k]));
+    if (same) return;
+    this.safeArea = { ...area };
+    this.resize();
+    if (this.view !== "custom") this.setView(this.view);
   }
 
   getCameraState(): CameraState {
@@ -149,8 +169,20 @@ export class Viewport {
     this.renderer.setSize(w, h, false);
     this.renderer.domElement.style.width = "100%";
     this.renderer.domElement.style.height = "100%";
-    this.camera.aspect = w / h;
+    // Render a larger virtual frame whose centre is the centre of the uncovered area.
+    const { top, right, bottom, left } = this.safeArea;
+    const visW = Math.max(w - left - right, w * 0.3);
+    const visH = Math.max(h - top - bottom, h * 0.3);
+    const dx = left - right;
+    const dy = top - bottom;
+    const fullW = w + Math.abs(dx);
+    const fullH = h + Math.abs(dy);
+    this.camera.aspect = fullW / fullH;
+    if (dx === 0 && dy === 0) this.camera.clearViewOffset();
+    else this.camera.setViewOffset(fullW, fullH, dx < 0 ? -dx : 0, dy < 0 ? -dy : 0, w, h);
     this.camera.updateProjectionMatrix();
+    const half = (FOV * Math.PI) / 360;
+    this.fit = { fov: (2 * Math.atan(Math.tan(half) * (visH / fullH)) * 180) / Math.PI, aspect: visW / visH };
     this.requestRender();
   }
 
@@ -183,7 +215,7 @@ function buildPlate(width: number, depth: number): THREE.Group {
 
   const surface = new THREE.Mesh(
     new THREE.PlaneGeometry(width, depth),
-    new THREE.MeshStandardMaterial({ color: 0x2b3038, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: 0x1b2233, roughness: 0.9, transparent: true, opacity: 0.72 }),
   );
   surface.position.z = -0.01;
   group.add(surface);
@@ -199,8 +231,8 @@ function buildPlate(width: number, depth: number): THREE.Group {
     g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
     return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color }));
   };
-  group.add(lines(minor, 0x3a404a));
-  group.add(lines(major, 0x56606e));
+  group.add(lines(minor, 0x2f3a52));
+  group.add(lines(major, 0x4a5878));
   group.add(lines([-width / 2, 0, 0.02, width / 2, 0, 0.02], 0xd9534f)); // X axis, red
   group.add(lines([0, -depth / 2, 0.02, 0, depth / 2, 0.02], 0x5cb85c)); // Y axis, green
   return group;
