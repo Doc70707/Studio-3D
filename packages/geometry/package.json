@@ -1,0 +1,16 @@
+{
+  "name": "@studio3d/geometry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Real solid geometry (OCCT via WebAssembly) in a background worker, with input and result validation.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "dependencies": {
+    "@studio3d/document": "0.1.0",
+    "replicad": "1.1.0",
+    "replicad-opencascadejs": "1.1.0"
+  }
+}

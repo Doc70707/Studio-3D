@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("the app starts and shows the viewport", async ({ page }) => {
-  await expect(page).toHaveTitle("Studio 3D");
+  await expect(page).toHaveTitle("Untitled — Studio 3D");
   await expect(page.getByTestId("viewport-canvas")).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

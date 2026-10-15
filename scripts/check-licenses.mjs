@@ -16,7 +16,10 @@ const ALLOWED = /^(MIT|ISC|BSD-2-Clause|BSD-3-Clause|0BSD|Apache-2\.0|Zlib|Unico
 
 // Licences a human has reviewed. Each entry needs a reason (see docs/milestone-0/licensing-and-dependencies.md).
 // Add "name@version": "reason" here only after a human has reviewed a licence the rules above reject.
-const REVIEWED = {};
+const REVIEWED = {
+  "replicad-opencascadejs@1.1.0":
+    "OCCT 8.0 geometry kernel, LGPL-2.1 + Open CASCADE exception. Reviewed in Milestone 0: shipped as its own replaceable .wasm file, with notices and a source offer below. Lawyer review before any paid release.",
+};
 
 /** "MIT OR Apache-2.0" → ok if any alternative is allowed; "MIT AND X" → every part must be allowed. */
 function verdict(expr) {
@@ -103,6 +106,16 @@ const lines = [
   "|---|---|---|---|",
   ...all.map((p) => `| ${p.ecosystem} | ${p.name} | ${p.version} | ${p.licence ?? "unknown"} |`),
   "",
+  "## Open CASCADE Technology (geometry kernel)",
+  "",
+  "Studio 3D uses facilities provided by Open CASCADE Technology (OCCT) 8.0, licensed under the GNU Lesser General Public",
+  "License 2.1 with the Open CASCADE Exception 1.0. It ships as a separate WebAssembly file (`replicad_single-*.wasm`",
+  "in the app's assets), built by the replicad-opencascadejs project, which you may replace with your own build.",
+  "",
+  "- OCCT source: https://github.com/Open-Cascade-SAS/OCCT",
+  "- WebAssembly build scripts: https://github.com/sgenoud/replicad (package replicad-opencascadejs 1.1.0)",
+  "- On request we will provide the exact corresponding source for the version we distribute, for at least three years.",
+  "",
   "## Licence texts (npm packages)",
   "",
   ...all
@@ -118,4 +131,4 @@ if (failures) {
   console.error(`${failures} dependency licence(s) need review. See docs/milestone-0/licensing-and-dependencies.md.`);
   process.exit(1);
 }
-console.log("All licences are permissive. THIRD_PARTY_NOTICES.md updated.");
+console.log("All licences are permissive or human-reviewed. THIRD_PARTY_NOTICES.md updated.");

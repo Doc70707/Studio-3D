@@ -7,16 +7,22 @@ A beginner-first 3D design studio for making functional, dimensionally accurate 
 | Milestone | State |
 |---|---|
 | 0. Audit and feasibility | Done. See [docs/milestone-0](docs/milestone-0/README.md) |
-| 1. Running application | **In progress.** App shell, 3D viewport, camera controls, tests, Windows CI |
-| 2. Real geometry proof | Next: OCCT box, save/reopen, verified STL export |
+| 1. Running application | Done. App shell, 3D viewport, camera controls, tests, Windows CI |
+| 2. Real geometry proof | **In review.** Real box from the OCCT kernel, save/reopen, verified STL export |
+| 3. Guided "Make a Box" | Next |
 
 What works today:
 
-- Window with a 3D view of a 256 × 256 mm build plate.
-- Orbit (left-drag), pan (right-drag or Shift-drag) and zoom (scroll).
-- Standard views from buttons or keys: 0 = 3D, 1 = Top, 2 = Front, 3 = Right.
+- A box with width, depth, height and wall thickness (0 = solid block, more = open-top container),
+  built as a real solid by the OCCT geometry kernel in a background worker. The 3D view updates as you type.
+- Plain-language errors for impossible values; the last valid box stays on screen and Export is disabled until fixed.
+- Outside size, inside space and material volume, measured from the real geometry.
+- New, Open, Save, Save as (Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S). Desktop saves are atomic and keep a `.bak`
+  of the previous version. You're asked before unsaved changes are thrown away or the window closes.
+- Export STL for your slicer. Tests check every exported mesh is watertight with exact dimensions, independently with trimesh.
+- 3D view of a 256 × 256 mm build plate with orbit, pan, zoom and standard views (keys 0–3).
 
-No modeling tools exist yet, and the app says so.
+Not yet: guided workflow, undo/redo, more shapes, print preparation.
 
 ## Getting the Windows app (no setup needed)
 
@@ -41,18 +47,22 @@ npm run desktop:build   # Windows installers in apps/desktop/src-tauri/target/re
 npm run typecheck   # TypeScript
 npm test            # unit tests (Vitest)
 npm run build && npm run test:e2e   # browser tests (Playwright, Chromium)
+python3 -I scripts/verify_stl.py test-output   # independent STL check of files the tests exported (needs trimesh)
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml   # safe file write tests
 npm run licenses    # fails on copyleft/unknown licences; regenerates THIRD_PARTY_NOTICES.md
 ```
 
-CI runs all of these on Linux. It also builds the Windows installers on a Windows machine, launches the app there, and checks that its window opens.
+CI runs the TypeScript, browser, STL and licence checks on Linux. On a Windows machine it runs the Rust file-write tests, builds the installers, launches the app and checks the interface loads.
 
 ## Layout
 
 ```
-apps/desktop/        React interface + Tauri desktop shell (src-tauri/)
+apps/desktop/        React interface, file platform (desktop/browser), Tauri desktop shell (src-tauri/)
+packages/document/   the project document, validation rules, .s3d file format and migrations
+packages/geometry/   OCCT kernel adapter, background worker, result checks, STL export
 packages/viewport/   Three.js view and camera controls (display only, never changes geometry)
 scripts/             licence check and notices generator
 docs/                milestone reports and decisions
 ```
 
-Later milestones add `packages/geometry`, `document`, `features`, `history`, `persistence`, `io`, `validation`, `print-prep` and `integrations`, as described in [docs/milestone-0/architecture.md](docs/milestone-0/architecture.md).
+Later milestones add `features`, `history`, `io`, `validation`, `print-prep` and `integrations`, as described in [docs/milestone-0/architecture.md](docs/milestone-0/architecture.md).

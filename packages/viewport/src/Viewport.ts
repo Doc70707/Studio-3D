@@ -8,6 +8,14 @@ export interface ViewportOptions {
   plateDepth?: number;
 }
 
+/** Triangles and edge lines to display. Plain arrays, so the viewport needs no geometry code. */
+export interface DisplayMesh {
+  positions: Float32Array;
+  normals: Float32Array;
+  indices: Uint32Array;
+  edges: Float32Array;
+}
+
 export interface CameraState {
   view: StandardView | "custom";
   position: [number, number, number];
@@ -40,6 +48,7 @@ export class Viewport {
   private view: StandardView | "custom" = "iso";
   private frameRequested = false;
   private listeners = new Set<(s: CameraState) => void>();
+  private model: THREE.Group | null = null;
 
   constructor(private readonly container: HTMLElement, options: ViewportOptions = {}) {
     const w = options.plateWidth ?? 256;
@@ -86,6 +95,34 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** Shows a model, replacing the previous one. Pass null to clear. */
+  setModel(mesh: DisplayMesh | null): void {
+    if (this.model) {
+      this.scene.remove(this.model);
+      disposeObject(this.model);
+      this.model = null;
+    }
+    if (mesh) {
+      const group = new THREE.Group();
+      group.name = "model";
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+      g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+      const surface = new THREE.Mesh(
+        g,
+        new THREE.MeshStandardMaterial({ color: 0x4c9aff, roughness: 0.55, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+      );
+      group.add(surface);
+      const e = new THREE.BufferGeometry();
+      e.setAttribute("position", new THREE.BufferAttribute(mesh.edges, 3));
+      group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x0b2a55 })));
+      this.scene.add(group);
+      this.model = group;
+    }
+    this.requestRender();
+  }
+
   getCameraState(): CameraState {
     const r = (n: number) => Math.round(n * 1000) / 1000 + 0; // "+ 0" turns -0 into 0
     const { x, y, z } = this.camera.position;
@@ -101,12 +138,7 @@ export class Viewport {
   dispose(): void {
     this.resizeObserver.disconnect();
     this.controls.dispose();
-    this.scene.traverse((o) => {
-      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
-        o.geometry.dispose();
-        (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
-      }
-    });
+    disposeObject(this.scene);
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -133,6 +165,15 @@ export class Viewport {
       this.listeners.forEach((fn) => fn(s));
     });
   }
+}
+
+function disposeObject(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
+      o.geometry.dispose();
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+    }
+  });
 }
 
 /** Build plate: a flat surface with 10 mm and 50 mm grid lines and X/Y axis lines through the origin. */
