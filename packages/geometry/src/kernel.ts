@@ -8,6 +8,7 @@ import {
   makeBaseBox,
   makeCylinder,
   makeSphere,
+  measureArea,
   measureVolume,
   Plane,
   type Drawing,
@@ -29,6 +30,7 @@ import {
   type Profile,
   type SketchFeature,
   type HoleFeature,
+  type HollowFeature,
   type Issue,
   type ProjectDocument,
   type ShapeFeature,
@@ -321,6 +323,89 @@ function drill(part: Part, h: HoleFeature, issues: Issue[]): Part {
   return { shape: result, volume, pieces: result.solids.length };
 }
 
+/** For each open side: the plane its faces lie in, and which end of the part's bounding box that is. */
+const SIDES = {
+  top: { plane: "XY", axis: 2, end: "max" },
+  bottom: { plane: "XY", axis: 2, end: "min" },
+  front: { plane: "XZ", axis: 1, end: "min" },
+  back: { plane: "XZ", axis: 1, end: "max" },
+  left: { plane: "YZ", axis: 0, end: "min" },
+  right: { plane: "YZ", axis: 0, end: "max" },
+} as const;
+
+/**
+ * Hollows out the part, leaving walls `wall` thick and removing the flat faces on the open side.
+ * The result must keep the part's outside size, have less material than before, and no more than the
+ * walls could hold (their area times their thickness, with room for rounded inside corners).
+ */
+export function hollow(part: Part, h: HollowFeature): Part {
+  const [min, max] = part.shape.boundingBox.bounds;
+  const size = [0, 1, 2].map((i) => max[i]! - min[i]!);
+  const thinnest = Math.min(...size);
+  if (2 * h.wall >= thinnest - 1e-9)
+    throw new ShapeCheckFailed(
+      `Walls ${fmt(h.wall)} thick would fill the whole part, which is only ${fmt(thinnest)} across at its thinnest. Use thinner walls.`,
+      h.id,
+      "wall",
+    );
+
+  let openArea = 0;
+  let inner: Shape3D;
+  let result: Shape3D;
+  try {
+    if (h.open === "none") {
+      // With nothing removed, OCCT gives the solid shrunk by the wall thickness: cut that out of the part.
+      inner = part.shape.shell(h.wall, (f) => f.inPlane("XY", 1e9));
+      try {
+        result = part.shape.cut(inner);
+      } finally {
+        inner.delete();
+      }
+    } else {
+      const side = SIDES[h.open];
+      const at = [0, 0, 0] as [number, number, number];
+      at[side.axis] = (side.end === "max" ? max : min)[side.axis]!;
+      const faces = part.shape.faces;
+      const open = faces.filter((face) => {
+        const [lo, hi] = face.boundingBox.bounds;
+        const flat = (v: number) => Math.abs(v - at[side.axis]!) < 1e-6;
+        return face.geomType === "PLANE" && flat(lo[side.axis]!) && flat(hi[side.axis]!);
+      });
+      openArea = open.reduce((a, face) => a + measureArea(face), 0);
+      const found = open.length;
+      faces.forEach((face) => face.delete());
+      if (!found)
+        throw new ShapeCheckFailed(
+          `The ${h.open} of the part isn't flat, so it can't be left open. Choose another side, or None to keep it closed.`,
+          h.id,
+          "open",
+        );
+      result = part.shape.shell(h.wall, (f) => f.inPlane(side.plane, at));
+    }
+  } catch (e) {
+    if (e instanceof ShapeCheckFailed) throw e;
+    throw new ShapeCheckFailed(cantHollow(h), h.id, "wall");
+  }
+
+  const volume = measureVolume(result);
+  const [rmin, rmax] = result.boundingBox.bounds;
+  const sameSize = [0, 1, 2].every((i) => Math.abs(rmin[i]! - min[i]!) < 1e-4 && Math.abs(rmax[i]! - max[i]!) < 1e-4);
+  const most = Math.min(part.volume, 1.5 * (measureArea(part.shape) - openArea) * h.wall);
+  if (!sameSize || !(volume > 0) || volume >= part.volume * (1 - 1e-9) || volume > most) {
+    result.delete();
+    throw new ShapeCheckFailed(cantHollow(h), h.id, "wall");
+  }
+  return { shape: result, volume, pieces: result.solids.length };
+}
+
+/** Why a hollow failed, in words that point at what to change. */
+const cantHollow = (h: HollowFeature) =>
+  `${h.name} couldn't be made with ${fmt(h.wall)} walls, so your last good version was kept. ` +
+  "Sharp points (like the tip of a cone) and parts thinner than two walls can't be hollowed. " +
+  "Try thinner walls, or remove the pointed shape.";
+
+const fmt = (n: number) => `${Math.round(n * 100) / 100} mm`;
+
 function failure(e: unknown, featureId: string, name: string): Issue {
   if (e instanceof ShapeCheckFailed)
     return {
@@ -352,6 +437,7 @@ export function buildDocument(doc: ProjectDocument): BuildResult {
     try {
       let next: Part;
       if (f.type === "hole") next = drill(part!, f, issues);
+      else if (f.type === "hollow") next = hollow(part!, f);
       else if (f.type === "sketch") {
         const tool = makeSketchTool(f, partSpan(part));
         next = part

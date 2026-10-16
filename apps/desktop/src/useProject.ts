@@ -18,7 +18,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.7.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.8.0" };
 
 const fingerprint = (doc: ProjectDocument) => JSON.stringify(doc);
 
@@ -59,12 +59,16 @@ export function useProject() {
     [edit],
   );
 
-  /** Adds a new shape before the holes (holes are drilled after shapes), or a hole or sketch at the end. */
+  /**
+   * Adds a new shape before the holes and any hollow (so it is drilled and hollowed with the rest of the part),
+   * or a hole, sketch or hollow at the end.
+   */
   const addFeature = useCallback(
     (feature: Feature) =>
       edit((d) => {
-        if (feature.type === "hole" || feature.type === "sketch") return { ...d, features: [...d.features, feature] };
-        const firstHole = d.features.findIndex((f) => f.type === "hole");
+        if (feature.type === "hole" || feature.type === "sketch" || feature.type === "hollow")
+          return { ...d, features: [...d.features, feature] };
+        const firstHole = d.features.findIndex((f) => f.type === "hole" || f.type === "hollow");
         const at = firstHole === -1 ? d.features.length : firstHole;
         return {
           ...d,

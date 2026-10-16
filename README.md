@@ -30,6 +30,10 @@ What works today:
   are refused with an explanation, and every push or cut is checked against its area times its depth.
 - Offsets: make a copy of any sketched shape grown or shrunk by an exact distance on every side. A shape drawn inside
   another becomes a hole, so an outline plus a smaller offset copy makes a frame, a rim or a washer.
+- Hollow: empty out the whole part, leaving walls of the thickness you choose, open on one side (top, bottom, front,
+  back, left or right) or closed with an empty space inside. The outside size is checked to stay the same and the
+  material to go down. Walls too thick for the part, a side that isn't flat, and shapes the geometry engine can't
+  hollow (like a cone's sharp tip) are explained, and your last good version is kept.
 - Measurements in the 3D view: the part's width, depth and height are labelled, and the shape or hole you're editing
   shows its size and its distance from the part's edges. The status bar shows exactly where the pointer is on the part.
   The Sizes button (or M) turns the labels off and on.
@@ -41,7 +45,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: hollowing a part to a wall thickness, threads, print preparation.
+Not yet: threads, print preparation.
 
 ## Getting the Windows app (no setup needed)
 

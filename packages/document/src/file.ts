@@ -1,7 +1,7 @@
 // The .s3d project file: versioned JSON.
 // Rules: never silently drop data we don't understand, never guess at a newer format,
 // and explain every rejection in plain language.
-import { SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
+import { OPEN_SIDES, SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
 
 export const FILE_FORMAT = "studio3d-project";
 export const FILE_FORMAT_VERSION = 2;
@@ -63,6 +63,7 @@ const NUMBERS: Record<Feature["type"], readonly string[]> = {
   sphere: ["x", "y", "z", ...SIZE_FIELDS.sphere],
   hole: ["x", "y", "diameter", "depth"],
   sketch: ["depth"],
+  hollow: ["wall"],
 };
 const TYPES = new Set(Object.keys(NUMBERS));
 const knownKeys = (type: Feature["type"]) =>
@@ -70,7 +71,8 @@ const knownKeys = (type: Feature["type"]) =>
     "id",
     "type",
     "name",
-    ...(type === "hole" ? [] : ["mode"]),
+    ...(type === "hole" || type === "hollow" ? [] : ["mode"]),
+    ...(type === "hollow" ? ["open"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles"] : []),
     ...NUMBERS[type],
   ]);
@@ -82,6 +84,7 @@ const DEFAULT_NAMES: Record<Feature["type"], string> = {
   sphere: "Sphere",
   hole: "Hole",
   sketch: "Sketch",
+  hollow: "Hollow",
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -206,10 +209,10 @@ export function parseProject(text: string): ParseResult {
       };
     }
     const type = f.type as Feature["type"];
-    if (i === 0 && type === "hole") {
+    if (i === 0 && (type === "hole" || type === "hollow")) {
       return {
         ok: false,
-        error: "This project file is damaged: it has to start with a shape, not a hole.",
+        error: `This project file is damaged: it has to start with a shape, not a ${type}.`,
       };
     }
     if (typeof f.id !== "string" || !f.id || seen.has(f.id)) {
@@ -227,7 +230,13 @@ export function parseProject(text: string): ParseResult {
         };
       }
     }
-    if (type !== "hole" && f.mode !== "add" && f.mode !== "cut") {
+    if (type === "hollow" && !OPEN_SIDES.some((o) => o.side === f.open)) {
+      return {
+        ok: false,
+        error: `This project file is damaged: ${where} doesn't say which side is open.`,
+      };
+    }
+    if (type !== "hole" && type !== "hollow" && f.mode !== "add" && f.mode !== "cut") {
       return {
         ok: false,
         error: `This project file is damaged: ${where} doesn't say whether it adds or cuts.`,

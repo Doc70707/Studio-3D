@@ -89,8 +89,33 @@ export interface SketchFeature {
   depth: number;
 }
 
+/** Which side of the part a hollow leaves open. "none" keeps it closed, with an empty space inside. */
+export type OpenSide = "top" | "bottom" | "front" | "back" | "left" | "right" | "none";
+
+export const OPEN_SIDES: { side: OpenSide; label: string }[] = [
+  { side: "top", label: "Top" },
+  { side: "bottom", label: "Bottom" },
+  { side: "front", label: "Front" },
+  { side: "back", label: "Back" },
+  { side: "left", label: "Left" },
+  { side: "right", label: "Right" },
+  { side: "none", label: "None (closed inside)" },
+];
+
+/**
+ * Hollows out the part built so far, leaving walls of the given thickness. The flat face(s) on the open side
+ * are removed; with open = "none" the part stays closed with an empty space inside.
+ */
+export interface HollowFeature {
+  id: string;
+  type: "hollow";
+  name: string;
+  wall: number;
+  open: OpenSide;
+}
+
 /** A document is a list of steps applied in order: shapes are added or cut, holes are drilled, sketches are pushed out or cut in. */
-export type Feature = ShapeFeature | HoleFeature | SketchFeature;
+export type Feature = ShapeFeature | HoleFeature | SketchFeature | HollowFeature;
 
 export interface ProjectDocument {
   units: Units;
@@ -167,10 +192,12 @@ export const SHAPES: Record<ShapeType, { label: string; make: () => Omit<ShapeFe
   },
 };
 
-export const isShape = (f: Feature): f is ShapeFeature => f.type !== "hole" && f.type !== "sketch";
+export const isShape = (f: Feature): f is ShapeFeature =>
+  f.type !== "hole" && f.type !== "sketch" && f.type !== "hollow";
 export const isSketch = (f: Feature): f is SketchFeature => f.type === "sketch";
-/** Steps that add or cut solid material (everything except holes). */
-export const isSolidStep = (f: Feature): f is ShapeFeature | SketchFeature => f.type !== "hole";
+export const isHollow = (f: Feature): f is HollowFeature => f.type === "hollow";
+/** Steps that add or cut solid material (shapes and sketches). */
+export const isSolidStep = (f: Feature): f is ShapeFeature | SketchFeature => isShape(f) || isSketch(f);
 export const shapesOf = (doc: ProjectDocument): ShapeFeature[] => doc.features.filter(isShape);
 export const holesOf = (doc: ProjectDocument): HoleFeature[] =>
   doc.features.filter((f): f is HoleFeature => f.type === "hole");
@@ -178,6 +205,7 @@ export const holesOf = (doc: ProjectDocument): HoleFeature[] =>
 /** The first box, if the part is a single box. Used for "inside space" and the classic box workflow. */
 export function singleBox(doc: ProjectDocument): BoxFeature | null {
   const solids = doc.features.filter(isSolidStep);
+  if (doc.features.some(isHollow)) return null;
   return solids.length === 1 && solids[0]!.type === "box" ? solids[0]! : null;
 }
 
@@ -230,6 +258,11 @@ export function newSketch(
     profiles,
     depth,
   };
+}
+
+/** A new hollow: 2 mm walls, open at the top. */
+export function newHollow(doc: ProjectDocument): HollowFeature {
+  return { id: newId(), type: "hollow", name: nextName(doc, "Hollow"), wall: 2, open: "top" };
 }
 
 export function newDocument(): ProjectDocument {
@@ -457,6 +490,8 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
       issues.push(...validateHole(f));
     } else if (f.type === "sketch") {
       issues.push(...validateSketch(f));
+    } else if (f.type === "hollow") {
+      issues.push(...validateHollow(f));
     } else {
       if (holesStarted)
         issues.push({
@@ -469,6 +504,17 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
     }
   }
   return issues;
+}
+
+/** Plain-language checks for a hollow that don't need the part. */
+export function validateHollow(h: HollowFeature): Issue[] {
+  const add = (field: string, message: string): Issue[] => [{ severity: "error", featureId: h.id, field, message }];
+  if (!Number.isFinite(h.wall)) return add("wall", "Wall thickness needs to be a number.");
+  if (h.wall < LIMITS.minPrintableWall)
+    return add("wall", `Walls need to be at least ${fmt(LIMITS.minPrintableWall)} thick to print.`);
+  if (h.wall > LIMITS.maxSize) return add("wall", `Walls can be at most ${fmt(LIMITS.maxSize)} thick.`);
+  if (!OPEN_SIDES.some((o) => o.side === h.open)) return add("open", "Choose which side to leave open.");
+  return [];
 }
 
 /** Where a profile's number is shown in the panel, e.g. "profiles.0.width". */

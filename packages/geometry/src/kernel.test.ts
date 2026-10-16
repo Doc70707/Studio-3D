@@ -28,6 +28,8 @@ import {
 } from "./kernel";
 import { faceCount, faceOfTriangle, outlineOfFace, trianglesInPlane } from "./faces";
 import {
+  newHollow,
+  type OpenSide,
   PLATE_PLANE,
   offsetProfile,
   newSketch,
@@ -652,6 +654,101 @@ describe("sketches", () => {
     expect(report.watertight).toBe(true);
     expect(rel(report.volume, r.measurements.volume)).toBeLessThan(0.005);
     expect(rel(r.measurements.volume, 72000 - 600 * 8 - cyl(12, 8) + 400 * 6)).toBeLessThan(1e-9);
+  });
+});
+
+describe("hollow", () => {
+  const block = (): ShapeFeature =>
+    ({ ...newShape({ units: "mm", features: [] }, "box"), width: 60, depth: 40, height: 30 }) as ShapeFeature;
+  const hollowed = (open: OpenSide, wall = 2, ...before: Feature[]): Feature[] => [
+    ...(before.length ? before : [block()]),
+    { ...newHollow({ units: "mm", features: [] }), wall, open },
+  ];
+  const fails = (features: Feature[]) => {
+    const r = buildDocument({ units: "mm", features });
+    expect(r.ok).toBe(false);
+    return r.ok ? "" : r.issues[0]!.message;
+  };
+
+  it("a block open at the top keeps its outside size and loses exactly its inside", () => {
+    const r = designed({ units: "mm", features: hollowed("top") });
+    expect(r.measurements.size).toEqual([60, 40, 30]);
+    expect(rel(r.measurements.volume, 72000 - 56 * 36 * 28)).toBeLessThan(1e-9);
+  });
+
+  it("every side can be the open one, each removing the same inside box", () => {
+    for (const [open, inside] of [
+      ["bottom", 56 * 36 * 28],
+      ["front", 56 * 38 * 26],
+      ["back", 56 * 38 * 26],
+      ["left", 58 * 36 * 26],
+      ["right", 58 * 36 * 26],
+    ] as const) {
+      const r = designed({ units: "mm", features: hollowed(open) });
+      expect(r.measurements.size, open).toEqual([60, 40, 30]);
+      expect(rel(r.measurements.volume, 72000 - inside), open).toBeLessThan(1e-9);
+    }
+  });
+
+  it("closed: the part keeps all its outside faces with an empty space inside", () => {
+    const r = designed({ units: "mm", features: hollowed("none") });
+    expect(rel(r.measurements.volume, 72000 - 56 * 36 * 26)).toBeLessThan(1e-9);
+    const sphere = { ...newShape({ units: "mm", features: [] }, "sphere"), diameter: 20 } as ShapeFeature;
+    const s = designed({ units: "mm", features: hollowed("none", 2, sphere) });
+    expect(rel(s.measurements.volume, (4 / 3) * Math.PI * (10 ** 3 - 8 ** 3))).toBeLessThan(1e-6);
+  });
+
+  it("a cylinder open at the top becomes a cup", () => {
+    const c = { ...newShape({ units: "mm", features: [] }, "cylinder"), diameter: 20, height: 20 } as ShapeFeature;
+    const r = designed({ units: "mm", features: hollowed("top", 2, c) });
+    expect(rel(r.measurements.volume, cyl(20, 20) - cyl(16, 18))).toBeLessThan(1e-6);
+  });
+
+  it("thick walls that still fit are exact too", () => {
+    const r = designed({ units: "mm", features: hollowed("top", 14) });
+    expect(rel(r.measurements.volume, 72000 - 32 * 12 * 16)).toBeLessThan(1e-9);
+  });
+
+  it("walls too thick for the part are refused, with the part's thinnest size", () => {
+    expect(fails(hollowed("top", 20))).toContain("only 30 mm across at its thinnest");
+    expect(fails(hollowed("top", 0.2))).toContain("at least 0.4 mm");
+  });
+
+  it("a pointed cone on the part makes the geometry engine fail; that's caught and explained", () => {
+    const cone = { ...newShape({ units: "mm", features: [] }, "cone"), z: 30 } as ShapeFeature;
+    expect(fails(hollowed("bottom", 2, block(), cone))).toContain("Sharp points (like the tip of a cone)");
+  });
+
+  it("a rounded side can't be left open, and says so", () => {
+    const sphere = { ...newShape({ units: "mm", features: [] }, "sphere"), diameter: 20 } as ShapeFeature;
+    expect(fails(hollowed("top", 2, sphere))).toContain("top of the part isn't flat");
+  });
+
+  it("holes drilled after hollowing go through the walls; the hollow part exports watertight", async () => {
+    const hole: HoleFeature = { id: "h1", type: "hole", name: "Hole 1", x: 0, y: 0, diameter: 6, depth: 0 };
+    const r = designed({ units: "mm", features: [...hollowed("top"), hole] });
+    // Only the 2 mm floor is drilled: the hole is over the hollow inside.
+    expect(rel(r.measurements.volume, 72000 - 56 * 36 * 28 - cyl(6, 2))).toBeLessThan(1e-9);
+    const stl = await exportStl(r.shape);
+    expect(checkBinaryStl(stl).watertight).toBe(true);
+    writeFileSync(`${OUT}hollow.stl`, Buffer.from(stl));
+    writeFileSync(
+      `${OUT}hollow.expected.json`,
+      JSON.stringify({ volume: r.measurements.volume, size: r.measurements.size }),
+    );
+  });
+
+  it("a part with a boss on top, hollowed from below, keeps walls inside the boss", () => {
+    const boss = {
+      ...newShape({ units: "mm", features: [] }, "cylinder"),
+      diameter: 20,
+      height: 10,
+      z: 30,
+    } as ShapeFeature;
+    const r = designed({ units: "mm", features: hollowed("bottom", 2, block(), boss) });
+    expect(r.measurements.size).toEqual([60, 40, 40]);
+    expect(r.measurements.volume).toBeLessThan(72000 + cyl(20, 10));
+    expect(r.measurements.volume).toBeGreaterThan(72000 - 56 * 36 * 28);
   });
 });
 
