@@ -2,6 +2,7 @@
 // Rules: never silently drop data we don't understand, never guess at a newer format,
 // and explain every rejection in plain language.
 import { OPEN_SIDES, SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
+import { isThreadSize } from "./threads";
 
 export const FILE_FORMAT = "studio3d-project";
 export const FILE_FORMAT_VERSION = 2;
@@ -73,6 +74,7 @@ const knownKeys = (type: Feature["type"]) =>
     "name",
     ...(type === "hole" || type === "hollow" ? [] : ["mode"]),
     ...(type === "hollow" ? ["open"] : []),
+    ...(type === "cylinder" || type === "hole" ? ["thread", "fit"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles"] : []),
     ...NUMBERS[type],
   ]);
@@ -229,6 +231,16 @@ export function parseProject(text: string): ParseResult {
           error: `This project file is damaged: the ${k} of ${where} isn't a number.`,
         };
       }
+    }
+    if (
+      (type === "cylinder" || type === "hole") &&
+      ((f.thread !== undefined && !isThreadSize(f.thread)) ||
+        (f.fit !== undefined && (typeof f.fit !== "number" || !Number.isFinite(f.fit))))
+    ) {
+      return {
+        ok: false,
+        error: `This project file is damaged: the thread of ${where} isn't one this version knows.`,
+      };
     }
     if (type === "hollow" && !OPEN_SIDES.some((o) => o.side === f.open)) {
       return {

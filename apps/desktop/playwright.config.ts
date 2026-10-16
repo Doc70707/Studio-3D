@@ -4,6 +4,9 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "e2e",
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
+  // Rebuilds run the real geometry engine in WebAssembly beside software-rendered WebGL. With two test workers
+  // and thread builds taking seconds, 5 s is too tight for "the model is up to date", so allow 15 s.
+  expect: { timeout: 15_000 },
   use: { baseURL: "http://localhost:4173", viewport: { width: 1280, height: 800 } },
   projects: [
     {

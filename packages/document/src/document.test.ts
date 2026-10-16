@@ -15,6 +15,14 @@ import {
   type ShapeFeature,
   newHollow,
   type HollowFeature,
+  newHole,
+  holeDiameter,
+  shapeSize,
+  threadProfile,
+  threadVolume,
+  type CylinderFeature,
+  type HoleFeature,
+  type ThreadSize,
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
@@ -255,5 +263,49 @@ describe("hollow", () => {
     const r = parseProject(text);
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toContain("which side is open");
+  });
+});
+
+describe("threads", () => {
+  const cylinder = (over: Partial<CylinderFeature> = {}) =>
+    ({ ...newShape(newDocument(), "cylinder"), thread: "M8", fit: 0.3, diameter: 8, ...over }) as CylinderFeature;
+
+  it("an ISO profile: tooth 5/8 of the triangle height, crest p/8 wide, root 3/4 p wide", () => {
+    const t = threadProfile("M8", 0, true);
+    expect(t.major).toBe(4);
+    expect(t.major - t.minor).toBeCloseTo((5 / 8) * (Math.sqrt(3) / 2) * 1.25, 12);
+    expect([t.crestWidth, t.rootWidth]).toEqual([1.25 / 8, (3 / 4) * 1.25]);
+  });
+
+  it("the fit makes a bolt smaller and a hole bigger by the same amount across", () => {
+    expect(2 * threadProfile("M5", 0.4, true).major).toBeCloseTo(4.6, 12);
+    expect(2 * threadProfile("M5", 0.4, false).major).toBeCloseTo(5.4, 12);
+  });
+
+  it("a threaded cylinder's volume and size come from the thread", () => {
+    const c = cylinder({ height: 10 });
+    expect(shapeVolume(c)).toBeCloseTo(threadVolume(threadProfile("M8", 0.3, true), 10), 9);
+    expect(shapeSize(c)).toEqual([7.7, 7.7, 10]);
+    expect(shapeSize({ ...c, mode: "cut" })[0]).toBeCloseTo(8.3, 12);
+  });
+
+  it("checks the thread settings in plain words", () => {
+    expect(validateShape(cylinder())).toEqual([]);
+    expect(validateShape(cylinder({ fit: -0.1 }))[0]!.message).toContain("can't be negative");
+    expect(validateShape(cylinder({ fit: 2 }))[0]!.message).toContain("at most 1 mm");
+    expect(validateShape(cylinder({ height: 2 }))[0]!.message).toContain("at least two turns");
+    expect(validateShape(cylinder({ thread: "M7" as ThreadSize }))[0]!.field).toBe("thread");
+  });
+
+  it("a threaded hole cuts out to the thread's grooves, and is saved and opened unchanged", () => {
+    const doc = newDocument();
+    const hole: HoleFeature = { ...newHole(doc), thread: "M6", fit: 0.3, diameter: 6 };
+    expect(holeDiameter(hole)).toBeCloseTo(6.3, 12);
+    expect(holeDiameter({ ...hole, thread: undefined })).toBe(6);
+    const withThreads = { ...doc, features: [...doc.features, cylinder(), hole] };
+    const r = parseProject(serializeProject(withThreads, app));
+    expect(r.ok && r.document).toEqual(withThreads);
+    const bad = parseProject(serializeProject(withThreads, app).replace('"M6"', '"M7"'));
+    expect(!bad.ok && bad.error).toContain("thread");
   });
 });

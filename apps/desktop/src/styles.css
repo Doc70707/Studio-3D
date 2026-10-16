@@ -1319,3 +1319,14 @@ input:focus-visible {
   background: #141a26;
   color: var(--text);
 }
+
+.thread-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+
+.thread-picker .help {
+  margin: 0;
+}
