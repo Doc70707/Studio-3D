@@ -26,7 +26,7 @@ export function featureDimensions(f: Feature, part: { min: Vec3; max: Vec3 }): D
     if (!near(f.y, py0)) dim([f.x, py0, top], [f.x, f.y, top], [0, 0, 0.01], fmt(f.y - py0));
     return out;
   }
-  if (f.type === "sketch") return out;
+  if (f.type === "sketch" || f.type === "hollow") return out;
 
   const [w, d, h] = shapeSize(f);
   const x0 = f.x - w / 2;

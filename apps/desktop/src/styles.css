@@ -517,6 +517,7 @@ input:focus-visible {
 
 /* Holes */
 .holes,
+.hollows,
 .sketches {
   margin-top: 22px;
   padding-top: 18px;
@@ -1294,4 +1295,27 @@ input:focus-visible {
 .sketch-side .offset-row button.add {
   flex: none;
   height: 36px;
+}
+
+.select-row select {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.select-row select:focus-visible {
+  outline: none;
+}
+
+.select-row select option {
+  background: #141a26;
+  color: var(--text);
 }

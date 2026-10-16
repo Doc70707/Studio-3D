@@ -13,6 +13,8 @@ import {
   validateDocument,
   validateShape,
   type ShapeFeature,
+  newHollow,
+  type HollowFeature,
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
@@ -220,8 +222,38 @@ describe("validateShape", () => {
     const s = (type: "cylinder" | "tube" | "cone" | "sphere", over: object) =>
       ({ ...newShape(newDocument(), type), ...over }) as ShapeFeature;
     expect(shapeVolume(s("cylinder", { diameter: 10, height: 4 }))).toBeCloseTo(pi * 25 * 4, 9);
-    expect(shapeVolume(s("tube", { outerDiameter: 10, innerDiameter: 6, height: 2 }))).toBeCloseTo(pi * (25 - 9) * 2, 9);
+    expect(shapeVolume(s("tube", { outerDiameter: 10, innerDiameter: 6, height: 2 }))).toBeCloseTo(
+      pi * (25 - 9) * 2,
+      9,
+    );
     expect(shapeVolume(s("cone", { bottomDiameter: 6, topDiameter: 0, height: 9 }))).toBeCloseTo((pi * 9 * 9) / 3, 9);
     expect(shapeVolume(s("sphere", { diameter: 6 }))).toBeCloseTo((4 / 3) * pi * 27, 9);
+  });
+});
+
+describe("hollow", () => {
+  const withHollow = (over: Partial<HollowFeature> = {}) => {
+    const doc = newDocument();
+    return { ...doc, features: [...doc.features, { ...newHollow(doc), ...over }] };
+  };
+
+  it("starts with 2 mm walls open at the top, and is checked", () => {
+    expect(withHollow().features[1]).toMatchObject({ type: "hollow", name: "Hollow 1", wall: 2, open: "top" });
+    expect(validateDocument(withHollow())).toEqual([]);
+    expect(validateDocument(withHollow({ wall: 0.2 }))[0]!.message).toContain("at least 0.4 mm");
+    expect(validateDocument(withHollow({ wall: NaN }))[0]!.field).toBe("wall");
+  });
+
+  it("is saved and opened again unchanged", () => {
+    const doc = withHollow({ wall: 1.6, open: "none" });
+    const r = parseProject(serializeProject(doc, app));
+    expect(r.ok && r.document).toEqual(doc);
+  });
+
+  it("a file with a hollow that doesn't say which side is open is refused as damaged", () => {
+    const text = serializeProject(withHollow(), app).replace('"open": "top"', '"open": "sideways"');
+    const r = parseProject(text);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toContain("which side is open");
   });
 });

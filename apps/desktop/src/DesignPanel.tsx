@@ -1,18 +1,21 @@
 import { forwardRef, useEffect, useState } from "react";
 import {
   FIELD_LABELS,
+  OPEN_SIDES,
   SHAPES,
   SIZE_FIELDS,
   PROFILE_LABELS,
   hasErrors,
   isSolidStep,
   newHole,
+  newHollow,
   newShape,
   shapesOf,
   singleBox,
   type BoxFeature,
   type Feature,
   type HoleFeature,
+  type HollowFeature,
   type Issue,
   type ProjectDocument,
   type ShapeFeature,
@@ -67,6 +70,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
 ) {
   const shapes = shapesOf(doc);
   const sketches = doc.features.filter((f): f is SketchFeature => f.type === "sketch");
+  const hollows = doc.features.filter((f): f is HollowFeature => f.type === "hollow");
   const solidCount = doc.features.filter(isSolidStep).length;
   const [selected, setSelected] = useState<string | null>(shapes[0]?.id ?? null);
   const open = shapes.some((s) => s.id === selected) ? selected : (shapes[0]?.id ?? null);
@@ -171,6 +175,33 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               onChange={(patch) => onChange(sk.id, patch)}
               onEdit={() => sketching.onEditSketch(sk.id)}
               onRemove={() => onRemove(sk.id)}
+            />
+          ))}
+        </section>
+
+        <section className="hollows" aria-label="Hollow">
+          <div className="section-head">
+            <h3>Hollow</h3>
+            {hollows.length === 0 && (
+              <button type="button" className="add" onClick={() => onAdd(newHollow(doc))}>
+                <Icon name="hollow" />
+                Hollow out
+              </button>
+            )}
+          </div>
+          {hollows.length === 0 && (
+            <p className="help">
+              Empty out the inside of the part, leaving walls of the thickness you choose. Saves material and print
+              time, or makes a cup, a case or a planter.
+            </p>
+          )}
+          {hollows.map((h) => (
+            <HollowCard
+              key={h.id}
+              hollow={h}
+              issues={issues.filter((i) => i.featureId === h.id)}
+              onChange={(patch) => onChange(h.id, patch)}
+              onRemove={() => onRemove(h.id)}
             />
           ))}
         </section>
@@ -336,6 +367,79 @@ function ShapeCard(props: {
 const surfaceWord = (sk: SketchFeature) => (sk.surface === "plate" ? "plate" : "face");
 
 /** A sketch in the list: what it does and how far, with the drawing itself edited on the sketch screen. */
+function HollowCard(props: {
+  hollow: HollowFeature;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  onRemove: () => void;
+}) {
+  const { hollow: h, issues, onChange } = props;
+  const side = OPEN_SIDES.find((o) => o.side === h.open);
+  const summary = h.open === "none" ? "closed inside" : `open at the ${h.open}`;
+  const openIssue = issues.find((i) => i.field === "open");
+  const general = issues.filter((i) => i.field !== "open" && i.field !== "wall");
+  return (
+    <div className={`shape-card open${hasErrors(issues) ? " has-error" : ""}`} data-testid="hollow">
+      <div className="shape-head">
+        <span className="shape-toggle static">
+          <span className="mode-dot cut" aria-hidden="true" />
+          <span className="shape-name">{h.name}</span>
+          <span className="shape-summary">
+            {mm(h.wall)} mm walls · {summary}
+          </span>
+        </span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Remove ${h.name}`}
+          title="Make the part solid again"
+          onClick={props.onRemove}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+      <div className="shape-body">
+        <NumberField
+          label="Wall thickness"
+          name={`${h.name} wall thickness`}
+          help="How thick the walls, floor and roof are left."
+          value={h.wall}
+          issue={issues.find((i) => i.field === "wall")}
+          onCommit={(wall) => onChange({ wall })}
+        />
+        <div className="field">
+          <label htmlFor={`${h.id}-open`}>Open side</label>
+          <div className="input-row select-row">
+            <select
+              id={`${h.id}-open`}
+              value={h.open}
+              aria-invalid={openIssue ? true : undefined}
+              onChange={(e) => onChange({ open: e.target.value })}
+            >
+              {OPEN_SIDES.map((o) => (
+                <option key={o.side} value={o.side}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className={openIssue ? `issue ${openIssue.severity}` : "help"} role={openIssue ? "alert" : undefined}>
+            {openIssue?.message ??
+              (side?.side === "none"
+                ? "Every outside face stays. Resin prints will need a drain hole."
+                : "The flat face on this side is removed so you can reach inside.")}
+          </p>
+        </div>
+        {general.map((i) => (
+          <p key={i.message} className={`issue ${i.severity}`} role="alert">
+            {i.message}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SketchCard(props: {
   sketch: SketchFeature;
   first: boolean;
