@@ -34,11 +34,7 @@ export type ParseResult =
     }
   | { ok: false; error: string };
 
-export function serializeProject(
-  doc: ProjectDocument,
-  app: AppInfo,
-  preserved: Preserved = emptyPreserved(),
-): string {
+export function serializeProject(doc: ProjectDocument, app: AppInfo, preserved: Preserved = emptyPreserved()): string {
   const file = {
     ...preserved.file,
     format: FILE_FORMAT,
@@ -88,13 +84,9 @@ const DEFAULT_NAMES: Record<Feature["type"], string> = {
   sketch: "Sketch",
 };
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-function pickUnknown(
-  obj: Record<string, unknown>,
-  known: Set<string>,
-): Record<string, unknown> {
+function pickUnknown(obj: Record<string, unknown>, known: Set<string>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(obj).filter(([k]) => !known.has(k)));
 }
 
@@ -112,11 +104,7 @@ const MIGRATIONS: Record<number, (file: Record<string, unknown>) => void> = {
     for (const f of doc.features) {
       if (!isObject(f)) continue;
       if (f.type === "box") Object.assign(f, { mode: "add", x: 0, y: 0, z: 0 });
-      if (
-        f.type === "hole" &&
-        typeof f.x === "number" &&
-        typeof f.y === "number"
-      ) {
+      if (f.type === "hole" && typeof f.x === "number" && typeof f.y === "number") {
         f.x -= halfW;
         f.y -= halfD;
       }
@@ -125,19 +113,12 @@ const MIGRATIONS: Record<number, (file: Record<string, unknown>) => void> = {
 };
 
 const isNumbers = (v: unknown, n: number) =>
-  Array.isArray(v) &&
-  v.length === n &&
-  v.every((x) => typeof x === "number" && Number.isFinite(x));
+  Array.isArray(v) && v.length === n && v.every((x) => typeof x === "number" && Number.isFinite(x));
 
 /** What's wrong with a stored sketch's surface and outlines, or null when they can be read. */
 function sketchProblem(f: Record<string, unknown>): string | null {
   const plane = f.plane;
-  if (
-    !isObject(plane) ||
-    !isNumbers(plane.origin, 3) ||
-    !isNumbers(plane.xDir, 3) ||
-    !isNumbers(plane.normal, 3)
-  )
+  if (!isObject(plane) || !isNumbers(plane.origin, 3) || !isNumbers(plane.xDir, 3) || !isNumbers(plane.normal, 3))
     return "has an unreadable sketch position";
   if (typeof f.surface !== "string") return "doesn't say what it was drawn on";
   if (!Array.isArray(f.profiles)) return "has no outlines";
@@ -145,13 +126,9 @@ function sketchProblem(f: Record<string, unknown>): string | null {
     if (!isObject(p)) return "has an unreadable outline";
     const ok =
       p.kind === "rectangle"
-        ? ["x", "y", "width", "height"].every(
-            (k) => typeof p[k] === "number" && Number.isFinite(p[k]),
-          )
+        ? ["x", "y", "width", "height"].every((k) => typeof p[k] === "number" && Number.isFinite(p[k]))
         : p.kind === "circle"
-          ? ["x", "y", "diameter"].every(
-              (k) => typeof p[k] === "number" && Number.isFinite(p[k]),
-            )
+          ? ["x", "y", "diameter"].every((k) => typeof p[k] === "number" && Number.isFinite(p[k]))
           : p.kind === "polygon"
             ? Array.isArray(p.points) && p.points.every((q) => isNumbers(q, 2))
             : false;
@@ -167,23 +144,17 @@ export function parseProject(text: string): ParseResult {
   } catch {
     return {
       ok: false,
-      error:
-        "This file is damaged or isn't a Studio 3D project (it isn't valid project data).",
+      error: "This file is damaged or isn't a Studio 3D project (it isn't valid project data).",
     };
   }
   if (!isObject(raw) || raw.format !== FILE_FORMAT) {
     return { ok: false, error: "This file isn't a Studio 3D project." };
   }
   const version = raw.formatVersion;
-  if (
-    typeof version !== "number" ||
-    !Number.isInteger(version) ||
-    version < 1
-  ) {
+  if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
     return {
       ok: false,
-      error:
-        "This project file is damaged: its format version is missing or invalid.",
+      error: "This project file is damaged: its format version is missing or invalid.",
     };
   }
   if (version > FILE_FORMAT_VERSION) {
@@ -238,8 +209,7 @@ export function parseProject(text: string): ParseResult {
     if (i === 0 && type === "hole") {
       return {
         ok: false,
-        error:
-          "This project file is damaged: it has to start with a shape, not a hole.",
+        error: "This project file is damaged: it has to start with a shape, not a hole.",
       };
     }
     if (typeof f.id !== "string" || !f.id || seen.has(f.id)) {
@@ -271,14 +241,9 @@ export function parseProject(text: string): ParseResult {
           error: `This project file is damaged: ${where} ${problem}.`,
         };
     }
-    const name =
-      typeof f.name === "string" && f.name
-        ? f.name
-        : `${DEFAULT_NAMES[type]} ${i + 1}`;
+    const name = typeof f.name === "string" && f.name ? f.name : `${DEFAULT_NAMES[type]} ${i + 1}`;
     const known = knownKeys(type);
-    const feature = Object.fromEntries(
-      Object.entries(f).filter(([k]) => known.has(k)),
-    ) as unknown as Feature;
+    const feature = Object.fromEntries(Object.entries(f).filter(([k]) => known.has(k))) as unknown as Feature;
     feature.name = name;
     const extra = pickUnknown(f, known);
     if (Object.keys(extra).length) {
@@ -294,13 +259,8 @@ export function parseProject(text: string): ParseResult {
       ok: false,
       error: "This project file is damaged: it has no shapes in it.",
     };
-  if (
-    Object.keys(preserved.file).length ||
-    Object.keys(preserved.document).length
-  ) {
-    warnings.push(
-      "This project has data from a newer version. It'll be kept when you save, but isn't used.",
-    );
+  if (Object.keys(preserved.file).length || Object.keys(preserved.document).length) {
+    warnings.push("This project has data from a newer version. It'll be kept when you save, but isn't used.");
   }
 
   return { ok: true, document: { units: "mm", features }, preserved, warnings };

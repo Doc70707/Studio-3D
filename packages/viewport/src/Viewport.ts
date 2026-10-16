@@ -107,12 +107,7 @@ export class Viewport {
   }
 
   setView(view: StandardView): void {
-    const p = placeCamera(
-      view,
-      this.plateBounds,
-      this.fit.fov,
-      this.fit.aspect,
-    );
+    const p = placeCamera(view, this.plateBounds, this.fit.fov, this.fit.aspect);
     this.camera.up.set(...p.up);
     this.camera.position.set(...p.position);
     this.controls.target.set(...p.target);
@@ -152,12 +147,7 @@ export class Viewport {
       this.surface = surface;
       const e = new THREE.BufferGeometry();
       e.setAttribute("position", new THREE.BufferAttribute(mesh.edges, 3));
-      group.add(
-        new THREE.LineSegments(
-          e,
-          new THREE.LineBasicMaterial({ color: 0x123a6b }),
-        ),
-      );
+      group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x123a6b })));
       this.scene.add(group);
       this.model = group;
     }
@@ -217,10 +207,7 @@ export class Viewport {
     if (lines && lines.length) {
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(lines, 3));
-      this.sketchLines = new THREE.LineSegments(
-        g,
-        new THREE.LineBasicMaterial({ color: 0xffc94d, depthTest: false }),
-      );
+      this.sketchLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffc94d, depthTest: false }));
       this.sketchLines.name = "sketch";
       this.sketchLines.renderOrder = 3;
       this.scene.add(this.sketchLines);
@@ -236,10 +223,7 @@ export class Viewport {
     size: number,
   ): void {
     const half = (this.fit.fov * Math.PI) / 360;
-    const distance =
-      (Math.max(size, 10) * 0.75) /
-      Math.tan(half) /
-      Math.min(1, this.fit.aspect);
+    const distance = (Math.max(size, 10) * 0.75) / Math.tan(half) / Math.min(1, this.fit.aspect);
     this.camera.up.set(...up);
     this.camera.position.set(
       target[0] + normal[0] * distance,
@@ -304,15 +288,7 @@ export class Viewport {
     const fullH = h + Math.abs(dy);
     this.camera.aspect = fullW / fullH;
     if (dx === 0 && dy === 0) this.camera.clearViewOffset();
-    else
-      this.camera.setViewOffset(
-        fullW,
-        fullH,
-        dx < 0 ? -dx : 0,
-        dy < 0 ? -dy : 0,
-        w,
-        h,
-      );
+    else this.camera.setViewOffset(fullW, fullH, dx < 0 ? -dx : 0, dy < 0 ? -dy : 0, w, h);
     this.camera.updateProjectionMatrix();
     const half = (FOV * Math.PI) / 360;
     this.fit = {
@@ -339,9 +315,7 @@ function disposeObject(root: THREE.Object3D): void {
   root.traverse((o) => {
     if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
       o.geometry.dispose();
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) =>
-        m.dispose(),
-      );
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
     }
   });
 }
@@ -365,13 +339,7 @@ function buildPlate(width: number, depth: number): THREE.Group {
 
   const minor: number[] = [];
   const major: number[] = [];
-  const line = (
-    arr: number[],
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-  ) => arr.push(x1, y1, 0, x2, y2, 0);
+  const line = (arr: number[], x1: number, y1: number, x2: number, y2: number) => arr.push(x1, y1, 0, x2, y2, 0);
   for (let x = -width / 2; x <= width / 2 + 1e-9; x += 10)
     line(Math.abs(x % 50) < 1e-9 ? major : minor, x, -depth / 2, x, depth / 2);
   for (let y = -depth / 2; y <= depth / 2 + 1e-9; y += 10)

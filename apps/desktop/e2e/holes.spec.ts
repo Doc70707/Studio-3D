@@ -4,24 +4,18 @@ import { checkBinaryStl } from "../../../packages/geometry/src/stl-check";
 
 const OUT = new URL("../../../test-output/", import.meta.url).pathname;
 const host = (page: Page) => page.locator("main.viewport-host");
-const field = (page: Page, label: string) =>
-  page.getByLabel(label, { exact: true });
+const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
 const volume = (page: Page) => page.getByTestId("volume");
 const cm3 = (mm3: number) => `${(mm3 / 1000).toFixed(2)} cm³`;
 const cyl = (d: number, h: number) => Math.PI * (d / 2) ** 2 * h;
-const current = (page: Page) =>
-  expect(host(page)).toHaveAttribute("data-geometry", "current");
+const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(host(page)).toHaveAttribute("data-geometry", "current", {
-    timeout: 30_000,
-  });
+  await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
 });
 
-test("adding a hole cuts it through the floor with the real geometry engine", async ({
-  page,
-}) => {
+test("adding a hole cuts it through the floor with the real geometry engine", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
   await expect(page.getByTestId("hole")).toHaveCount(1);
   await current(page);
@@ -39,18 +33,13 @@ test("adding a hole cuts it through the floor with the real geometry engine", as
   await expect(volume(page)).toHaveText(cm3(72000 - cyl(10, 12)));
 });
 
-test("a hole off the edge is explained and the last good model is kept", async ({
-  page,
-}) => {
+test("a hole off the edge is explained and the last good model is kept", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
   await current(page);
   const good = await volume(page).innerText();
   await field(page, "Hole 1 left / right position").fill("-29");
   await expect(page.getByText("runs off the left edge")).toBeVisible();
-  await expect(field(page, "Hole 1 left / right position")).toHaveAttribute(
-    "aria-invalid",
-    "true",
-  );
+  await expect(field(page, "Hole 1 left / right position")).toHaveAttribute("aria-invalid", "true");
   await expect(host(page)).toHaveAttribute("data-geometry", "stale");
   await expect(volume(page)).toHaveText(good);
   await expect(page.getByRole("button", { name: "Export STL" })).toBeDisabled();
@@ -75,9 +64,7 @@ test("removing a hole puts the material back", async ({ page }) => {
   await expect(volume(page)).toHaveText(cm3(15552));
 });
 
-test("undo and redo step through changes, with buttons and with the keyboard", async ({
-  page,
-}) => {
+test("undo and redo step through changes, with buttons and with the keyboard", async ({ page }) => {
   const undo = page.getByRole("button", { name: "Undo" });
   const redo = page.getByRole("button", { name: "Redo" });
   await expect(undo).toBeDisabled();
@@ -107,9 +94,7 @@ test("undo and redo step through changes, with buttons and with the keyboard", a
   await expect(redo).toBeDisabled();
 });
 
-test("Ctrl+Z inside a text box undoes the design, not just the text", async ({
-  page,
-}) => {
+test("Ctrl+Z inside a text box undoes the design, not just the text", async ({ page }) => {
   await field(page, "Height").fill("45");
   await field(page, "Height").press("Control+z");
   await expect(field(page, "Height")).toHaveValue("30");
@@ -131,9 +116,7 @@ test("holes are saved and reopened exactly", async ({ page }) => {
   await page.getByRole("button", { name: "Open…" }).click();
   await (await chooser).setFiles(path);
   await expect(field(page, "Hole 1 diameter")).toHaveValue("3.5");
-  await expect(field(page, "Hole 1 left / right position")).toHaveValue(
-    "12.25",
-  );
+  await expect(field(page, "Hole 1 left / right position")).toHaveValue("12.25");
   await current(page);
   await expect(volume(page)).toHaveText(saved);
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled(); // opening starts a fresh history
@@ -151,17 +134,12 @@ test("exported STL has the holes in it and is watertight", async ({ page }) => {
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export STL" }).click();
   const bytes = readFileSync(await (await download).path());
-  const report = checkBinaryStl(
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  );
+  const report = checkBinaryStl(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   const expected = 30000 - cyl(8, 20);
   expect(report.watertight).toBe(true);
   expect(report.consistentWinding).toBe(true);
   expect(Math.abs(report.volume - expected) / expected).toBeLessThan(0.005);
   mkdirSync(OUT, { recursive: true });
   writeFileSync(`${OUT}app-export-hole.stl`, bytes);
-  writeFileSync(
-    `${OUT}app-export-hole.expected.json`,
-    JSON.stringify({ volume: expected, size: [50, 30, 20] }),
-  );
+  writeFileSync(`${OUT}app-export-hole.expected.json`, JSON.stringify({ volume: expected, size: [50, 30, 20] }));
 });

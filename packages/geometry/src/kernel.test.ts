@@ -26,12 +26,7 @@ import {
   tessellate,
   useKernel,
 } from "./kernel";
-import {
-  faceCount,
-  faceOfTriangle,
-  outlineOfFace,
-  trianglesInPlane,
-} from "./faces";
+import { faceCount, faceOfTriangle, outlineOfFace, trianglesInPlane } from "./faces";
 import {
   PLATE_PLANE,
   newSketch,
@@ -86,20 +81,14 @@ describe("box geometry", () => {
     [1, 1, 1, 0],
     [1000, 1000, 1000, 5],
     [33.3, 12.7, 8.4, 0.8],
-  ])(
-    "changing dimensions rebuilds exactly: %s × %s × %s, wall %s",
-    (width, depth, height, wall) => {
-      const b = box({ width, depth, height, wall });
-      const r = built(b);
-      expect(
-        Math.abs(r.measurements.volume - expectedBoxVolume(b)) /
-          expectedBoxVolume(b),
-      ).toBeLessThan(1e-9);
-      expect(r.measurements.size[0]).toBeCloseTo(width, 9);
-      expect(r.measurements.size[1]).toBeCloseTo(depth, 9);
-      expect(r.measurements.size[2]).toBeCloseTo(height, 9);
-    },
-  );
+  ])("changing dimensions rebuilds exactly: %s × %s × %s, wall %s", (width, depth, height, wall) => {
+    const b = box({ width, depth, height, wall });
+    const r = built(b);
+    expect(Math.abs(r.measurements.volume - expectedBoxVolume(b)) / expectedBoxVolume(b)).toBeLessThan(1e-9);
+    expect(r.measurements.size[0]).toBeCloseTo(width, 9);
+    expect(r.measurements.size[1]).toBeCloseTo(depth, 9);
+    expect(r.measurements.size[2]).toBeCloseTo(height, 9);
+  });
 
   it("invalid walls are refused before reaching the kernel (which would silently return a solid block)", () => {
     const r = buildBox(box({ width: 80, depth: 40, wall: 50 }));
@@ -128,9 +117,7 @@ describe("save, reopen, rebuild", () => {
       wall: 1.6,
     };
     const before = buildDocument(doc);
-    const reopened = parseProject(
-      serializeProject(doc, { name: "Studio 3D", version: "test" }),
-    );
+    const reopened = parseProject(serializeProject(doc, { name: "Studio 3D", version: "test" }));
     expect(reopened.ok).toBe(true);
     if (!reopened.ok || !before.ok) return;
     const after = buildDocument(reopened.document);
@@ -144,31 +131,26 @@ describe("STL export", () => {
   it.each([
     ["container", box({ width: 80, depth: 40, height: 30, wall: 2 })],
     ["solid", box({ width: 25, depth: 25, height: 10, wall: 0 })],
-  ])(
-    "%s exports a watertight STL with exact size and near-exact volume",
-    async (name, b) => {
-      const stl = await exportStl(built(b).shape);
-      mkdirSync(OUT, { recursive: true });
-      writeFileSync(`${OUT}${name}.stl`, Buffer.from(stl));
-      writeFileSync(
-        `${OUT}${name}.expected.json`,
-        JSON.stringify({
-          volume: expectedBoxVolume(b),
-          size: [b.width, b.depth, b.height],
-        }),
-      );
+  ])("%s exports a watertight STL with exact size and near-exact volume", async (name, b) => {
+    const stl = await exportStl(built(b).shape);
+    mkdirSync(OUT, { recursive: true });
+    writeFileSync(`${OUT}${name}.stl`, Buffer.from(stl));
+    writeFileSync(
+      `${OUT}${name}.expected.json`,
+      JSON.stringify({
+        volume: expectedBoxVolume(b),
+        size: [b.width, b.depth, b.height],
+      }),
+    );
 
-      const report = checkBinaryStl(stl);
-      expect(report.watertight).toBe(true);
-      expect(report.consistentWinding).toBe(true);
-      expect(report.max[0] - report.min[0]).toBeCloseTo(b.width, 4);
-      expect(report.max[1] - report.min[1]).toBeCloseTo(b.depth, 4);
-      expect(report.max[2] - report.min[2]).toBeCloseTo(b.height, 4);
-      expect(
-        Math.abs(report.volume - expectedBoxVolume(b)) / expectedBoxVolume(b),
-      ).toBeLessThan(0.005);
-    },
-  );
+    const report = checkBinaryStl(stl);
+    expect(report.watertight).toBe(true);
+    expect(report.consistentWinding).toBe(true);
+    expect(report.max[0] - report.min[0]).toBeCloseTo(b.width, 4);
+    expect(report.max[1] - report.min[1]).toBeCloseTo(b.depth, 4);
+    expect(report.max[2] - report.min[2]).toBeCloseTo(b.height, 4);
+    expect(Math.abs(report.volume - expectedBoxVolume(b)) / expectedBoxVolume(b)).toBeLessThan(0.005);
+  });
 });
 
 const hole = (over: Partial<HoleFeature> = {}): HoleFeature => ({
@@ -195,18 +177,14 @@ const rel = (a: number, b: number) => Math.abs(a - b) / b;
 
 describe("holes", () => {
   it("a through hole in a solid block removes exactly one cylinder", () => {
-    const r = designed(
-      design(box({ wall: 0 }), hole({ diameter: 10, depth: 0 })),
-    );
+    const r = designed(design(box({ wall: 0 }), hole({ diameter: 10, depth: 0 })));
     expect(rel(r.measurements.volume, 72000 - cyl(10, 30))).toBeLessThan(1e-9);
     expect(r.measurements.size).toEqual([60, 40, 30]);
     expect(r.issues).toEqual([]);
   });
 
   it("a blind hole stops at its depth", () => {
-    const r = designed(
-      design(box({ wall: 0 }), hole({ diameter: 6, depth: 12 })),
-    );
+    const r = designed(design(box({ wall: 0 }), hole({ diameter: 6, depth: 12 })));
     expect(rel(r.measurements.volume, 72000 - cyl(6, 12))).toBeLessThan(1e-9);
   });
 
@@ -222,9 +200,7 @@ describe("holes", () => {
       hole({ x: 0, y: 10, diameter: 8, depth: 20 }),
     ];
     const r = designed(design(box({ wall: 0 }), ...holes));
-    expect(
-      rel(r.measurements.volume, 72000 - 2 * cyl(4, 30) - cyl(8, 20)),
-    ).toBeLessThan(1e-9);
+    expect(rel(r.measurements.volume, 72000 - 2 * cyl(4, 30) - cyl(8, 20))).toBeLessThan(1e-9);
   });
 
   it("a hole drilled into a side wall of a container cuts through the wall", () => {
@@ -233,9 +209,7 @@ describe("holes", () => {
     const h = hole({ x: -28.4, y: 0, diameter: 3, depth: 10 });
     const r = designed(design(b, h));
     expect(r.measurements.volume).toBeLessThan(15552);
-    expect(15552 - r.measurements.volume).toBeLessThanOrEqual(
-      maxHoleVolume(h, b.height) * (1 + 1e-9),
-    );
+    expect(15552 - r.measurements.volume).toBeLessThanOrEqual(maxHoleVolume(h, b.height) * (1 + 1e-9));
     expect(r.issues.some((i) => i.severity === "warning")).toBe(true); // only 0.1 mm left at the edge
   });
 
@@ -267,36 +241,21 @@ describe("holes", () => {
   });
 
   it("a design with holes survives save and reopen", () => {
-    const doc = design(
-      box({ wall: 0 }),
-      hole({ diameter: 7.5, x: -17.75 }),
-      hole({ depth: 9 }),
-    );
-    const reopened = parseProject(
-      serializeProject(doc, { name: "Studio 3D", version: "test" }),
-    );
+    const doc = design(box({ wall: 0 }), hole({ diameter: 7.5, x: -17.75 }), hole({ depth: 9 }));
+    const reopened = parseProject(serializeProject(doc, { name: "Studio 3D", version: "test" }));
     if (!reopened.ok) throw new Error(reopened.error);
     expect(reopened.document).toEqual(doc);
-    expect(designed(reopened.document).measurements).toEqual(
-      designed(doc).measurements,
-    );
+    expect(designed(reopened.document).measurements).toEqual(designed(doc).measurements);
   });
 
   it("exports a watertight STL with the holes in it", async () => {
     const b = box({ width: 50, depth: 30, height: 20, wall: 0 });
-    const doc = design(
-      b,
-      hole({ x: -15, y: 0, diameter: 6 }),
-      hole({ x: 10, y: 0, diameter: 10, depth: 8 }),
-    );
+    const doc = design(b, hole({ x: -15, y: 0, diameter: 6 }), hole({ x: 10, y: 0, diameter: 10, depth: 8 }));
     const stl = await exportStl(designed(doc).shape);
     const expected = 30000 - cyl(6, 20) - cyl(10, 8);
     mkdirSync(OUT, { recursive: true });
     writeFileSync(`${OUT}holes.stl`, Buffer.from(stl));
-    writeFileSync(
-      `${OUT}holes.expected.json`,
-      JSON.stringify({ volume: expected, size: [50, 30, 20] }),
-    );
+    writeFileSync(`${OUT}holes.expected.json`, JSON.stringify({ volume: expected, size: [50, 30, 20] }));
     const report = checkBinaryStl(stl);
     expect(report.watertight).toBe(true);
     expect(report.consistentWinding).toBe(true);
@@ -305,10 +264,8 @@ describe("holes", () => {
   });
 });
 
-const shape = (
-  type: "box" | "cylinder" | "tube" | "cone" | "sphere",
-  over: Partial<Record<string, unknown>> = {},
-) => ({ ...newShape(newDocument(), type), ...over }) as ShapeFeature;
+const shape = (type: "box" | "cylinder" | "tube" | "cone" | "sphere", over: Partial<Record<string, unknown>> = {}) =>
+  ({ ...newShape(newDocument(), type), ...over }) as ShapeFeature;
 const part = (...shapes: ShapeFeature[]): ProjectDocument => ({
   units: "mm",
   features: shapes,
@@ -316,42 +273,21 @@ const part = (...shapes: ShapeFeature[]): ProjectDocument => ({
 
 describe("shapes", () => {
   it.each([
-    [
-      "cylinder",
-      shape("cylinder", { diameter: 12, height: 7, x: 5, y: -3, z: 2 }),
-    ],
-    [
-      "tube",
-      shape("tube", { outerDiameter: 30, innerDiameter: 22.5, height: 9 }),
-    ],
+    ["cylinder", shape("cylinder", { diameter: 12, height: 7, x: 5, y: -3, z: 2 })],
+    ["tube", shape("tube", { outerDiameter: 30, innerDiameter: 22.5, height: 9 })],
     ["cone", shape("cone", { bottomDiameter: 20, topDiameter: 8, height: 15 })],
-    [
-      "pointed cone",
-      shape("cone", { bottomDiameter: 20, topDiameter: 0, height: 15 }),
-    ],
-    [
-      "upside-down cone",
-      shape("cone", { bottomDiameter: 4, topDiameter: 18, height: 10 }),
-    ],
+    ["pointed cone", shape("cone", { bottomDiameter: 20, topDiameter: 0, height: 15 })],
+    ["upside-down cone", shape("cone", { bottomDiameter: 4, topDiameter: 18, height: 10 })],
     ["sphere", shape("sphere", { diameter: 17, z: 3 })],
-    [
-      "moved box",
-      shape("box", { width: 10, depth: 12, height: 4, x: -40, y: 25, z: 6 }),
-    ],
+    ["moved box", shape("box", { width: 10, depth: 12, height: 4, x: -40, y: 25, z: 6 })],
   ])("%s has the exact volume, size and position", (_, s) => {
     const r = designed(part(s));
     expect(rel(r.measurements.volume, shapeVolume(s))).toBeLessThan(1e-9);
     const want = shapeSize(s);
     r.measurements.size.forEach((v, i) => expect(v).toBeCloseTo(want[i]!, 6));
     expect(r.measurements.min[2]).toBeCloseTo(s.z, 6); // the base sits at its lift height
-    expect((r.measurements.min[0] + r.measurements.max[0]) / 2).toBeCloseTo(
-      s.x,
-      6,
-    );
-    expect((r.measurements.min[1] + r.measurements.max[1]) / 2).toBeCloseTo(
-      s.y,
-      6,
-    );
+    expect((r.measurements.min[0] + r.measurements.max[0]) / 2).toBeCloseTo(s.x, 6);
+    expect((r.measurements.min[1] + r.measurements.max[1]) / 2).toBeCloseTo(s.y, 6);
   });
 
   it("adding overlapping shapes counts the shared material once", () => {
@@ -390,9 +326,7 @@ describe("shapes", () => {
     const block = shape("box", { width: 40, depth: 40, height: 10 });
     const ball = shape("sphere", { diameter: 20, z: 0, mode: "cut" });
     const r = designed(part(block, ball));
-    expect(
-      rel(r.measurements.volume, 16000 - ((4 / 3) * Math.PI * 1000) / 2),
-    ).toBeLessThan(1e-9);
+    expect(rel(r.measurements.volume, 16000 - ((4 / 3) * Math.PI * 1000) / 2)).toBeLessThan(1e-9);
   });
 
   it("shapes that don't touch are built, with a warning that they print separately", () => {
@@ -401,20 +335,13 @@ describe("shapes", () => {
   });
 
   it("a cut that misses the part gets a warning and changes nothing", () => {
-    const r = designed(
-      part(shape("box"), shape("cylinder", { x: 80, mode: "cut" })),
-    );
+    const r = designed(part(shape("box"), shape("cylinder", { x: 80, mode: "cut" })));
     expect(r.measurements.volume).toBeCloseTo(8000, 6);
     expect(r.issues[0]?.message).toContain("doesn't cut anything");
   });
 
   it("a cut that would remove everything is refused", () => {
-    const r = buildDocument(
-      part(
-        shape("box"),
-        shape("box", { width: 50, depth: 50, height: 50, mode: "cut" }),
-      ),
-    );
+    const r = buildDocument(part(shape("box"), shape("box", { width: 50, depth: 50, height: 50, mode: "cut" })));
     expect(r.ok).toBe(false);
     expect(r.issues[0]?.message).toContain("cut away the whole part");
   });
@@ -434,27 +361,21 @@ describe("shapes", () => {
       units: "mm",
       features: [base, post, hole({ diameter: 6 })],
     });
-    expect(
-      rel(r.measurements.volume, 16000 + cyl(16, 20) - cyl(6, 30)),
-    ).toBeLessThan(1e-9);
+    expect(rel(r.measurements.volume, 16000 + cyl(16, 20) - cyl(6, 30))).toBeLessThan(1e-9);
   });
 
   it("every shape on its own passes the exact-maths check made inside the kernel", () => {
-    for (const type of ["box", "cylinder", "tube", "cone", "sphere"] as const)
-      makeShape(shape(type)).delete();
+    for (const type of ["box", "cylinder", "tube", "cone", "sphere"] as const) makeShape(shape(type)).delete();
   });
 
   it.each([
     ["sphere", shape("sphere")],
     ["pointed cone", shape("cone")],
-  ])(
-    "a %s exports a watertight STL (no collapsed triangles at its tip)",
-    async (_, s) => {
-      const report = checkBinaryStl(await exportStl(designed(part(s)).shape));
-      expect(report.watertight).toBe(true);
-      expect(rel(report.volume, shapeVolume(s))).toBeLessThan(0.005);
-    },
-  );
+  ])("a %s exports a watertight STL (no collapsed triangles at its tip)", async (_, s) => {
+    const report = checkBinaryStl(await exportStl(designed(part(s)).shape));
+    expect(report.watertight).toBe(true);
+    expect(rel(report.volume, shapeVolume(s))).toBeLessThan(0.005);
+  });
 
   it("a part made of several shapes exports a watertight STL", async () => {
     const base = shape("box", { width: 40, depth: 30, height: 6 });
@@ -493,8 +414,7 @@ describe("shapes", () => {
     expect(report.watertight).toBe(true);
     expect(report.consistentWinding).toBe(true);
     expect(rel(report.volume, r.measurements.volume)).toBeLessThan(0.005);
-    const expected =
-      7200 + Math.PI * (49 - 9) * 14 + (Math.PI * 25 * 8) / 3 - cyl(8, 3);
+    const expected = 7200 + Math.PI * (49 - 9) * 14 + (Math.PI * 25 * 8) / 3 - cyl(8, 3);
     expect(rel(r.measurements.volume, expected)).toBeLessThan(1e-9);
   });
 });
@@ -510,35 +430,19 @@ describe("sketches", () => {
     }
     throw new Error(`no ${label}`);
   };
-  const sketch = (
-    on: FaceOutline | null,
-    profiles: Profile[],
-    mode: "add" | "cut",
-    depth: number,
-  ): SketchFeature =>
-    newSketch(
-      { units: "mm", features: [] },
-      on?.plane ?? PLATE_PLANE,
-      on?.label ?? "plate",
-      profiles,
-      mode,
-      depth,
-    );
-  const rect = (
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ): Profile => ({ kind: "rectangle", x, y, width, height });
+  const sketch = (on: FaceOutline | null, profiles: Profile[], mode: "add" | "cut", depth: number): SketchFeature =>
+    newSketch({ units: "mm", features: [] }, on?.plane ?? PLATE_PLANE, on?.label ?? "plate", profiles, mode, depth);
+  const rect = (x: number, y: number, width: number, height: number): Profile => ({
+    kind: "rectangle",
+    x,
+    y,
+    width,
+    height,
+  });
 
   it("every flat face of a block is found, with its size, and curved faces are skipped", () => {
-    const mesh = tessellate(
-      designed(part(block(), shape("cylinder", { z: 30 }))).shape,
-    );
-    const labels = Array.from(
-      { length: faceCount(mesh) },
-      (_, f) => outlineOfFace(mesh, f)?.label ?? "curved",
-    );
+    const mesh = tessellate(designed(part(block(), shape("cylinder", { z: 30 }))).shape);
+    const labels = Array.from({ length: faceCount(mesh) }, (_, f) => outlineOfFace(mesh, f)?.label ?? "curved");
     expect(labels).toContain("curved");
     const front = faceOf([block()], "front face");
     expect([front.width, front.height]).toEqual([60, 30]);
@@ -547,9 +451,7 @@ describe("sketches", () => {
     expect([top.width, top.height, top.plane.origin[2]]).toEqual([60, 40, 30]);
     // A ray hit on any triangle maps back to its face.
     expect(faceOfTriangle(mesh, 0)).toBe(0);
-    expect(faceOfTriangle(mesh, mesh.indices.length / 3 - 1)).toBe(
-      faceCount(mesh) - 1,
-    );
+    expect(faceOfTriangle(mesh, mesh.indices.length / 3 - 1)).toBe(faceCount(mesh) - 1);
   });
 
   it("a rectangle cut into the top face makes a pocket of exactly its size", () => {
@@ -567,12 +469,7 @@ describe("sketches", () => {
     expect(toWorld(front.plane, [0, 0])).toEqual([-30, -20, 0]);
     expect(toWorld(front.plane, [60, 30])).toEqual([30, -20, 30]);
     // A 10 mm boss on the front face, 8 mm long: sticks out of the front only.
-    const boss = sketch(
-      front,
-      [{ kind: "circle", x: 30, y: 15, diameter: 10 }],
-      "add",
-      8,
-    );
+    const boss = sketch(front, [{ kind: "circle", x: 30, y: 15, diameter: 10 }], "add", 8);
     const r = designed({ units: "mm", features: [block(), boss] });
     expect(rel(r.measurements.volume, 72000 + cyl(10, 8))).toBeLessThan(1e-9);
     expect(r.measurements.min[1]).toBeCloseTo(-28, 9);
@@ -612,9 +509,7 @@ describe("sketches", () => {
       units: "mm",
       features: [sketch(null, [L], "add", 20)],
     });
-    expect(rel(r.measurements.volume, (40 * 5 + 5 * 25) * 20)).toBeLessThan(
-      1e-9,
-    );
+    expect(rel(r.measurements.volume, (40 * 5 + 5 * 25) * 20)).toBeLessThan(1e-9);
     expect(r.measurements.size).toEqual([40, 30, 20]);
     expect(r.measurements.min).toEqual([0, 0, 0]);
   });
@@ -623,28 +518,19 @@ describe("sketches", () => {
     const top = faceOf([block()], "top face");
     const r = designed({
       units: "mm",
-      features: [
-        block(),
-        sketch(top, [rect(0, 0, 20, 20), rect(10, 10, 20, 20)], "add", 4),
-      ],
+      features: [block(), sketch(top, [rect(0, 0, 20, 20), rect(10, 10, 20, 20)], "add", 4)],
     });
-    expect(rel(r.measurements.volume, 72000 + (800 - 100) * 4)).toBeLessThan(
-      1e-9,
-    );
+    expect(rel(r.measurements.volume, 72000 + (800 - 100) * 4)).toBeLessThan(1e-9);
   });
 
   it("several separate outlines are all cut", () => {
     const top = faceOf([block()], "top face");
-    const holes = [5, 15, 25].map(
-      (x): Profile => ({ kind: "circle", x, y: 20, diameter: 4 }),
-    );
+    const holes = [5, 15, 25].map((x): Profile => ({ kind: "circle", x, y: 20, diameter: 4 }));
     const r = designed({
       units: "mm",
       features: [block(), sketch(top, holes, "cut", 10)],
     });
-    expect(rel(r.measurements.volume, 72000 - 3 * cyl(4, 10))).toBeLessThan(
-      1e-9,
-    );
+    expect(rel(r.measurements.volume, 72000 - 3 * cyl(4, 10))).toBeLessThan(1e-9);
   });
 
   it("a sketch cut into the side of a hollow box goes through the wall only", () => {
@@ -654,9 +540,7 @@ describe("sketches", () => {
       units: "mm",
       features: [tray, sketch(front, [rect(20, 10, 20, 10)], "cut", 0)],
     });
-    expect(
-      rel(r.measurements.volume, shapeVolume(tray) - 2 * 200 * 2),
-    ).toBeLessThan(1e-9);
+    expect(rel(r.measurements.volume, shapeVolume(tray) - 2 * 200 * 2)).toBeLessThan(1e-9);
   });
 
   it("a cut drawn off the part gets a warning and changes nothing", () => {
@@ -681,10 +565,7 @@ describe("sketches", () => {
     };
     const r = buildDocument({
       units: "mm",
-      features: [
-        block(),
-        sketch(faceOf([block()], "top face"), [bowtie], "add", 5),
-      ],
+      features: [block(), sketch(faceOf([block()], "top face"), [bowtie], "add", 5)],
     });
     expect(r.ok).toBe(false);
     expect(r.issues[0]?.message).toContain("crosses over itself");
@@ -703,10 +584,7 @@ describe("sketches", () => {
     let area = 0;
     for (let i = 0; i < tris.length; i += 3) {
       const [a, b, c] = [tris[i]!, tris[i + 1]!, tris[i + 2]!];
-      area +=
-        Math.abs(
-          (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]),
-        ) / 2;
+      area += Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
     }
     expect(area).toBeCloseTo(60 * 40 - 200, 6); // the top face, minus the pocket's opening
   });
@@ -716,12 +594,7 @@ describe("sketches", () => {
     const front = faceOf([block()], "front face");
     const features: Feature[] = [
       block(),
-      sketch(
-        top,
-        [rect(5, 5, 20, 30), { kind: "circle", x: 45, y: 20, diameter: 12 }],
-        "cut",
-        8,
-      ),
+      sketch(top, [rect(5, 5, 20, 30), { kind: "circle", x: 45, y: 20, diameter: 12 }], "cut", 8),
       sketch(
         front,
         [
@@ -752,9 +625,7 @@ describe("sketches", () => {
     const report = checkBinaryStl(stl);
     expect(report.watertight).toBe(true);
     expect(rel(report.volume, r.measurements.volume)).toBeLessThan(0.005);
-    expect(
-      rel(r.measurements.volume, 72000 - 600 * 8 - cyl(12, 8) + 400 * 6),
-    ).toBeLessThan(1e-9);
+    expect(rel(r.measurements.volume, 72000 - 600 * 8 - cyl(12, 8) + 400 * 6)).toBeLessThan(1e-9);
   });
 });
 

@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Viewport,
-  isWebGLAvailable,
-  type CameraState,
-  type StandardView,
-} from "@studio3d/viewport";
+import { Viewport, isWebGLAvailable, type CameraState, type StandardView } from "@studio3d/viewport";
 import {
   GeometryClient,
   createGeometryWorker,
@@ -105,22 +100,14 @@ export function App() {
       });
     };
     const ro = new ResizeObserver(update);
-    for (const el of [
-      hostRef.current,
-      topbarRef.current,
-      panelRef.current,
-      statusRef.current,
-    ])
-      if (el) ro.observe(el);
+    for (const el of [hostRef.current, topbarRef.current, panelRef.current, statusRef.current]) if (el) ro.observe(el);
     update();
     return () => ro.disconnect();
   }, []);
 
   // Geometry engine
   useEffect(() => {
-    const client = new GeometryClient(createGeometryWorker, (msg) =>
-      setNotice({ kind: "error", text: msg }),
-    );
+    const client = new GeometryClient(createGeometryWorker, (msg) => setNotice({ kind: "error", text: msg }));
     geometryRef.current = client;
     client.ready().then(
       () => setEngine("ready"),
@@ -136,10 +123,7 @@ export function App() {
   }, [setNotice]);
 
   // While a sketch is being drawn, the 3D view previews the design with it included.
-  const shownDoc = useMemo(
-    () => (draft ? withDraft(doc, draft.feature, draft.isNew) : doc),
-    [doc, draft],
-  );
+  const shownDoc = useMemo(() => (draft ? withDraft(doc, draft.feature, draft.isNew) : doc), [doc, draft]);
 
   // Rebuild real geometry whenever the document changes and its values are valid.
   const inputIssues = validateDocument(shownDoc);
@@ -169,12 +153,9 @@ export function App() {
     return () => clearTimeout(timer);
   }, [shownDoc, engine, inputOk]);
 
-  const issues = inputOk
-    ? dedupe([...inputIssues, ...kernelIssues])
-    : inputIssues;
+  const issues = inputOk ? dedupe([...inputIssues, ...kernelIssues]) : inputIssues;
   // Up to date only when the model on screen was built from exactly this document (not just "nothing is building yet").
-  const shownCurrent =
-    inputOk && !building && !hasErrors(kernelIssues) && built?.doc === shownDoc;
+  const shownCurrent = inputOk && !building && !hasErrors(kernelIssues) && built?.doc === shownDoc;
   const upToDate = shownCurrent && shownDoc === doc;
 
   // Sketching: pick a face, draw, then add the sketch to the design.
@@ -207,24 +188,15 @@ export function App() {
   const onHostPointerMove = (e: React.PointerEvent) => {
     if (!picking || e.buttons) return;
     const hit = faceAt(e.clientX, e.clientY);
-    viewportRef.current?.setHighlight(
-      hit?.outline ? new Float32Array(hit.points.flat()) : null,
-    );
+    viewportRef.current?.setHighlight(hit?.outline ? new Float32Array(hit.points.flat()) : null);
     setPickMessage(
-      hit && !hit.outline
-        ? "That face is curved. Pick a flat one."
-        : "Click a flat face of the part to draw on it.",
+      hit && !hit.outline ? "That face is curved. Pick a flat one." : "Click a flat face of the part to draw on it.",
     );
   };
   const onHostPointerUp = (e: React.PointerEvent) => {
     const down = pointerDown.current;
     pointerDown.current = null;
-    if (
-      !picking ||
-      !down ||
-      Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4
-    )
-      return; // a drag orbits instead
+    if (!picking || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return; // a drag orbits instead
     const hit = faceAt(e.clientX, e.clientY);
     if (!hit?.outline) return;
     const o = hit.outline;
@@ -260,18 +232,13 @@ export function App() {
 
   const editSketch = useCallback(
     (id: string) => {
-      const f = doc.features.find(
-        (x): x is SketchFeature => x.id === id && x.type === "sketch",
-      );
+      const f = doc.features.find((x): x is SketchFeature => x.id === id && x.type === "sketch");
       if (!f) return;
       const mesh = meshRef.current;
-      const triangles =
-        f.surface !== "plate" && mesh ? trianglesInPlane(mesh, f.plane) : [];
+      const triangles = f.surface !== "plate" && mesh ? trianglesInPlane(mesh, f.plane) : [];
       const xs = triangles.map((t) => t[0]);
       const ys = triangles.map((t) => t[1]);
-      const face = triangles.length
-        ? { triangles, width: Math.max(...xs), height: Math.max(...ys) }
-        : null;
+      const face = triangles.length ? { triangles, width: Math.max(...xs), height: Math.max(...ys) } : null;
       stopPicking();
       setSketchView("2d");
       setDraft({
@@ -301,8 +268,7 @@ export function App() {
   useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    if (draft && sketchView === "3d")
-      vp.setSketchLines(sketchLines(draft.feature));
+    if (draft && sketchView === "3d") vp.setSketchLines(sketchLines(draft.feature));
     else vp.setSketchLines(null);
   }, [draft, sketchView]);
   useEffect(() => {
@@ -316,14 +282,10 @@ export function App() {
   const draftIssues = draft
     ? dedupe([
         ...validateSketch(draft.feature),
-        ...(inputOk
-          ? kernelIssues.filter((i) => i.featureId === draft.feature.id)
-          : []),
+        ...(inputOk ? kernelIssues.filter((i) => i.featureId === draft.feature.id) : []),
       ])
     : [];
-  const draftIndex = draft
-    ? shownDoc.features.findIndex((f) => f.id === draft.feature.id)
-    : -1;
+  const draftIndex = draft ? shownDoc.features.findIndex((f) => f.id === draft.feature.id) : -1;
 
   const exportStl = useCallback(
     () =>
@@ -331,8 +293,7 @@ export function App() {
         const client = geometryRef.current;
         if (!client) return;
         const r = await client.rebuild(doc); // make sure the export matches exactly what's on screen
-        if (r.status !== "built")
-          throw new Error("Fix the highlighted values before exporting.");
+        if (r.status !== "built") throw new Error("Fix the highlighted values before exporting.");
         const data = await client.exportStl();
         const saved = await platform.exportStl(data, name);
         if (saved) setNotice({ kind: "info", text: `Exported ${saved.name}.` });
@@ -393,46 +354,27 @@ export function App() {
   }, [name, dirty, engine]);
   useEffect(() => platform.guardClose(() => dirtyRef.current), [dirtyRef]);
 
-  const saveLabel = platform.capabilities.saveInPlace
-    ? "Save"
-    : "Download project";
-  const saveStatus = dirty
-    ? "Unsaved changes"
-    : project.file
-      ? "All changes saved"
-      : "Not saved yet";
+  const saveLabel = platform.capabilities.saveInPlace ? "Save" : "Download project";
+  const saveStatus = dirty ? "Unsaved changes" : project.file ? "All changes saved" : "Not saved yet";
 
   return (
-    <div
-      className={`app${draft ? " sketching" : ""}${picking ? " picking" : ""}`}
-    >
+    <div className={`app${draft ? " sketching" : ""}${picking ? " picking" : ""}`}>
       <main
         className="viewport-host"
         ref={hostRef}
-        onPointerDown={(e) =>
-          (pointerDown.current = { x: e.clientX, y: e.clientY })
-        }
+        onPointerDown={(e) => (pointerDown.current = { x: e.clientX, y: e.clientY })}
         onPointerMove={onHostPointerMove}
         onPointerUp={onHostPointerUp}
         data-camera-view={camera?.view ?? ""}
         data-camera-position={camera ? camera.position.join(",") : ""}
-        data-geometry={
-          engine === "ready"
-            ? shownCurrent
-              ? "current"
-              : building
-                ? "building"
-                : "stale"
-            : engine
-        }
+        data-geometry={engine === "ready" ? (shownCurrent ? "current" : building ? "building" : "stale") : engine}
       >
         {webglError && (
           <div className="notice glass" role="alert">
             <h2>3D view can't start</h2>
             <p>
-              Your computer's graphics (WebGL 2) aren't available to the app.
-              Updating your graphics driver usually fixes this. On Windows, also
-              make sure Microsoft Edge WebView2 is installed.
+              Your computer's graphics (WebGL 2) aren't available to the app. Updating your graphics driver usually
+              fixes this. On Windows, also make sure Microsoft Edge WebView2 is installed.
             </p>
           </div>
         )}
@@ -452,17 +394,10 @@ export function App() {
           </div>
         )}
         {notice && (
-          <div
-            className={`toast glass ${notice.kind}`}
-            role={notice.kind === "error" ? "alert" : "status"}
-          >
+          <div className={`toast glass ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
             <Icon name={notice.kind === "error" ? "alert" : "check"} />
             <span>{notice.text}</span>
-            <button
-              type="button"
-              aria-label="Dismiss"
-              onClick={() => setNotice(null)}
-            >
+            <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
               <Icon name="close" />
             </button>
           </div>
@@ -560,11 +495,7 @@ export function App() {
           className="primary"
           onClick={() => void exportStl()}
           disabled={busy || !upToDate}
-          title={
-            upToDate
-              ? "Export a mesh for your slicer"
-              : "Fix the highlighted values to export"
-          }
+          title={upToDate ? "Export a mesh for your slicer" : "Fix the highlighted values to export"}
         >
           <Icon name="export" />
           Export STL
@@ -602,10 +533,7 @@ export function App() {
       )}
 
       <footer className="statusbar glass" ref={statusRef}>
-        <span
-          data-testid="save-status"
-          className={dirty ? "unsaved" : undefined}
-        >
+        <span data-testid="save-status" className={dirty ? "unsaved" : undefined}>
           <span className="dot" aria-hidden="true" />
           {name} · {saveStatus}
         </span>
@@ -620,26 +548,17 @@ export function App() {
                   ? "Model up to date"
                   : "Showing your last good design"}
         </span>
-        <span className="hint">
-          Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change
-          view
-        </span>
+        <span className="hint">Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view</span>
       </footer>
     </div>
   );
 }
 
 /** The design with a sketch that's being drawn: added at the end, or in place of the one being edited. */
-function withDraft(
-  doc: ProjectDocument,
-  f: SketchFeature,
-  isNew: boolean,
-): ProjectDocument {
+function withDraft(doc: ProjectDocument, f: SketchFeature, isNew: boolean): ProjectDocument {
   return {
     ...doc,
-    features: isNew
-      ? [...doc.features, f]
-      : doc.features.map((x) => (x.id === f.id ? f : x)),
+    features: isNew ? [...doc.features, f] : doc.features.map((x) => (x.id === f.id ? f : x)),
   };
 }
 

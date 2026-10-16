@@ -26,14 +26,7 @@ export type Request =
 
 export type Response =
   | { id: number; kind: "ready" }
-  | {
-      id: number;
-      kind: "rebuilt";
-      ok: true;
-      mesh: MeshData;
-      measurements: Measurements;
-      issues: Issue[];
-    }
+  | { id: number; kind: "rebuilt"; ok: true; mesh: MeshData; measurements: Measurements; issues: Issue[] }
   | { id: number; kind: "rebuilt"; ok: false; issues: Issue[] }
   | { id: number; kind: "stl"; ok: true; data: ArrayBuffer }
   | { id: number; kind: "stl"; ok: false; error: string }

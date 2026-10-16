@@ -28,8 +28,7 @@
   --radius-sm: 9px;
   --gap: 16px;
   --blur: blur(24px) saturate(170%);
-  --shadow:
-    0 10px 40px rgba(2, 6, 20, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --shadow: 0 10px 40px rgba(2, 6, 20, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
   font-family:
     "Segoe UI Variable Text",
@@ -261,9 +260,7 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   border-radius: 24px;
-  background: var(
-    --glass-strong
-  ); /* the larger surface reads as a thicker material */
+  background: var(--glass-strong); /* the larger surface reads as a thicker material */
 }
 
 .panel-scroll {
@@ -969,11 +966,7 @@ input:focus-visible {
 
 .sketch-editor.view-2d {
   background:
-    radial-gradient(
-      900px 600px at 80% 0%,
-      rgba(88, 130, 255, 0.12),
-      transparent 60%
-    ),
+    radial-gradient(900px 600px at 80% 0%, rgba(88, 130, 255, 0.12), transparent 60%),
     linear-gradient(180deg, #10182c, #0b1020);
 }
 

@@ -44,19 +44,14 @@ export function NumberField(props: {
           onChange={(e) => {
             setText(e.target.value);
             const v = parse(e.target.value);
-            if (v === null)
-              setTypingError(
-                `${props.label} needs to be a number, like 12 or 2.5.`,
-              );
+            if (v === null) setTypingError(`${props.label} needs to be a number, like 12 or 2.5.`);
             else {
               setTypingError(null);
               props.onCommit(v);
             }
           }}
         />
-        {props.unit !== "" && (
-          <span className="unit">{props.unit ?? "mm"}</span>
-        )}
+        {props.unit !== "" && <span className="unit">{props.unit ?? "mm"}</span>}
       </div>
       {props.compact ? (
         typingError && (
@@ -65,10 +60,7 @@ export function NumberField(props: {
           </p>
         )
       ) : message ? (
-        <p
-          className={`issue ${severity}`}
-          role={severity === "error" ? "alert" : undefined}
-        >
+        <p className={`issue ${severity}`} role={severity === "error" ? "alert" : undefined}>
           {message}
         </p>
       ) : (

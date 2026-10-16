@@ -19,11 +19,7 @@ export interface Platform {
   capabilities: { saveInPlace: boolean };
   openProject(): Promise<{ file: FileRef; text: string } | null>;
   /** Saves to `target` if given (desktop only), otherwise asks where. Returns where it went, or null if cancelled. */
-  saveProject(
-    text: string,
-    suggestedName: string,
-    target?: FileRef,
-  ): Promise<FileRef | null>;
+  saveProject(text: string, suggestedName: string, target?: FileRef): Promise<FileRef | null>;
   exportStl(data: ArrayBuffer, suggestedName: string): Promise<FileRef | null>;
   /** `hasUnsavedChanges` is read when the user tries to close the app. */
   guardClose(hasUnsavedChanges: () => boolean): () => void;
@@ -32,24 +28,16 @@ export interface Platform {
   setTitle(title: string): void;
 }
 
-const PROJECT_FILTER = {
-  name: "Studio 3D project",
-  extensions: [FILE_EXTENSION],
-};
+const PROJECT_FILTER = { name: "Studio 3D project", extensions: [FILE_EXTENSION] };
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
-const withExt = (name: string, ext: string) =>
-  name.toLowerCase().endsWith(`.${ext}`) ? name : `${name}.${ext}`;
+const withExt = (name: string, ext: string) => (name.toLowerCase().endsWith(`.${ext}`) ? name : `${name}.${ext}`);
 
 const desktop: Platform = {
   kind: "desktop",
   capabilities: { saveInPlace: true },
 
   async openProject() {
-    const path = await open({
-      multiple: false,
-      directory: false,
-      filters: [PROJECT_FILTER],
-    });
+    const path = await open({ multiple: false, directory: false, filters: [PROJECT_FILTER] });
     if (typeof path !== "string") return null;
     const text = await invoke<string>("read_project", { path });
     return { file: { name: baseName(path), path }, text };
@@ -58,10 +46,7 @@ const desktop: Platform = {
   async saveProject(text, suggestedName, target) {
     let path = target?.path;
     if (!path) {
-      const chosen = await save({
-        defaultPath: withExt(suggestedName, FILE_EXTENSION),
-        filters: [PROJECT_FILTER],
-      });
+      const chosen = await save({ defaultPath: withExt(suggestedName, FILE_EXTENSION), filters: [PROJECT_FILTER] });
       if (!chosen) return null;
       path = withExt(chosen, FILE_EXTENSION);
     }
@@ -70,16 +55,10 @@ const desktop: Platform = {
   },
 
   async exportStl(data, suggestedName) {
-    const chosen = await save({
-      defaultPath: withExt(suggestedName, "stl"),
-      filters: [{ name: "STL mesh", extensions: ["stl"] }],
-    });
+    const chosen = await save({ defaultPath: withExt(suggestedName, "stl"), filters: [{ name: "STL mesh", extensions: ["stl"] }] });
     if (!chosen) return null;
     const path = withExt(chosen, "stl");
-    await invoke("write_export", {
-      path,
-      bytes: Array.from(new Uint8Array(data)),
-    });
+    await invoke("write_export", { path, bytes: Array.from(new Uint8Array(data)) });
     return { name: baseName(path), path };
   },
 
@@ -87,27 +66,19 @@ const desktop: Platform = {
     const win = getCurrentWindow();
     const off = win.onCloseRequested(async (event) => {
       if (!hasUnsavedChanges()) return;
-      const leave = await ask(
-        "You have unsaved changes. Close Studio 3D without saving?",
-        {
-          title: "Unsaved changes",
-          kind: "warning",
-          okLabel: "Close without saving",
-          cancelLabel: "Keep working",
-        },
-      );
+      const leave = await ask("You have unsaved changes. Close Studio 3D without saving?", {
+        title: "Unsaved changes",
+        kind: "warning",
+        okLabel: "Close without saving",
+        cancelLabel: "Keep working",
+      });
       if (!leave) event.preventDefault();
     });
     return () => void off.then((f) => f());
   },
 
   confirmDiscard(message) {
-    return ask(message, {
-      title: "Unsaved changes",
-      kind: "warning",
-      okLabel: "Discard changes",
-      cancelLabel: "Keep working",
-    });
+    return ask(message, { title: "Unsaved changes", kind: "warning", okLabel: "Discard changes", cancelLabel: "Keep working" });
   },
 
   setTitle(title) {
@@ -127,13 +98,8 @@ const browser: Platform = {
       input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return resolve(null);
-        if (file.size > 50 * 1024 * 1024)
-          return reject(
-            new Error("This file is too large to be a Studio 3D project."),
-          );
-        file
-          .text()
-          .then((text) => resolve({ file: { name: file.name }, text }), reject);
+        if (file.size > 50 * 1024 * 1024) return reject(new Error("This file is too large to be a Studio 3D project."));
+        file.text().then((text) => resolve({ file: { name: file.name }, text }), reject);
       };
       input.oncancel = () => resolve(null);
       input.click();

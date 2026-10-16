@@ -21,10 +21,7 @@ import {
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
-const sketch = (
-  profiles: Profile[],
-  over: Partial<SketchFeature> = {},
-): SketchFeature => ({
+const sketch = (profiles: Profile[], over: Partial<SketchFeature> = {}): SketchFeature => ({
   ...newSketch(newDocument(), PLATE_PLANE, "plate", profiles),
   ...over,
 });
@@ -131,12 +128,7 @@ describe("validateSketch", () => {
   it.each([
     ["an empty sketch", [], {}, "is empty"],
     ["a tiny rectangle", [{ ...rect, width: 0.1 }], {}, "at least"],
-    [
-      "a circle with no size",
-      [{ kind: "circle", x: 0, y: 0, diameter: 0 }],
-      {},
-      "at least",
-    ],
+    ["a circle with no size", [{ kind: "circle", x: 0, y: 0, diameter: 0 }], {}, "at least"],
     [
       "two corners only",
       [
@@ -185,31 +177,19 @@ describe("validateSketch", () => {
     ],
     ["a zero height", [rect], { depth: 0 }, "Height must be"],
     ["a negative cut", [rect], { mode: "cut", depth: -1 }, "negative"],
-    [
-      "a broken surface",
-      [rect],
-      { plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [1, 0, 0] } },
-      "damaged",
-    ],
-  ] as [string, Profile[], Partial<SketchFeature>, string][])(
-    "explains %s",
-    (_, profiles, over, text) => {
-      const issues = validateSketch(sketch(profiles, over));
-      expect(hasErrors(issues)).toBe(true);
-      expect(issues.map((i) => i.message).join(" ")).toContain(text);
-    },
-  );
+    ["a broken surface", [rect], { plane: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [1, 0, 0] } }, "damaged"],
+  ] as [string, Profile[], Partial<SketchFeature>, string][])("explains %s", (_, profiles, over, text) => {
+    const issues = validateSketch(sketch(profiles, over));
+    expect(hasErrors(issues)).toBe(true);
+    expect(issues.map((i) => i.message).join(" ")).toContain(text);
+  });
 
   it("a cut of depth 0 means all the way through", () => {
-    expect(validateSketch(sketch([rect], { mode: "cut", depth: 0 }))).toEqual(
-      [],
-    );
+    expect(validateSketch(sketch([rect], { mode: "cut", depth: 0 }))).toEqual([]);
   });
 
   it("a part can start from a sketch drawn on the plate", () => {
-    expect(
-      validateDocument({ units: "mm", features: [sketch([rect])] }),
-    ).toEqual([]);
+    expect(validateDocument({ units: "mm", features: [sketch([rect])] })).toEqual([]);
     expect(
       hasErrors(
         validateDocument({
@@ -253,18 +233,11 @@ describe("sketches in project files", () => {
   });
 
   it.each([
-    [
-      "an unreadable surface",
-      (f: Record<string, unknown>) => (f.plane = { origin: [0, 0] }),
-    ],
-    [
-      "an unknown outline",
-      (f: Record<string, unknown>) => (f.profiles = [{ kind: "spline" }]),
-    ],
+    ["an unreadable surface", (f: Record<string, unknown>) => (f.plane = { origin: [0, 0] })],
+    ["an unknown outline", (f: Record<string, unknown>) => (f.profiles = [{ kind: "spline" }])],
     [
       "a corner that isn't a number",
-      (f: Record<string, unknown>) =>
-        (f.profiles = [{ kind: "polygon", points: [[0, "a"]] }]),
+      (f: Record<string, unknown>) => (f.profiles = [{ kind: "polygon", points: [[0, "a"]] }]),
     ],
   ])("rejects %s as damaged", (_, damage) => {
     const doc = newDocument();

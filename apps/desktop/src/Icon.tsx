@@ -5,8 +5,7 @@ const PATHS = {
   save: "M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zM8 3v5h7V3M8 21v-6h8v6",
   export: "M12 3v12M7 8l5-5 5 5M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4",
   check: "M5 12.5l4.5 4.5L19 7.5",
-  alert:
-    "M12 8v5M12 16.5v.5M10.3 3.9L2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
+  alert: "M12 8v5M12 16.5v.5M10.3 3.9L2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
   close: "M6 6l12 12M18 6L6 18",
   plus: "M12 5v14M5 12h14",
   trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
@@ -22,14 +21,7 @@ const PATHS = {
 
 export function Icon({ name }: { name: keyof typeof PATHS }) {
   return (
-    <svg
-      className="icon"
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      aria-hidden="true"
-      focusable="false"
-    >
+    <svg className="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
       <path
         d={PATHS[name]}
         fill="none"

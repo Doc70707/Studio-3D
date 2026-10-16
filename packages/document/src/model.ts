@@ -1,15 +1,7 @@
 // The project document. Parameters are the source of truth; geometry is always rebuilt from them.
 // All lengths are stored in millimetres. Positions are measured from the centre of the build plate:
 // x to the right (red axis), y to the back (green axis), z up from the plate.
-import {
-  profileArea,
-  selfIntersects,
-  type Profile,
-  type SketchPlane,
-  PROFILE_LABELS,
-  dot,
-  length3,
-} from "./sketch";
+import { profileArea, selfIntersects, type Profile, type SketchPlane, PROFILE_LABELS, dot, length3 } from "./sketch";
 
 export type Units = "mm";
 
@@ -64,12 +56,7 @@ export interface SphereFeature extends Placed {
   diameter: number;
 }
 
-export type ShapeFeature =
-  | BoxFeature
-  | CylinderFeature
-  | TubeFeature
-  | ConeFeature
-  | SphereFeature;
+export type ShapeFeature = BoxFeature | CylinderFeature | TubeFeature | ConeFeature | SphereFeature;
 export type ShapeType = ShapeFeature["type"];
 
 /**
@@ -138,10 +125,7 @@ export const DEFAULT_BOX: Omit<BoxFeature, "id"> = {
 };
 
 /** What each kind of shape is called and what a new one looks like. */
-export const SHAPES: Record<
-  ShapeType,
-  { label: string; make: () => Omit<ShapeFeature, "id" | "name"> }
-> = {
+export const SHAPES: Record<ShapeType, { label: string; make: () => Omit<ShapeFeature, "id" | "name"> }> = {
   box: {
     label: "Box",
     make: () => ({
@@ -183,14 +167,11 @@ export const SHAPES: Record<
   },
 };
 
-export const isShape = (f: Feature): f is ShapeFeature =>
-  f.type !== "hole" && f.type !== "sketch";
+export const isShape = (f: Feature): f is ShapeFeature => f.type !== "hole" && f.type !== "sketch";
 export const isSketch = (f: Feature): f is SketchFeature => f.type === "sketch";
 /** Steps that add or cut solid material (everything except holes). */
-export const isSolidStep = (f: Feature): f is ShapeFeature | SketchFeature =>
-  f.type !== "hole";
-export const shapesOf = (doc: ProjectDocument): ShapeFeature[] =>
-  doc.features.filter(isShape);
+export const isSolidStep = (f: Feature): f is ShapeFeature | SketchFeature => f.type !== "hole";
+export const shapesOf = (doc: ProjectDocument): ShapeFeature[] => doc.features.filter(isShape);
 export const holesOf = (doc: ProjectDocument): HoleFeature[] =>
   doc.features.filter((f): f is HoleFeature => f.type === "hole");
 
@@ -218,10 +199,7 @@ export function newShape(
 }
 
 /** A new hole: 5 mm, through, at the given spot (usually the middle of the part). */
-export function newHole(
-  doc: ProjectDocument,
-  where: { x: number; y: number } = { x: 0, y: 0 },
-): HoleFeature {
+export function newHole(doc: ProjectDocument, where: { x: number; y: number } = { x: 0, y: 0 }): HoleFeature {
   return {
     id: newId(),
     type: "hole",
@@ -308,18 +286,13 @@ export function validateShape(s: ShapeFeature): Issue[] {
   const num = (k: string) => (s as unknown as Record<string, number>)[k]!;
 
   for (const k of ["x", "y", "z", ...SIZE_FIELDS[s.type]]) {
-    if (!Number.isFinite(num(k)))
-      add("error", k, `${FIELD_LABELS[k]} needs to be a number.`);
+    if (!Number.isFinite(num(k))) add("error", k, `${FIELD_LABELS[k]} needs to be a number.`);
   }
   if (issues.length) return issues;
 
   for (const k of ["x", "y", "z"]) {
     if (Math.abs(num(k)) > LIMITS.maxPosition)
-      add(
-        "error",
-        k,
-        `${FIELD_LABELS[k]} can be at most ${fmt(LIMITS.maxPosition)} from the centre.`,
-      );
+      add("error", k, `${FIELD_LABELS[k]} can be at most ${fmt(LIMITS.maxPosition)} from the centre.`);
   }
   if (s.z < 0)
     add(
@@ -335,10 +308,8 @@ export function validateShape(s: ShapeFeature): Issue[] {
     const label = FIELD_LABELS[k]!;
     if (optional.has(k)) {
       if (v < 0) add("error", k, `${label} can't be negative.`);
-    } else if (v < LIMITS.minSize)
-      add("error", k, `${label} must be at least ${fmt(LIMITS.minSize)}.`);
-    else if (v > LIMITS.maxSize)
-      add("error", k, `${label} can be at most ${fmt(LIMITS.maxSize)}.`);
+    } else if (v < LIMITS.minSize) add("error", k, `${label} must be at least ${fmt(LIMITS.minSize)}.`);
+    else if (v > LIMITS.maxSize) add("error", k, `${label} can be at most ${fmt(LIMITS.maxSize)}.`);
   }
   if (issues.length) return issues;
 
@@ -378,15 +349,9 @@ function validateBoxWall(b: BoxFeature): Issue[] {
       `Walls of ${fmt(b.wall)} would fill the whole box. Use less than ${fmt(narrowest / 2)}, or 0 for a solid block.`,
     );
   } else if (b.wall >= b.height) {
-    add(
-      "error",
-      `The floor (${fmt(b.wall)}) can't be as thick as the box is tall (${fmt(b.height)}).`,
-    );
+    add("error", `The floor (${fmt(b.wall)}) can't be as thick as the box is tall (${fmt(b.height)}).`);
   } else if (b.wall < LIMITS.minPrintableWall) {
-    add(
-      "warning",
-      `Walls thinner than ${fmt(LIMITS.minPrintableWall)} may not print well on most printers.`,
-    );
+    add("warning", `Walls thinner than ${fmt(LIMITS.minPrintableWall)} may not print well on most printers.`);
   }
   return issues;
 }
@@ -410,12 +375,8 @@ export function validateHole(h: HoleFeature): Issue[] {
   }
   if (issues.length) return issues;
   if (h.diameter < HOLE_LIMITS.minDiameter)
-    add(
-      "diameter",
-      `A hole needs to be at least ${fmt(HOLE_LIMITS.minDiameter)} across.`,
-    );
-  if (h.depth < 0)
-    add("depth", "Depth can't be negative. Use 0 to go all the way through.");
+    add("diameter", `A hole needs to be at least ${fmt(HOLE_LIMITS.minDiameter)} across.`);
+  if (h.depth < 0) add("depth", "Depth can't be negative. Use 0 to go all the way through.");
   return issues;
 }
 
@@ -430,11 +391,12 @@ export function holeEdgeIssues(
   partHeight: number,
 ): Issue[] {
   const r = h.diameter / 2;
-  const issue = (
-    severity: Severity,
-    field: string,
-    message: string,
-  ): Issue => ({ severity, featureId: h.id, field, message });
+  const issue = (severity: Severity, field: string, message: string): Issue => ({
+    severity,
+    featureId: h.id,
+    field,
+    message,
+  });
   if (h.depth > partHeight + 1e-9) {
     return [
       issue(
@@ -452,13 +414,7 @@ export function holeEdgeIssues(
   ] as const;
   for (const [field, gap, side] of sides) {
     if (gap < -1e-9)
-      return [
-        issue(
-          "error",
-          field,
-          `This hole runs off the ${side} edge of the part. Move it in or make it smaller.`,
-        ),
-      ];
+      return [issue("error", field, `This hole runs off the ${side} edge of the part. Move it in or make it smaller.`)];
   }
   const closest = sides.reduce((a, b) => (b[1] < a[1] ? b : a));
   if (closest[1] < LIMITS.minPrintableWall) {
@@ -491,8 +447,7 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
       severity: "error",
       featureId: first.id,
       field: "mode",
-      message:
-        "The first shape has to add material, since there's nothing to cut from yet.",
+      message: "The first shape has to add material, since there's nothing to cut from yet.",
     });
   }
   let holesStarted = false;
@@ -517,19 +472,14 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
 }
 
 /** Where a profile's number is shown in the panel, e.g. "profiles.0.width". */
-export const profileField = (index: number, key: string) =>
-  `profiles.${index}.${key}`;
+export const profileField = (index: number, key: string) => `profiles.${index}.${key}`;
 
 /** Plain-language checks for a sketch: a sensible surface, drawable outlines and a sensible depth. */
 export function validateSketch(s: SketchFeature): Issue[] {
   const issues: Issue[] = [];
-  const add = (
-    field: string | null,
-    message: string,
-    severity: Severity = "error",
-  ) => issues.push({ severity, featureId: s.id, field, message });
-  const finite = (...ns: unknown[]) =>
-    ns.every((n) => typeof n === "number" && Number.isFinite(n));
+  const add = (field: string | null, message: string, severity: Severity = "error") =>
+    issues.push({ severity, featureId: s.id, field, message });
+  const finite = (...ns: unknown[]) => ns.every((n) => typeof n === "number" && Number.isFinite(n));
 
   const { origin, xDir, normal } = s.plane;
   const planeOk =
@@ -538,103 +488,61 @@ export function validateSketch(s: SketchFeature): Issue[] {
     Math.abs(length3(normal) - 1) < 1e-6 &&
     Math.abs(dot(xDir, normal)) < 1e-6 &&
     origin.every((n) => Math.abs(n) <= LIMITS.maxPosition);
-  if (!planeOk)
-    add(
-      null,
-      `The position of ${s.name} is damaged. Remove it and draw it again.`,
-    );
+  if (!planeOk) add(null, `The position of ${s.name} is damaged. Remove it and draw it again.`);
 
-  if (!s.profiles.length)
-    add(null, `${s.name} is empty. Draw at least one shape in it.`);
+  if (!s.profiles.length) add(null, `${s.name} is empty. Draw at least one shape in it.`);
   s.profiles.forEach((p, i) => {
     const what = `${PROFILE_LABELS[p.kind]} ${i + 1}`;
     const f = (k: string) => profileField(i, k);
     const position = (x: number, y: number, field: string) => {
       if (Math.abs(x) > LIMITS.maxPosition || Math.abs(y) > LIMITS.maxPosition)
-        add(
-          field,
-          `${what} is too far away. Keep it within ${fmt(LIMITS.maxPosition)}.`,
-        );
+        add(field, `${what} is too far away. Keep it within ${fmt(LIMITS.maxPosition)}.`);
     };
     const size = (v: number, field: string, label: string) => {
-      if (v < LIMITS.minSize)
-        add(
-          field,
-          `${label} of ${what} must be at least ${fmt(LIMITS.minSize)}.`,
-        );
-      else if (v > LIMITS.maxSize)
-        add(
-          field,
-          `${label} of ${what} can be at most ${fmt(LIMITS.maxSize)}.`,
-        );
+      if (v < LIMITS.minSize) add(field, `${label} of ${what} must be at least ${fmt(LIMITS.minSize)}.`);
+      else if (v > LIMITS.maxSize) add(field, `${label} of ${what} can be at most ${fmt(LIMITS.maxSize)}.`);
     };
     if (p.kind === "rectangle") {
       if (!finite(p.x, p.y, p.width, p.height))
-        return add(
-          f("width"),
-          `${what} needs numbers for its position and size.`,
-        );
+        return add(f("width"), `${what} needs numbers for its position and size.`);
       position(p.x, p.y, f("x"));
       size(p.width, f("width"), "The width");
       size(p.height, f("height"), "The height");
     } else if (p.kind === "circle") {
-      if (!finite(p.x, p.y, p.diameter))
-        return add(
-          f("diameter"),
-          `${what} needs numbers for its position and size.`,
-        );
+      if (!finite(p.x, p.y, p.diameter)) return add(f("diameter"), `${what} needs numbers for its position and size.`);
       position(p.x, p.y, f("x"));
       size(p.diameter, f("diameter"), "The diameter");
     } else {
       const pts = p.points;
-      if (pts.length < 3)
-        return add(f("points"), `${what} needs at least 3 corners.`);
-      if (!pts.every((q) => finite(q[0], q[1])))
-        return add(f("points"), `${what} has a corner that isn't a number.`);
+      if (pts.length < 3) return add(f("points"), `${what} needs at least 3 corners.`);
+      if (!pts.every((q) => finite(q[0], q[1]))) return add(f("points"), `${what} has a corner that isn't a number.`);
       for (const q of pts) position(q[0], q[1], f("points"));
       const dup = pts.some((q, j) => {
         const r = pts[(j + 1) % pts.length]!;
         return Math.hypot(q[0] - r[0], q[1] - r[1]) < 0.01;
       });
-      if (dup)
-        return add(
-          f("points"),
-          `${what} has two corners in the same place. Remove one of them.`,
-        );
+      if (dup) return add(f("points"), `${what} has two corners in the same place. Remove one of them.`);
       if (selfIntersects(pts))
-        return add(
-          f("points"),
-          `${what} crosses over itself. Move its corners so the lines don't cross.`,
-        );
-      if (profileArea(p) < LIMITS.minSize * LIMITS.minSize)
-        add(f("points"), `${what} is too small to make.`);
+        return add(f("points"), `${what} crosses over itself. Move its corners so the lines don't cross.`);
+      if (profileArea(p) < LIMITS.minSize * LIMITS.minSize) add(f("points"), `${what} is too small to make.`);
     }
   });
 
   if (!finite(s.depth)) add("depth", "Depth needs to be a number.");
   else if (s.mode === "add") {
-    if (s.depth < LIMITS.minSize)
-      add("depth", `Height must be at least ${fmt(LIMITS.minSize)}.`);
-    else if (s.depth > LIMITS.maxSize)
-      add("depth", `Height can be at most ${fmt(LIMITS.maxSize)}.`);
-  } else if (s.depth < 0)
-    add("depth", "Depth can't be negative. Use 0 to cut all the way through.");
+    if (s.depth < LIMITS.minSize) add("depth", `Height must be at least ${fmt(LIMITS.minSize)}.`);
+    else if (s.depth > LIMITS.maxSize) add("depth", `Height can be at most ${fmt(LIMITS.maxSize)}.`);
+  } else if (s.depth < 0) add("depth", "Depth can't be negative. Use 0 to cut all the way through.");
   else if (s.depth > 0 && s.depth < LIMITS.minSize)
-    add(
-      "depth",
-      `Depth must be at least ${fmt(LIMITS.minSize)}, or 0 to cut all the way through.`,
-    );
-  else if (s.depth > LIMITS.maxSize)
-    add("depth", `Depth can be at most ${fmt(LIMITS.maxSize)}.`);
+    add("depth", `Depth must be at least ${fmt(LIMITS.minSize)}, or 0 to cut all the way through.`);
+  else if (s.depth > LIMITS.maxSize) add("depth", `Depth can be at most ${fmt(LIMITS.maxSize)}.`);
   return issues;
 }
 
 /** Total flat area of a sketch's outlines (overlaps counted twice). */
-export const sketchArea = (s: SketchFeature) =>
-  s.profiles.reduce((a, p) => a + profileArea(p), 0);
+export const sketchArea = (s: SketchFeature) => s.profiles.reduce((a, p) => a + profileArea(p), 0);
 
-export const hasErrors = (issues: Issue[]) =>
-  issues.some((i) => i.severity === "error");
+export const hasErrors = (issues: Issue[]) => issues.some((i) => i.severity === "error");
 
 /** Exact material volume of one shape on its own, used to check what the geometry engine returns. */
 export function shapeVolume(s: ShapeFeature): number {
@@ -642,12 +550,7 @@ export function shapeVolume(s: ShapeFeature): number {
   switch (s.type) {
     case "box": {
       const outer = s.width * s.depth * s.height;
-      return s.wall === 0
-        ? outer
-        : outer -
-            (s.width - 2 * s.wall) *
-              (s.depth - 2 * s.wall) *
-              (s.height - s.wall);
+      return s.wall === 0 ? outer : outer - (s.width - 2 * s.wall) * (s.depth - 2 * s.wall) * (s.height - s.wall);
     }
     case "cylinder":
       return disc(s.diameter) * s.height;

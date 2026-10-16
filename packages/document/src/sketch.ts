@@ -45,23 +45,14 @@ export const PROFILE_LABELS: Record<ProfileKind, string> = {
 };
 
 // Small vector helpers. Plain functions over arrays so they work in the worker and the UI alike.
-export const dot = (a: Vec3, b: Vec3) =>
-  a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+export const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export const cross = (a: Vec3, b: Vec3): Vec3 => [
   a[1] * b[2] - a[2] * b[1],
   a[2] * b[0] - a[0] * b[2],
   a[0] * b[1] - a[1] * b[0],
 ];
-export const scale = (a: Vec3, s: number): Vec3 => [
-  a[0] * s,
-  a[1] * s,
-  a[2] * s,
-];
-export const add3 = (a: Vec3, b: Vec3): Vec3 => [
-  a[0] + b[0],
-  a[1] + b[1],
-  a[2] + b[2],
-];
+export const scale = (a: Vec3, s: number): Vec3 => [a[0] * s, a[1] * s, a[2] * s];
+export const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 export const length3 = (a: Vec3) => Math.hypot(a[0], a[1], a[2]);
 export const normalize = (a: Vec3): Vec3 => scale(a, 1 / length3(a));
 
@@ -70,10 +61,7 @@ export const yDirOf = (p: SketchPlane): Vec3 => cross(p.normal, p.xDir);
 
 /** A point of the sketch, in 3D. */
 export function toWorld(p: SketchPlane, [u, v]: Point2, lift = 0): Vec3 {
-  return add3(
-    add3(add3(p.origin, scale(p.xDir, u)), scale(yDirOf(p), v)),
-    scale(p.normal, lift),
-  );
+  return add3(add3(add3(p.origin, scale(p.xDir, u)), scale(yDirOf(p), v)), scale(p.normal, lift));
 }
 
 /** A 3D point, in sketch coordinates. */
@@ -88,8 +76,7 @@ export function toSketch(p: SketchPlane, q: Vec3): Point2 {
  */
 export function axesFor(normal: Vec3): { xDir: Vec3; normal: Vec3 } {
   const n = normalize(normal);
-  if (Math.abs(n[2]) > 0.999)
-    return { xDir: [1, 0, 0], normal: [0, 0, Math.sign(n[2])] };
+  if (Math.abs(n[2]) > 0.999) return { xDir: [1, 0, 0], normal: [0, 0, Math.sign(n[2])] };
   return {
     xDir: normalize(cross([0, 0, 1], n)).map((v) => v + 0) as Vec3,
     normal: n.map((v) => v + 0) as Vec3,
@@ -131,21 +118,14 @@ export function faceOutline(points: Vec3[]): FaceOutline | null {
   let sum: Vec3 = [0, 0, 0];
   for (let i = 0; i < points.length; i += 3) {
     const [a, b, c] = [points[i]!, points[i + 1]!, points[i + 2]!];
-    sum = add3(
-      sum,
-      cross(
-        [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
-        [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
-      ),
-    );
+    sum = add3(sum, cross([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]));
   }
   if (length3(sum) < 1e-9) return null;
   const { xDir, normal } = axesFor(sum);
   const yDir = cross(normal, xDir);
   const w = dot(points[0]!, normal);
   let size = 0;
-  for (const q of points)
-    size = Math.max(size, Math.abs(dot(q, xDir)), Math.abs(dot(q, yDir)));
+  for (const q of points) size = Math.max(size, Math.abs(dot(q, xDir)), Math.abs(dot(q, yDir)));
   const tolerance = 1e-4 * Math.max(1, size);
   if (points.some((q) => Math.abs(dot(q, normal) - w) > tolerance)) return null;
 
@@ -216,20 +196,14 @@ export function profileBounds(p: Profile): [number, number, number, number] {
     case "polygon": {
       const xs = p.points.map((q) => q[0]);
       const ys = p.points.map((q) => q[1]);
-      return [
-        Math.min(...xs),
-        Math.min(...ys),
-        Math.max(...xs),
-        Math.max(...ys),
-      ];
+      return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
     }
   }
 }
 
 /** True when segment a-b crosses segment c-d (touching at a shared end doesn't count). */
 function segmentsCross(a: Point2, b: Point2, c: Point2, d: Point2): boolean {
-  const orient = (p: Point2, q: Point2, r: Point2) =>
-    (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const orient = (p: Point2, q: Point2, r: Point2) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
   const scaleOf = Math.max(1, ...[a, b, c, d].flat().map(Math.abs));
   const eps = 1e-9 * scaleOf * scaleOf;
   const sign = (v: number) => (v > eps ? 1 : v < -eps ? -1 : 0);
@@ -237,8 +211,7 @@ function segmentsCross(a: Point2, b: Point2, c: Point2, d: Point2): boolean {
   const o2 = sign(orient(a, b, d));
   const o3 = sign(orient(c, d, a));
   const o4 = sign(orient(c, d, b));
-  if (o1 !== o2 && o3 !== o4 && o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0)
-    return true;
+  if (o1 !== o2 && o3 !== o4 && o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0) return true;
   // Collinear pieces that overlap, or a corner lying on another edge.
   const onSegment = (p: Point2, q: Point2, r: Point2) =>
     Math.min(p[0], q[0]) - 1e-9 <= r[0] &&
@@ -259,15 +232,7 @@ export function selfIntersects(points: Point2[]): boolean {
     for (let j = i + 1; j < n; j++) {
       const neighbours = j === i + 1 || (i === 0 && j === n - 1);
       if (neighbours) continue;
-      if (
-        segmentsCross(
-          points[i]!,
-          points[(i + 1) % n]!,
-          points[j]!,
-          points[(j + 1) % n]!,
-        )
-      )
-        return true;
+      if (segmentsCross(points[i]!, points[(i + 1) % n]!, points[j]!, points[(j + 1) % n]!)) return true;
     }
   }
   return false;

@@ -1,12 +1,5 @@
 // Finding the faces of a displayed mesh, so a face can be clicked and sketched on.
-import {
-  faceOutline,
-  type FaceOutline,
-  type SketchPlane,
-  type Vec3,
-  dot,
-  toSketch,
-} from "@studio3d/document";
+import { faceOutline, type FaceOutline, type SketchPlane, type Vec3, dot, toSketch } from "@studio3d/document";
 import type { MeshData } from "./protocol";
 
 type FaceMesh = Pick<MeshData, "positions" | "indices" | "faces">;
@@ -30,29 +23,19 @@ export function facePoints(mesh: FaceMesh, face: number): Vec3[] {
   const out: Vec3[] = [];
   for (let i = start; i < start + count; i++) {
     const v = mesh.indices[i]! * 3;
-    out.push([
-      mesh.positions[v]!,
-      mesh.positions[v + 1]!,
-      mesh.positions[v + 2]!,
-    ]);
+    out.push([mesh.positions[v]!, mesh.positions[v + 1]!, mesh.positions[v + 2]!]);
   }
   return out;
 }
 
 /** A face as a sketch surface, or null when it is curved. */
-export const outlineOfFace = (
-  mesh: FaceMesh,
-  face: number,
-): FaceOutline | null => faceOutline(facePoints(mesh, face));
+export const outlineOfFace = (mesh: FaceMesh, face: number): FaceOutline | null => faceOutline(facePoints(mesh, face));
 
 /**
  * Everything of the part that lies flat in a sketch's surface, drawn in sketch coordinates.
  * Used to show the face under a sketch again when it is edited later, after the part has changed.
  */
-export function trianglesInPlane(
-  mesh: FaceMesh,
-  plane: SketchPlane,
-): [number, number][] {
+export function trianglesInPlane(mesh: FaceMesh, plane: SketchPlane): [number, number][] {
   const out: [number, number][] = [];
   const w = dot(plane.origin, plane.normal);
   for (let f = 0; f < faceCount(mesh); f++) {

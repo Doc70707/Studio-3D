@@ -14,8 +14,7 @@ export function checkBinaryStl(buf: ArrayBuffer): StlReport {
   const view = new DataView(buf);
   if (buf.byteLength < 84) throw new Error("STL too short");
   const n = view.getUint32(80, true);
-  if (buf.byteLength !== 84 + n * 50)
-    throw new Error(`STL size mismatch: header says ${n} triangles`);
+  if (buf.byteLength !== 84 + n * 50) throw new Error(`STL size mismatch: header says ${n} triangles`);
 
   const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
   const ids = new Map<string, number>();
@@ -38,20 +37,12 @@ export function checkBinaryStl(buf: ArrayBuffer): StlReport {
       const y = view.getFloat32(o + v * 12 + 4, true);
       const z = view.getFloat32(o + v * 12 + 8, true);
       p.push([x, y, z]);
-      min[0] = Math.min(min[0], x);
-      min[1] = Math.min(min[1], y);
-      min[2] = Math.min(min[2], z);
-      max[0] = Math.max(max[0], x);
-      max[1] = Math.max(max[1], y);
-      max[2] = Math.max(max[2], z);
+      min[0] = Math.min(min[0], x); min[1] = Math.min(min[1], y); min[2] = Math.min(min[2], z);
+      max[0] = Math.max(max[0], x); max[1] = Math.max(max[1], y); max[2] = Math.max(max[2], z);
     }
     const [a, b, c] = p as [number[], number[], number[]];
     // Signed volume of the tetrahedron with the origin (divergence theorem).
-    volume +=
-      (a[0]! * (b[1]! * c[2]! - b[2]! * c[1]!) -
-        a[1]! * (b[0]! * c[2]! - b[2]! * c[0]!) +
-        a[2]! * (b[0]! * c[1]! - b[1]! * c[0]!)) /
-      6;
+    volume += (a[0]! * (b[1]! * c[2]! - b[2]! * c[1]!) - a[1]! * (b[0]! * c[2]! - b[2]! * c[0]!) + a[2]! * (b[0]! * c[1]! - b[1]! * c[0]!)) / 6;
     const vi = p.map((q) => id(q[0]!, q[1]!, q[2]!));
     for (let e = 0; e < 3; e++) {
       const k = `${vi[e]}>${vi[(e + 1) % 3]}`;
