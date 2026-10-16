@@ -38,6 +38,11 @@ What works today:
   threaded rod; a hole, or a cylinder that cuts, becomes a threaded hole a bolt screws into. A fit clearance (0.3 mm by
   default) leaves room so printed threads turn, and a test screws a printed-size bolt into its hole to check they
   never touch. Every thread's volume is checked against the exact ISO maths.
+- Select and move: click any piece of the part (a shape, hole, sketch or hollow) to select it. It lights up, its
+  settings open in the panel, and the clicked face is named, with a button to sketch on it. Drag the coloured arrows to
+  move it (whole millimetres, or tenths with Shift), nudge it with the arrow keys and Page Up / Page Down, or remove it
+  with Delete. Every face of the finished part is traced back to the step that made it, by checking it lies exactly on
+  that step's own solid.
 - Measurements in the 3D view: the part's width, depth and height are labelled, and the shape or hole you're editing
   shows its size and its distance from the part's edges. The status bar shows exactly where the pointer is on the part.
   The Sizes button (or M) turns the labels off and on.

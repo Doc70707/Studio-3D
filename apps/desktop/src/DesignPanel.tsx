@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_FIT,
   FIELD_LABELS,
@@ -66,11 +66,28 @@ interface Props {
   picking: boolean;
   /** Tells which shape or hole is being worked on, so the 3D view can show its measurements. */
   onFocus: (id: string | null) => void;
+  /** The step picked in the 3D view (or by opening its card); its card opens and scrolls into sight. */
+  selected: string | null;
+  onSelect: (id: string | null) => void;
 }
 
 /** The left panel: every shape in the part, then its holes, then the measurements. */
 export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
-  { doc, holes, issues, measurements, builtDoc, stale, onChange, onAdd, onRemove, onFocus, ...sketching },
+  {
+    doc,
+    holes,
+    issues,
+    measurements,
+    builtDoc,
+    stale,
+    onChange,
+    onAdd,
+    onRemove,
+    onFocus,
+    selected: picked,
+    onSelect,
+    ...sketching
+  },
   ref,
 ) {
   const shapes = shapesOf(doc);
@@ -82,6 +99,24 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
   const [holeFocus, setHoleFocus] = useState<string | null>(null);
   const focused = holes.some((h) => h.id === holeFocus) ? holeFocus : open;
   useEffect(() => onFocus(focused), [focused, onFocus]);
+  // A piece clicked in the 3D view opens its card and brings it into sight.
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!picked) return;
+    const f = doc.features.find((x) => x.id === picked);
+    if (f?.type === "hole") setHoleFocus(picked);
+    else if (f) {
+      setHoleFocus(null);
+      if (f.type !== "sketch" && f.type !== "hollow") setSelected(picked);
+    }
+    requestAnimationFrame(() =>
+      scroller.current
+        ?.querySelector(`[data-feature-id="${picked}"]`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+    );
+    // Only when another piece is picked, not on every edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked]);
   const general = issues.filter((i) => i.featureId === undefined);
   // New shapes go in the middle of the part, standing on top of it, so they are easy to see.
   const where = measurements
@@ -97,11 +132,12 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
     onAdd(s);
     setSelected(s.id);
     setHoleFocus(null);
+    onSelect(s.id);
   };
 
   return (
     <aside className="panel glass" aria-label="Design" ref={ref}>
-      <div className="panel-scroll">
+      <div className="panel-scroll" ref={scroller}>
         <h2>Part</h2>
         <p className="lead">Build your part from shapes. Each one adds material or cuts it away.</p>
 
@@ -113,10 +149,12 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               first={doc.features[0]?.id === s.id}
               only={solidCount === 1}
               open={s.id === open}
+              picked={s.id === picked}
               issues={issues.filter((x) => x.featureId === s.id)}
               onOpen={() => {
                 setSelected(s.id === open ? null : s.id);
                 setHoleFocus(null);
+                onSelect(s.id === open ? null : s.id);
               }}
               onChange={(patch) => onChange(s.id, patch)}
               onRemove={() => onRemove(s.id)}
@@ -174,6 +212,8 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
             <SketchCard
               key={sk.id}
               sketch={sk}
+              picked={sk.id === picked}
+              onPick={() => onSelect(sk.id)}
               first={doc.features[0]?.id === sk.id}
               only={solidCount === 1}
               issues={issues.filter((i) => i.featureId === sk.id)}
@@ -204,6 +244,8 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
             <HollowCard
               key={h.id}
               hollow={h}
+              picked={h.id === picked}
+              onPick={() => onSelect(h.id)}
               issues={issues.filter((i) => i.featureId === h.id)}
               onChange={(patch) => onChange(h.id, patch)}
               onRemove={() => onRemove(h.id)}
@@ -229,7 +271,11 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               key={h.id}
               hole={h}
               focused={h.id === focused}
-              onFocus={() => setHoleFocus(h.id)}
+              picked={h.id === picked}
+              onFocus={() => {
+                setHoleFocus(h.id);
+                if (h.id !== picked) onSelect(h.id);
+              }}
               issues={issues.filter((i) => i.featureId === h.id)}
               onChange={(patch) => onChange(h.id, patch)}
               onRemove={() => onRemove(h.id)}
@@ -271,6 +317,7 @@ function ShapeCard(props: {
   first: boolean;
   only: boolean;
   open: boolean;
+  picked: boolean;
   issues: Issue[];
   onOpen: () => void;
   onChange: (patch: Patch) => void;
@@ -282,7 +329,11 @@ function ShapeCard(props: {
   const bad = hasErrors(issues);
   const loose = issues.filter((i) => i.field === null || i.field === "mode" || (!props.open && i.field !== null));
   return (
-    <div className={`shape-card${props.open ? " open" : ""}${bad ? " has-error" : ""}`} data-testid="shape">
+    <div
+      className={`shape-card${props.open ? " open" : ""}${props.picked ? " picked" : ""}${bad ? " has-error" : ""}`}
+      data-testid="shape"
+      data-feature-id={s.id}
+    >
       <div className="shape-head">
         <button type="button" className="shape-toggle" aria-expanded={props.open} onClick={props.onOpen}>
           <span className={`mode-dot ${s.mode}`} aria-hidden="true" />
@@ -392,6 +443,8 @@ const surfaceWord = (sk: SketchFeature) => (sk.surface === "plate" ? "plate" : "
 /** The hollow step: how thick the walls are and which side is left open. */
 function HollowCard(props: {
   hollow: HollowFeature;
+  picked: boolean;
+  onPick: () => void;
   issues: Issue[];
   onChange: (patch: Patch) => void;
   onRemove: () => void;
@@ -402,7 +455,12 @@ function HollowCard(props: {
   const openIssue = issues.find((i) => i.field === "open");
   const general = issues.filter((i) => i.field !== "open" && i.field !== "wall");
   return (
-    <div className={`shape-card open${hasErrors(issues) ? " has-error" : ""}`} data-testid="hollow">
+    <div
+      className={`shape-card open${props.picked ? " picked" : ""}${hasErrors(issues) ? " has-error" : ""}`}
+      data-testid="hollow"
+      data-feature-id={h.id}
+      onPointerDown={props.onPick}
+    >
       <div className="shape-head">
         <span className="shape-toggle static">
           <span className="mode-dot cut" aria-hidden="true" />
@@ -466,6 +524,8 @@ function HollowCard(props: {
 /** A sketch in the list: what it does and how far, with the drawing itself edited on the sketch screen. */
 function SketchCard(props: {
   sketch: SketchFeature;
+  picked: boolean;
+  onPick: () => void;
   first: boolean;
   only: boolean;
   issues: Issue[];
@@ -482,7 +542,12 @@ function SketchCard(props: {
     sk.mode === "add" ? `out ${mm(sk.depth)} mm` : sk.depth === 0 ? "cut through" : `cut ${mm(sk.depth)} mm deep`;
   const canCut = !props.first && sk.surface !== "plate";
   return (
-    <div className={`shape-card open${hasErrors(issues) ? " has-error" : ""}`} data-testid="sketch">
+    <div
+      className={`shape-card open${props.picked ? " picked" : ""}${hasErrors(issues) ? " has-error" : ""}`}
+      data-testid="sketch"
+      data-feature-id={sk.id}
+      onPointerDown={props.onPick}
+    >
       <div className="shape-head">
         <span className="shape-toggle static">
           <span className={`mode-dot ${sk.mode}`} aria-hidden="true" />
@@ -569,6 +634,7 @@ function SketchCard(props: {
 function HoleCard(props: {
   hole: HoleFeature;
   focused: boolean;
+  picked: boolean;
   onFocus: () => void;
   issues: Issue[];
   onChange: (patch: Patch) => void;
@@ -579,8 +645,9 @@ function HoleCard(props: {
   const issueFor = (field: keyof HoleFeature) => issues.find((i) => i.field === field);
   return (
     <div
-      className={`hole-card${props.focused ? " focused" : ""}`}
+      className={`hole-card${props.focused ? " focused" : ""}${props.picked ? " picked" : ""}`}
       data-testid="hole"
+      data-feature-id={hole.id}
       onFocusCapture={props.onFocus}
       onPointerDown={props.onFocus}
     >

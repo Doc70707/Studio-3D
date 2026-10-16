@@ -5,6 +5,7 @@ import {
   canUndo,
   emptyPreserved,
   holesOf,
+  moveFeature as moved,
   newDocument,
   parseProject,
   record,
@@ -18,7 +19,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.9.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.10.0" };
 
 const fingerprint = (doc: ProjectDocument) => JSON.stringify(doc);
 
@@ -80,6 +81,13 @@ export function useProject() {
 
   const removeFeature = useCallback(
     (id: string) => edit((d) => ({ ...d, features: d.features.filter((f) => f.id !== id) }), null),
+    [edit],
+  );
+
+  /** Moves one step by some millimetres. Each move is its own undo step. */
+  const moveFeature = useCallback(
+    (id: string, by: [number, number, number]) =>
+      edit((d) => ({ ...d, features: d.features.map((f) => (f.id === id ? moved(f, by) : f)) }), null),
     [edit],
   );
 
@@ -181,6 +189,7 @@ export function useProject() {
       updateFeature,
       addFeature,
       removeFeature,
+      moveFeature,
       undo,
       redo,
       canUndo: undoable,
@@ -201,6 +210,7 @@ export function useProject() {
       updateFeature,
       addFeature,
       removeFeature,
+      moveFeature,
       undo,
       redo,
       undoable,
