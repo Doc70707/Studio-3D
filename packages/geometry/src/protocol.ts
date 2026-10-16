@@ -7,6 +7,8 @@ export interface MeshData {
   indices: Uint32Array;
   /** Pairs of points for the shape's edges (line segments). */
   edges: Float32Array;
+  /** The faces of the shape: [first index, index count] pairs into `indices`, one pair per face. */
+  faces: Uint32Array;
 }
 
 export interface Measurements {

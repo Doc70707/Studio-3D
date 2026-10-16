@@ -18,7 +18,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.4.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.5.0" };
 
 const fingerprint = (doc: ProjectDocument) => JSON.stringify(doc);
 
@@ -48,22 +48,28 @@ export function useProject() {
 
   /** Changes some numbers (or the add/cut mode) of one shape or hole. Typing in one field is one undo step. */
   const updateFeature = useCallback(
-    (id: string, patch: Partial<Record<string, number | string>>) =>
+    (id: string, patch: Record<string, unknown>) =>
       edit(
-        (d) => ({ ...d, features: d.features.map((f) => (f.id === id ? ({ ...f, ...patch } as Feature) : f)) }),
+        (d) => ({
+          ...d,
+          features: d.features.map((f) => (f.id === id ? ({ ...f, ...patch } as Feature) : f)),
+        }),
         `${id}.${Object.keys(patch).join()}`,
       ),
     [edit],
   );
 
-  /** Adds a new shape before the holes (holes are always drilled last), or a hole at the end. */
+  /** Adds a new shape before the holes (holes are drilled after shapes), or a hole or sketch at the end. */
   const addFeature = useCallback(
     (feature: Feature) =>
       edit((d) => {
-        if (feature.type === "hole") return { ...d, features: [...d.features, feature] };
+        if (feature.type === "hole" || feature.type === "sketch") return { ...d, features: [...d.features, feature] };
         const firstHole = d.features.findIndex((f) => f.type === "hole");
         const at = firstHole === -1 ? d.features.length : firstHole;
-        return { ...d, features: [...d.features.slice(0, at), feature, ...d.features.slice(at)] };
+        return {
+          ...d,
+          features: [...d.features.slice(0, at), feature, ...d.features.slice(at)],
+        };
       }, null),
     [edit],
   );
@@ -81,7 +87,10 @@ export function useProject() {
     try {
       await task();
     } catch (e) {
-      setNotice({ kind: "error", text: e instanceof Error ? e.message : String(e) });
+      setNotice({
+        kind: "error",
+        text: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setBusy(false);
     }
@@ -114,7 +123,10 @@ export function useProject() {
         if (!opened) return;
         const parsed = parseProject(opened.text);
         if (!parsed.ok) {
-          setNotice({ kind: "error", text: `Couldn't open ${opened.file.name}. ${parsed.error}` });
+          setNotice({
+            kind: "error",
+            text: `Couldn't open ${opened.file.name}. ${parsed.error}`,
+          });
           return;
         }
         preserved.current = parsed.preserved;
@@ -140,7 +152,10 @@ export function useProject() {
         if (!saved) return;
         setFile(saved);
         setSavedPrint(fingerprint(snapshot));
-        setNotice({ kind: "info", text: platform.kind === "desktop" ? `Saved ${saved.name}.` : `Downloaded ${saved.name}.` });
+        setNotice({
+          kind: "info",
+          text: platform.kind === "desktop" ? `Saved ${saved.name}.` : `Downloaded ${saved.name}.`,
+        });
       }),
     [doc, file, name, run],
   );

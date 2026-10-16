@@ -1,9 +1,11 @@
-import { forwardRef, useEffect, useId, useState } from "react";
+import { forwardRef, useState } from "react";
 import {
   FIELD_LABELS,
   SHAPES,
   SIZE_FIELDS,
+  PROFILE_LABELS,
   hasErrors,
+  isSolidStep,
   newHole,
   newShape,
   shapesOf,
@@ -15,9 +17,11 @@ import {
   type ProjectDocument,
   type ShapeFeature,
   type ShapeType,
+  type SketchFeature,
 } from "@studio3d/document";
 import type { Measurements } from "@studio3d/geometry";
 import { Icon } from "./Icon";
+import { NumberField } from "./NumberField";
 
 const HELP: Record<string, string> = {
   width: "Left to right, along the red X axis.",
@@ -33,7 +37,7 @@ const HELP: Record<string, string> = {
 
 const SHAPE_ORDER: ShapeType[] = ["box", "cylinder", "tube", "cone", "sphere"];
 
-type Patch = Partial<Record<string, number | string>>;
+type Patch = Record<string, unknown>;
 
 interface Props {
   doc: ProjectDocument;
@@ -47,14 +51,21 @@ interface Props {
   onChange: (id: string, patch: Patch) => void;
   onAdd: (feature: Feature) => void;
   onRemove: (id: string) => void;
+  onSketchOnFace: () => void;
+  onSketchOnPlate: () => void;
+  onEditSketch: (id: string) => void;
+  /** Waiting for a face to be clicked. */
+  picking: boolean;
 }
 
 /** The left panel: every shape in the part, then its holes, then the measurements. */
 export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
-  { doc, holes, issues, measurements, builtDoc, stale, onChange, onAdd, onRemove },
+  { doc, holes, issues, measurements, builtDoc, stale, onChange, onAdd, onRemove, ...sketching },
   ref,
 ) {
   const shapes = shapesOf(doc);
+  const sketches = doc.features.filter((f): f is SketchFeature => f.type === "sketch");
+  const solidCount = doc.features.filter(isSolidStep).length;
   const [selected, setSelected] = useState<string | null>(shapes[0]?.id ?? null);
   const open = shapes.some((s) => s.id === selected) ? selected : (shapes[0]?.id ?? null);
   const general = issues.filter((i) => i.featureId === undefined);
@@ -80,12 +91,12 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
         <p className="lead">Build your part from shapes. Each one adds material or cuts it away.</p>
 
         <section aria-label="Shapes">
-          {shapes.map((s, i) => (
+          {shapes.map((s) => (
             <ShapeCard
               key={s.id}
               shape={s}
-              first={i === 0}
-              only={shapes.length === 1}
+              first={doc.features[0]?.id === s.id}
+              only={solidCount === 1}
               open={s.id === open}
               issues={issues.filter((x) => x.featureId === s.id)}
               onOpen={() => setSelected(s.id === open ? null : s.id)}
@@ -115,6 +126,46 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
           </p>
         ))}
 
+        <section className="sketches" aria-label="Sketches">
+          <div className="section-head">
+            <h3>Sketches</h3>
+          </div>
+          <div className="add-row" role="group" aria-label="Start a sketch">
+            <button
+              type="button"
+              className="add"
+              aria-pressed={sketching.picking}
+              onClick={sketching.onSketchOnFace}
+              disabled={!measurements}
+            >
+              <Icon name="face" />
+              Sketch on a face
+            </button>
+            <button type="button" className="add" onClick={sketching.onSketchOnPlate}>
+              <Icon name="pencil" />
+              Draw on the plate
+            </button>
+          </div>
+          {sketches.length === 0 && (
+            <p className="help">
+              Draw rectangles, circles or any outline on a flat face, then push it out (for a bracket or a boss) or cut
+              it in (for a pocket, slot or hole).
+            </p>
+          )}
+          {sketches.map((sk) => (
+            <SketchCard
+              key={sk.id}
+              sketch={sk}
+              first={doc.features[0]?.id === sk.id}
+              only={solidCount === 1}
+              issues={issues.filter((i) => i.featureId === sk.id)}
+              onChange={(patch) => onChange(sk.id, patch)}
+              onEdit={() => sketching.onEditSketch(sk.id)}
+              onRemove={() => onRemove(sk.id)}
+            />
+          ))}
+        </section>
+
         <section className="holes" aria-label="Holes">
           <div className="section-head">
             <h3>Holes</h3>
@@ -124,7 +175,9 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
             </button>
           </div>
           {holes.length === 0 && (
-            <p className="help">Add a hole for a screw, a drain or a cable. Holes go straight down from the top of the part.</p>
+            <p className="help">
+              Add a hole for a screw, a drain or a cable. Holes go straight down from the top of the part.
+            </p>
           )}
           {holes.map((h) => (
             <HoleCard
@@ -213,7 +266,11 @@ function ShapeCard(props: {
               aria-pressed={s.mode === "cut"}
               onClick={() => onChange({ mode: "cut" })}
               disabled={props.first}
-              title={props.first ? "The first shape is what the others add to or cut from" : "Cut this shape away from the part"}
+              title={
+                props.first
+                  ? "The first shape is what the others add to or cut from"
+                  : "Cut this shape away from the part"
+              }
             >
               Cut away
             </button>
@@ -265,7 +322,117 @@ function ShapeCard(props: {
   );
 }
 
-function HoleCard(props: { hole: HoleFeature; issues: Issue[]; onChange: (patch: Patch) => void; onRemove: () => void }) {
+const surfaceWord = (sk: SketchFeature) => (sk.surface === "plate" ? "plate" : "face");
+
+/** A sketch in the list: what it does and how far, with the drawing itself edited on the sketch screen. */
+function SketchCard(props: {
+  sketch: SketchFeature;
+  first: boolean;
+  only: boolean;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const { sketch: sk, issues, onChange } = props;
+  const counts = new Map<string, number>();
+  for (const p of sk.profiles) counts.set(PROFILE_LABELS[p.kind], (counts.get(PROFILE_LABELS[p.kind]) ?? 0) + 1);
+  const what =
+    [...counts].map(([label, n]) => `${n} ${label.toLowerCase()}${n === 1 ? "" : "s"}`).join(", ") || "empty";
+  const how =
+    sk.mode === "add" ? `out ${mm(sk.depth)} mm` : sk.depth === 0 ? "cut through" : `cut ${mm(sk.depth)} mm deep`;
+  const canCut = !props.first && sk.surface !== "plate";
+  return (
+    <div className={`shape-card open${hasErrors(issues) ? " has-error" : ""}`} data-testid="sketch">
+      <div className="shape-head">
+        <span className="shape-toggle static">
+          <span className={`mode-dot ${sk.mode}`} aria-hidden="true" />
+          <span className="shape-name">{sk.name}</span>
+          <span className="shape-summary">
+            On the {sk.surface} · {what} · {how}
+          </span>
+        </span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Edit ${sk.name}`}
+          title="Edit the drawing"
+          onClick={props.onEdit}
+        >
+          <Icon name="pencil" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Remove ${sk.name}`}
+          title={props.only ? "A part needs at least one shape" : "Remove this sketch"}
+          onClick={props.onRemove}
+          disabled={props.only}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+      <div className="shape-body">
+        <div className="segmented-small" role="group" aria-label={`${sk.name} pushes out or cuts in`}>
+          <button
+            type="button"
+            aria-pressed={sk.mode === "add"}
+            onClick={() => onChange({ mode: "add", depth: sk.depth || 5 })}
+          >
+            Push out
+          </button>
+          <button
+            type="button"
+            aria-pressed={sk.mode === "cut"}
+            onClick={() => onChange({ mode: "cut" })}
+            disabled={!canCut}
+            title={canCut ? "Cut the drawing into the part" : "Only a sketch on a face of the part can cut into it"}
+          >
+            Cut in
+          </button>
+        </div>
+        {!(sk.mode === "cut" && sk.depth === 0) && (
+          <NumberField
+            label={sk.mode === "add" ? "Height" : "Depth"}
+            name={`${sk.name} ${sk.mode === "add" ? "height" : "depth"}`}
+            help={
+              sk.mode === "add"
+                ? `How far it sticks out of the ${surfaceWord(sk)}.`
+                : `How far it cuts into the ${surfaceWord(sk)}.`
+            }
+            value={sk.depth}
+            issue={issues.find((i) => i.field === "depth")}
+            onCommit={(v) => onChange({ depth: v })}
+          />
+        )}
+        {sk.mode === "cut" && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={sk.depth === 0}
+              onChange={(e) => onChange({ depth: e.target.checked ? 0 : 5 })}
+            />
+            All the way through
+          </label>
+        )}
+      </div>
+      {issues
+        .filter((i) => i.field !== "depth" || (sk.mode === "cut" && sk.depth === 0))
+        .map((i) => (
+          <p key={i.message} className={`issue ${i.severity}`} role={i.severity === "error" ? "alert" : undefined}>
+            {i.message}
+          </p>
+        ))}
+    </div>
+  );
+}
+
+function HoleCard(props: {
+  hole: HoleFeature;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  onRemove: () => void;
+}) {
   const { hole, issues, onChange } = props;
   const through = hole.depth === 0;
   const issueFor = (field: keyof HoleFeature) => issues.find((i) => i.field === field);
@@ -330,81 +497,6 @@ function HoleCard(props: { hole: HoleFeature; issues: Issue[]; onChange: (patch:
       ))}
     </div>
   );
-}
-
-function NumberField(props: {
-  label: string;
-  /** Accessible name when the visible label alone is ambiguous, e.g. "Hole 1 diameter". */
-  name?: string;
-  help?: string;
-  value: number;
-  issue?: Issue;
-  onCommit: (v: number) => void;
-  /** Compact fields show no help or message underneath; the caller shows messages instead. */
-  compact?: boolean;
-}) {
-  const id = useId();
-  const [text, setText] = useState(String(props.value));
-  const [typingError, setTypingError] = useState<string | null>(null);
-
-  // Follow outside changes (open, new project, undo) without fighting the user's typing.
-  useEffect(() => {
-    if (parse(text) !== props.value) {
-      setText(String(props.value));
-      setTypingError(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.value]);
-
-  const message = typingError ?? props.issue?.message;
-  const severity = typingError ? "error" : props.issue?.severity;
-  return (
-    <div className={props.compact ? "field compact" : "field"}>
-      <label htmlFor={id}>{props.label}</label>
-      <div className="input-row">
-        <input
-          id={id}
-          inputMode="decimal"
-          value={text}
-          aria-label={props.name}
-          aria-invalid={severity === "error"}
-          aria-describedby={props.help ? `${id}-help` : undefined}
-          onChange={(e) => {
-            setText(e.target.value);
-            const v = parse(e.target.value);
-            if (v === null) setTypingError(`${props.label} needs to be a number, like 12 or 2.5.`);
-            else {
-              setTypingError(null);
-              props.onCommit(v);
-            }
-          }}
-        />
-        <span className="unit">mm</span>
-      </div>
-      {props.compact ? (
-        typingError && (
-          <p className="issue error" role="alert">
-            {typingError}
-          </p>
-        )
-      ) : message ? (
-        <p className={`issue ${severity}`} role={severity === "error" ? "alert" : undefined}>
-          {message}
-        </p>
-      ) : (
-        <p id={`${id}-help`} className="help">
-          {props.help}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function parse(text: string): number | null {
-  const t = text.trim().replace(",", ".");
-  if (!/^-?\d*\.?\d+$|^-?\d+\.$/.test(t)) return null;
-  const v = Number(t);
-  return Number.isFinite(v) ? v : null;
 }
 
 function Facts({ box, measurements }: { box: BoxFeature | null; measurements: Measurements | null }) {

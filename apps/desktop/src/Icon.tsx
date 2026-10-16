@@ -11,12 +11,25 @@ const PATHS = {
   trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
   undo: "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3",
   redo: "M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3",
+  pencil: "M4 20l4-1 11-11-3-3L5 16zM14 7l3 3",
+  pointer: "M6 3l12 9-5 1 3 6-2 1-3-6-4 3z",
+  rectangle: "M4 6h16v12H4z",
+  circle: "M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z",
+  polygon: "M5 18L8 5l11 4-3 9z",
+  face: "M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8",
 } as const;
 
 export function Icon({ name }: { name: keyof typeof PATHS }) {
   return (
     <svg className="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-      <path d={PATHS[name]} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d={PATHS[name]}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

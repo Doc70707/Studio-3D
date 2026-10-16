@@ -34,6 +34,7 @@ self.onmessage = async (ev: MessageEvent<Request>) => {
       mesh.normals.buffer,
       mesh.indices.buffer,
       mesh.edges.buffer,
+      mesh.faces.buffer,
     ]);
   } else if (req.kind === "exportStl") {
     if (!lastGood) return post({ id: req.id, kind: "stl", ok: false, error: "There's no valid model to export yet." });
