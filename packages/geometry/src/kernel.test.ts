@@ -29,6 +29,7 @@ import {
 import { faceCount, faceOfTriangle, outlineOfFace, trianglesInPlane } from "./faces";
 import {
   PLATE_PLANE,
+  offsetProfile,
   newSketch,
   toWorld,
   type Feature,
@@ -587,6 +588,31 @@ describe("sketches", () => {
       area += Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
     }
     expect(area).toBeCloseTo(60 * 40 - 200, 6); // the top face, minus the pocket's opening
+  });
+
+  it("an outline with an offset copy inside it makes a frame (the inner one is a hole)", () => {
+    const outer = rect(0, 0, 40, 30);
+    const inner = offsetProfile(outer, -3)!;
+    const r = designed({ units: "mm", features: [sketch(null, [outer, inner], "add", 10)] });
+    expect(rel(r.measurements.volume, (40 * 30 - 34 * 24) * 10)).toBeLessThan(1e-9);
+  });
+
+  it("a washer: a circle with a smaller circle inside, and an island inside the hole", () => {
+    const profiles: Profile[] = [
+      { kind: "circle", x: 0, y: 0, diameter: 30 },
+      { kind: "circle", x: 0, y: 0, diameter: 20 },
+      { kind: "circle", x: 0, y: 0, diameter: 6 },
+    ];
+    const r = designed({ units: "mm", features: [sketch(null, profiles, "add", 3)] });
+    expect(rel(r.measurements.volume, cyl(30, 3) - cyl(20, 3) + cyl(6, 3))).toBeLessThan(1e-9);
+    expect(r.measurements.size).toEqual([30, 30, 3]);
+  });
+
+  it("a frame-shaped cut leaves the middle standing", () => {
+    const top = faceOf([block()], "top face");
+    const outer = rect(10, 10, 30, 20);
+    const r = designed({ units: "mm", features: [block(), sketch(top, [outer, offsetProfile(outer, -2)!], "cut", 4)] });
+    expect(rel(r.measurements.volume, 72000 - (600 - 26 * 16) * 4)).toBeLessThan(1e-9);
   });
 
   it("a part made with sketches exports a watertight STL", async () => {

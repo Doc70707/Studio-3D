@@ -207,3 +207,29 @@ test("the sketch's 3D view shows it on the part", async ({ page }) => {
   await page.getByRole("button", { name: "2D", exact: true }).click();
   await expect(canvas(page)).toBeVisible();
 });
+
+test("an offset copy inside a rectangle makes a frame, and too big an offset says why", async ({ page }) => {
+  await sketchOnTop(page);
+  await page.getByRole("button", { name: "Rectangle tool" }).click();
+  await clickAt(page, 10, 10);
+  await clickAt(page, 50, 30);
+  await expect(field(page, "Rectangle width")).toHaveValue("40");
+
+  await field(page, "Offset distance").fill("-12");
+  await page.getByRole("button", { name: "Make offset copy" }).click();
+  await expect(page.getByRole("alert")).toContainText("too small to shrink by 12 mm");
+  await expect(page.getByTestId("sketch-profile")).toHaveCount(1);
+
+  await field(page, "Offset distance").fill("-3");
+  await page.getByRole("button", { name: "Make offset copy" }).click();
+  await expect(page.getByTestId("sketch-profile")).toHaveCount(2);
+  await expect(page.getByTestId("sketch-profile").nth(1)).toHaveAttribute("data-hole", "true");
+  await expect(field(page, "Rectangle width")).toHaveValue("34");
+  await expect(field(page, "Rectangle left edge")).toHaveValue("13");
+
+  await field(page, "Sketch height").fill("5");
+  await page.screenshot({ path: `${OUT}offset-frame.png` });
+  await page.getByRole("button", { name: "Done" }).click();
+  await current(page);
+  await expect(volume(page)).toHaveText(cm3(72000 + (40 * 20 - 34 * 14) * 5));
+});

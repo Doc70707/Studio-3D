@@ -12,6 +12,8 @@ import {
 import {
   PROFILE_LABELS,
   hasErrors,
+  nestingDepths,
+  offsetProfile,
   profileBounds,
   type Issue,
   type Mode,
@@ -89,6 +91,8 @@ export function SketchEditor(props: {
   const [cam, setCam] = useState<{ cx: number; cy: number; k: number } | null>(null);
   const [tool, setTool] = useState<Tool>("rectangle");
   const [selected, setSelected] = useState<number | null>(null);
+  const [offsetBy, setOffsetBy] = useState(-2);
+  const [offsetError, setOffsetError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
   const [cursor, setCursor] = useState<Point2 | null>(null);
   const drag = useRef<{
@@ -394,6 +398,24 @@ export function SketchEditor(props: {
   const up = onPlate ? "Front / back" : "Up";
   const hint = TOOLS.find((t) => t.tool === tool)!.hint;
   const sel = selected !== null ? s.profiles[selected] : undefined;
+  const depths = useMemo(() => nestingDepths(s.profiles), [s.profiles]);
+  useEffect(() => setOffsetError(null), [selected]);
+
+  const makeOffset = () => {
+    if (!sel) return;
+    const copy = offsetProfile(sel, offsetBy);
+    if (!copy) {
+      setOffsetError(
+        offsetBy < 0
+          ? `${PROFILE_LABELS[sel.kind]} ${selected! + 1} is too small to shrink by ${mm(-offsetBy)}.`
+          : `Growing this outline by ${mm(offsetBy)} makes it cross over itself.`,
+      );
+      return;
+    }
+    setOffsetError(null);
+    setProfiles([...s.profiles, copy]);
+    setSelected(s.profiles.length);
+  };
 
   return (
     <div className={`sketch-editor view-${props.view}`} data-testid="sketch-editor">
@@ -477,7 +499,14 @@ export function SketchEditor(props: {
                 draft.face && <Face face={draft.face} toScreen={toScreen} />
               )}
               {s.profiles.map((p, i) => (
-                <ProfileShape key={i} profile={p} mode={s.mode} selected={i === selected} toScreen={toScreen} />
+                <ProfileShape
+                  key={i}
+                  profile={p}
+                  mode={s.mode}
+                  hole={(depths[i] ?? 0) % 2 === 1}
+                  selected={i === selected}
+                  toScreen={toScreen}
+                />
               ))}
               <PendingShape pending={pending} cursor={cursor} toScreen={toScreen} />
               {cursor && <circle className="cursor" cx={toScreen(cursor)[0]} cy={toScreen(cursor)[1]} r={4} />}
@@ -506,6 +535,26 @@ export function SketchEditor(props: {
             onPlate={onPlate}
             onChange={(p) => setProfiles(s.profiles.map((q, i) => (i === selected ? p : q)))}
           />
+          <div className="offset-row">
+            <NumberField label="Offset by" name="Offset distance" value={offsetBy} onCommit={setOffsetBy} compact />
+            <button
+              type="button"
+              className="add"
+              onClick={makeOffset}
+              title="Add a copy of this shape, grown or shrunk on every side"
+            >
+              Make offset copy
+            </button>
+          </div>
+          {offsetError && (
+            <p className="issue error" role="alert">
+              {offsetError}
+            </p>
+          )}
+          <p className="help">
+            Minus shrinks, plus grows. A shape drawn inside another one becomes a hole
+            {(depths[selected!] ?? 0) % 2 === 1 ? " (this one is a hole)" : ""}.
+          </p>
           <p className="help">
             {onPlate
               ? "Measured from the centre of the build plate."
@@ -718,14 +767,14 @@ function outlinePath(p: Profile, toScreen: ToScreen): string {
   return "";
 }
 
-function ProfileShape(props: { profile: Profile; mode: Mode; selected: boolean; toScreen: ToScreen }) {
+function ProfileShape(props: { profile: Profile; mode: Mode; hole: boolean; selected: boolean; toScreen: ToScreen }) {
   const { profile: p, toScreen } = props;
-  const cls = `profile ${props.mode}${props.selected ? " selected" : ""}`;
+  const cls = `profile ${props.mode}${props.hole ? " hole" : ""}${props.selected ? " selected" : ""}`;
   const [x0, y0, x1, y1] = profileBounds(p);
   const bl = toScreen([x0, y0]);
   const tr = toScreen([x1, y1]);
   return (
-    <g className={cls} data-testid="sketch-profile">
+    <g className={cls} data-testid="sketch-profile" data-hole={props.hole}>
       {p.kind === "circle" ? (
         <circle cx={toScreen([p.x, p.y])[0]} cy={toScreen([p.x, p.y])[1]} r={(tr[0] - bl[0]) / 2} />
       ) : (

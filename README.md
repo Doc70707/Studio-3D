@@ -28,6 +28,8 @@ What works today:
   with sizes and distances from the face's edges shown as you draw and exact numbers to type. Then push the drawing
   out of the face (a boss, a bracket) or cut it in (a pocket, a slot, a through hole). Outlines that cross themselves
   are refused with an explanation, and every push or cut is checked against its area times its depth.
+- Offsets: make a copy of any sketched shape grown or shrunk by an exact distance on every side. A shape drawn inside
+  another becomes a hole, so an outline plus a smaller offset copy makes a frame, a rim or a washer.
 - Measurements in the 3D view: the part's width, depth and height are labelled, and the shape or hole you're editing
   shows its size and its distance from the part's edges. The status bar shows exactly where the pointer is on the part.
   The Sizes button (or M) turns the labels off and on.
@@ -39,7 +41,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: offsets, threads, print preparation.
+Not yet: hollowing a part to a wall thickness, threads, print preparation.
 
 ## Getting the Windows app (no setup needed)
 
