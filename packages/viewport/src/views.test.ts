@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { STANDARD_VIEWS, boundsRadius, fitDistance, placeCamera, viewDirection, type Bounds } from "./views";
+import {
+  STANDARD_VIEWS,
+  boundsRadius,
+  fitDistance,
+  placeCamera,
+  viewDirection,
+  type Bounds,
+} from "./views";
 
 const plate: Bounds = { min: [-128, -128, 0], max: [128, 128, 0] };
 
@@ -42,7 +49,9 @@ describe("fitDistance", () => {
       const vFov = (45 * Math.PI) / 180;
       const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
       // Angular radius of the sphere seen from distance d must not exceed half the tighter FOV.
-      expect(Math.asin(r / d)).toBeLessThanOrEqual(Math.min(vFov, hFov) / 2 + 1e-12);
+      expect(Math.asin(r / d)).toBeLessThanOrEqual(
+        Math.min(vFov, hFov) / 2 + 1e-12,
+      );
     }
   });
 

@@ -1,12 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { MAX_STEPS, MERGE_WINDOW_MS, canRedo, canUndo, record, redo, startHistory, undo } from "./history";
+import {
+  MAX_STEPS,
+  MERGE_WINDOW_MS,
+  canRedo,
+  canUndo,
+  record,
+  redo,
+  startHistory,
+  undo,
+} from "./history";
 import { newDocument, type ProjectDocument } from "./model";
 
 const withWidth = (doc: ProjectDocument, width: number): ProjectDocument => ({
   ...doc,
-  features: doc.features.map((f, i) => (i === 0 && f.type === "box" ? { ...f, width } : f)),
+  features: doc.features.map((f, i) =>
+    i === 0 && f.type === "box" ? { ...f, width } : f,
+  ),
 });
-const width = (doc: ProjectDocument) => (doc.features[0]!.type === "box" ? doc.features[0]!.width : NaN);
+const width = (doc: ProjectDocument) =>
+  doc.features[0]!.type === "box" ? doc.features[0]!.width : NaN;
 
 describe("undo / redo", () => {
   it("undoes and redoes separate changes in order", () => {
@@ -29,7 +41,8 @@ describe("undo / redo", () => {
   it("typing several characters into one field is one undo step", () => {
     const d0 = newDocument();
     let h = startHistory(d0);
-    for (const [i, w] of [1, 12, 120].entries()) h = record(h, withWidth(h.present, w), "box.width", i * 200);
+    for (const [i, w] of [1, 12, 120].entries())
+      h = record(h, withWidth(h.present, w), "box.width", i * 200);
     expect(h.past).toHaveLength(1);
     expect(undo(h).present).toBe(d0);
   });
@@ -56,7 +69,8 @@ describe("undo / redo", () => {
 
   it("keeps at most MAX_STEPS steps", () => {
     let h = startHistory(newDocument());
-    for (let i = 0; i < MAX_STEPS + 50; i++) h = record(h, withWidth(h.present, 10 + i), null, i);
+    for (let i = 0; i < MAX_STEPS + 50; i++)
+      h = record(h, withWidth(h.present, 10 + i), null, i);
     expect(h.past).toHaveLength(MAX_STEPS);
   });
 

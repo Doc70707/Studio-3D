@@ -5,7 +5,12 @@ import type { Issue, ProjectDocument } from "@studio3d/document";
 import type { Measurements, MeshData, Request, Response } from "./protocol";
 
 export type RebuildOutcome =
-  | { status: "built"; mesh: MeshData; measurements: Measurements; issues: Issue[] }
+  | {
+      status: "built";
+      mesh: MeshData;
+      measurements: Measurements;
+      issues: Issue[];
+    }
   | { status: "rejected"; issues: Issue[] }
   | { status: "superseded" };
 
@@ -35,16 +40,23 @@ export class GeometryClient {
     this.latestRebuild = id;
     const res = await this.send({ id, kind: "rebuild", document });
     if (id !== this.latestRebuild) return { status: "superseded" };
-    if (res.kind !== "rebuilt") throw new Error("Unexpected reply from the geometry engine.");
+    if (res.kind !== "rebuilt")
+      throw new Error("Unexpected reply from the geometry engine.");
     return res.ok
-      ? { status: "built", mesh: res.mesh, measurements: res.measurements, issues: res.issues }
+      ? {
+          status: "built",
+          mesh: res.mesh,
+          measurements: res.measurements,
+          issues: res.issues,
+        }
       : { status: "rejected", issues: res.issues };
   }
 
   /** Binary STL of the last valid model. */
   async exportStl(): Promise<ArrayBuffer> {
     const res = await this.send({ id: this.nextId++, kind: "exportStl" });
-    if (res.kind !== "stl") throw new Error("Unexpected reply from the geometry engine.");
+    if (res.kind !== "stl")
+      throw new Error("Unexpected reply from the geometry engine.");
     if (!res.ok) throw new Error(res.error);
     return res.data;
   }
@@ -58,7 +70,9 @@ export class GeometryClient {
     this.worker = this.createWorker();
     let resolveReady!: () => void;
     let rejectReady!: (e: Error) => void;
-    this.readyPromise = new Promise((res, rej) => ((resolveReady = res), (rejectReady = rej)));
+    this.readyPromise = new Promise(
+      (res, rej) => ((resolveReady = res), (rejectReady = rej)),
+    );
     this.readyPromise.catch(() => {}); // callers who don't await ready() shouldn't see an unhandled rejection
 
     this.worker.onmessage = (ev: MessageEvent<Response>) => {
@@ -74,7 +88,8 @@ export class GeometryClient {
     };
     this.worker.onerror = (ev) => {
       ev.preventDefault();
-      const message = "The geometry engine stopped unexpectedly. It has been restarted and your design is safe.";
+      const message =
+        "The geometry engine stopped unexpectedly. It has been restarted and your design is safe.";
       this.worker.terminate();
       this.failAll(message);
       this.start();

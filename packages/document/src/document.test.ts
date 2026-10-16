@@ -16,7 +16,11 @@ import {
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
-const box = (over: Partial<BoxFeature> = {}): BoxFeature => ({ id: "b1", ...DEFAULT_BOX, ...over });
+const box = (over: Partial<BoxFeature> = {}): BoxFeature => ({
+  id: "b1",
+  ...DEFAULT_BOX,
+  ...over,
+});
 
 describe("validateBox", () => {
   it("accepts the default box", () => {
@@ -57,11 +61,19 @@ describe("project file", () => {
   });
 
   it("records the format version", () => {
-    expect(JSON.parse(serializeProject(newDocument(), app)).formatVersion).toBe(FILE_FORMAT_VERSION);
+    expect(JSON.parse(serializeProject(newDocument(), app)).formatVersion).toBe(
+      FILE_FORMAT_VERSION,
+    );
   });
 
   it("explains damaged files instead of crashing", () => {
-    for (const text of ["", "{not json", "[]", '{"format":"something-else"}', '{"format":"studio3d-project"}']) {
+    for (const text of [
+      "",
+      "{not json",
+      "[]",
+      '{"format":"something-else"}',
+      '{"format":"studio3d-project"}',
+    ]) {
       const r = parseProject(text);
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.length).toBeGreaterThan(10);
@@ -112,7 +124,15 @@ describe("project file", () => {
 });
 
 describe("holes in project files", () => {
-  const hole = { id: "h1", type: "hole", name: "Hole 1", x: 30, y: 20, diameter: 5, depth: 0 };
+  const hole = {
+    id: "h1",
+    type: "hole",
+    name: "Hole 1",
+    x: 30,
+    y: 20,
+    diameter: 5,
+    depth: 0,
+  };
   const withFeatures = (features: unknown[]) => {
     const file = JSON.parse(serializeProject(newDocument(), app));
     file.document.features = features;
@@ -120,9 +140,16 @@ describe("holes in project files", () => {
   };
 
   it("reads a box followed by holes", () => {
-    const b = JSON.parse(serializeProject(newDocument(), app)).document.features[0];
-    const r = parseProject(withFeatures([b, hole, { ...hole, id: "h2", depth: 4 }]));
-    expect(r.ok && r.document.features.map((f) => f.type)).toEqual(["box", "hole", "hole"]);
+    const b = JSON.parse(serializeProject(newDocument(), app)).document
+      .features[0];
+    const r = parseProject(
+      withFeatures([b, hole, { ...hole, id: "h2", depth: 4 }]),
+    );
+    expect(r.ok && r.document.features.map((f) => f.type)).toEqual([
+      "box",
+      "hole",
+      "hole",
+    ]);
   });
 
   it.each([
@@ -131,7 +158,8 @@ describe("holes in project files", () => {
     [
       "a shape that neither adds nor cuts",
       () => {
-        const b = JSON.parse(serializeProject(newDocument(), app)).document.features[0];
+        const b = JSON.parse(serializeProject(newDocument(), app)).document
+          .features[0];
         return [{ ...b, mode: "melt" }];
       },
     ],
@@ -142,7 +170,8 @@ describe("holes in project files", () => {
   });
 
   it("rejects a hole with a missing number", () => {
-    const b = JSON.parse(serializeProject(newDocument(), app)).document.features[0];
+    const b = JSON.parse(serializeProject(newDocument(), app)).document
+      .features[0];
     const r = parseProject(withFeatures([b, { ...hole, diameter: "big" }]));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain("diameter");
@@ -158,16 +187,41 @@ describe("format version 2: many shapes", () => {
       document: {
         units: "mm",
         features: [
-          { id: "b", type: "box", name: "Box", width: 60, depth: 40, height: 30, wall: 2 },
-          { id: "h", type: "hole", name: "Hole 1", x: 30, y: 20, diameter: 5, depth: 0 },
+          {
+            id: "b",
+            type: "box",
+            name: "Box",
+            width: 60,
+            depth: 40,
+            height: 30,
+            wall: 2,
+          },
+          {
+            id: "h",
+            type: "hole",
+            name: "Hole 1",
+            x: 30,
+            y: 20,
+            diameter: 5,
+            depth: 0,
+          },
         ],
       },
     };
     const r = parseProject(JSON.stringify(v1));
     if (!r.ok) throw new Error(r.error);
-    expect(r.document.features[0]).toMatchObject({ type: "box", mode: "add", x: 0, y: 0, z: 0, width: 60 });
+    expect(r.document.features[0]).toMatchObject({
+      type: "box",
+      mode: "add",
+      x: 0,
+      y: 0,
+      z: 0,
+      width: 60,
+    });
     expect(r.document.features[1]).toMatchObject({ type: "hole", x: 0, y: 0 });
-    expect(JSON.parse(serializeProject(r.document, app)).formatVersion).toBe(FILE_FORMAT_VERSION);
+    expect(JSON.parse(serializeProject(r.document, app)).formatVersion).toBe(
+      FILE_FORMAT_VERSION,
+    );
   });
 
   it("saves and reopens every kind of shape exactly", () => {
@@ -191,7 +245,8 @@ describe("format version 2: many shapes", () => {
 });
 
 describe("validateShape", () => {
-  const cylinder = (over: object = {}) => ({ ...newShape(newDocument(), "cylinder"), ...over }) as ShapeFeature;
+  const cylinder = (over: object = {}) =>
+    ({ ...newShape(newDocument(), "cylinder"), ...over }) as ShapeFeature;
   it("accepts every default shape", () => {
     for (const type of ["box", "cylinder", "tube", "cone", "sphere"] as const)
       expect(validateShape(newShape(newDocument(), type))).toEqual([]);
@@ -207,8 +262,13 @@ describe("validateShape", () => {
     expect(issues[0]!.message).toContain(text);
   });
   it("a tube's inside must be smaller than its outside", () => {
-    const tube = { ...newShape(newDocument(), "tube"), innerDiameter: 25 } as ShapeFeature;
-    expect(validateShape(tube)[0]!.message).toContain("must be smaller than the outside");
+    const tube = {
+      ...newShape(newDocument(), "tube"),
+      innerDiameter: 25,
+    } as ShapeFeature;
+    expect(validateShape(tube)[0]!.message).toContain(
+      "must be smaller than the outside",
+    );
   });
   it("the first shape has to add material", () => {
     const doc = newDocument();
@@ -219,9 +279,21 @@ describe("validateShape", () => {
     const pi = Math.PI;
     const s = (type: "cylinder" | "tube" | "cone" | "sphere", over: object) =>
       ({ ...newShape(newDocument(), type), ...over }) as ShapeFeature;
-    expect(shapeVolume(s("cylinder", { diameter: 10, height: 4 }))).toBeCloseTo(pi * 25 * 4, 9);
-    expect(shapeVolume(s("tube", { outerDiameter: 10, innerDiameter: 6, height: 2 }))).toBeCloseTo(pi * (25 - 9) * 2, 9);
-    expect(shapeVolume(s("cone", { bottomDiameter: 6, topDiameter: 0, height: 9 }))).toBeCloseTo((pi * 9 * 9) / 3, 9);
-    expect(shapeVolume(s("sphere", { diameter: 6 }))).toBeCloseTo((4 / 3) * pi * 27, 9);
+    expect(shapeVolume(s("cylinder", { diameter: 10, height: 4 }))).toBeCloseTo(
+      pi * 25 * 4,
+      9,
+    );
+    expect(
+      shapeVolume(
+        s("tube", { outerDiameter: 10, innerDiameter: 6, height: 2 }),
+      ),
+    ).toBeCloseTo(pi * (25 - 9) * 2, 9);
+    expect(
+      shapeVolume(s("cone", { bottomDiameter: 6, topDiameter: 0, height: 9 })),
+    ).toBeCloseTo((pi * 9 * 9) / 3, 9);
+    expect(shapeVolume(s("sphere", { diameter: 6 }))).toBeCloseTo(
+      (4 / 3) * pi * 27,
+      9,
+    );
   });
 });

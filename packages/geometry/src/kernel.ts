@@ -1,6 +1,18 @@
 // The only module that talks to the geometry kernel (OCCT through replicad).
 // Everything else uses the plain data it returns, so the kernel can be swapped later.
-import { setOC, draw, makeBaseBox, makeCylinder, makeSphere, measureVolume, type Shape3D } from "replicad";
+import {
+  setOC,
+  draw,
+  drawCircle,
+  drawRectangle,
+  makeBaseBox,
+  makeCylinder,
+  makeSphere,
+  measureVolume,
+  Plane,
+  type Drawing,
+  type Shape3D,
+} from "replicad";
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
 import {
   hasErrors,
@@ -9,7 +21,12 @@ import {
   shapeVolume,
   validateDocument,
   validateShape,
+  add3,
+  profileArea,
+  scale,
   type BoxFeature,
+  type Profile,
+  type SketchFeature,
   type HoleFeature,
   type Issue,
   type ProjectDocument,
@@ -58,8 +75,18 @@ function makeRaw(s: ShapeFeature): Shape3D {
     case "cylinder":
       return makeCylinder(s.diameter / 2, s.height, [s.x, s.y, s.z], [0, 0, 1]);
     case "tube": {
-      const outer = makeCylinder(s.outerDiameter / 2, s.height, [s.x, s.y, s.z], [0, 0, 1]);
-      const inner = makeCylinder(s.innerDiameter / 2, s.height + 2, [s.x, s.y, s.z - 1], [0, 0, 1]);
+      const outer = makeCylinder(
+        s.outerDiameter / 2,
+        s.height,
+        [s.x, s.y, s.z],
+        [0, 0, 1],
+      );
+      const inner = makeCylinder(
+        s.innerDiameter / 2,
+        s.height + 2,
+        [s.x, s.y, s.z - 1],
+        [0, 0, 1],
+      );
       try {
         return outer.cut(inner);
       } finally {
@@ -73,14 +100,22 @@ function makeRaw(s: ShapeFeature): Shape3D {
       const r = s.topDiameter / 2;
       const pen = draw([0, 0]).lineTo([R, 0]).lineTo([r, s.height]);
       const profile = r > 0 ? pen.lineTo([0, s.height]).close() : pen.close();
-      return profile.sketchOnPlane("XZ").revolve([0, 0, 1]).translate([s.x, s.y, s.z]) as Shape3D;
+      return profile
+        .sketchOnPlane("XZ")
+        .revolve([0, 0, 1])
+        .translate([s.x, s.y, s.z]) as Shape3D;
     }
     case "sphere":
-      return makeSphere(s.diameter / 2).translate([s.x, s.y, s.z + s.diameter / 2]);
+      return makeSphere(s.diameter / 2).translate([
+        s.x,
+        s.y,
+        s.z + s.diameter / 2,
+      ]);
   }
 }
 
-const near = (a: number, b: number, scale = 1) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b), scale);
+const near = (a: number, b: number, scale = 1) =>
+  Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b), scale);
 
 /**
  * Makes one shape and checks it against the exact maths: volume and size must match,
@@ -93,10 +128,15 @@ export function makeShape(s: ShapeFeature): Shape3D {
   const bb = shape.boundingBox;
   const size = [bb.width, bb.height, bb.depth];
   const want = shapeSize(s);
-  const ok = Math.abs(volume - expected) <= 1e-6 * expected && size.every((v, i) => near(v, want[i]!));
+  const ok =
+    Math.abs(volume - expected) <= 1e-6 * expected &&
+    size.every((v, i) => near(v, want[i]!));
   if (!ok) {
     shape.delete();
-    throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
+    throw new ShapeCheckFailed(
+      `${s.name} came out wrong, so your last good version was kept.`,
+      s.id,
+    );
   }
   return shape;
 }
@@ -131,39 +171,158 @@ interface Part {
  */
 function combine(part: Part, s: ShapeFeature, issues: Issue[]): Part {
   const tool = makeShape(s);
-  const toolVolume = shapeVolume(s);
+  const v = shapeVolume(s);
+  return applyTool(part, { shape: tool, least: v, most: v }, s, issues);
+}
+
+/** A cutting or adding shape, with the range its volume must fall in. */
+interface Tool {
+  shape: Shape3D;
+  least: number;
+  most: number;
+}
+
+function applyTool(
+  part: Part,
+  tool: Tool,
+  s: { id: string; name: string; mode: "add" | "cut" },
+  issues: Issue[],
+): Part {
   let result: Shape3D;
   try {
-    result = s.mode === "add" ? part.shape.fuse(tool) : part.shape.cut(tool);
+    result =
+      s.mode === "add"
+        ? part.shape.fuse(tool.shape)
+        : part.shape.cut(tool.shape);
   } finally {
-    tool.delete();
+    tool.shape.delete();
   }
   const volume = measureVolume(result);
   const pieces = result.solids.length;
-  const eps = 1e-6 * (part.volume + toolVolume);
-  const warn = (message: string) => issues.push({ severity: "warning", featureId: s.id, field: null, message });
+  const eps = 1e-6 * (part.volume + tool.most);
+  const warn = (message: string) =>
+    issues.push({ severity: "warning", featureId: s.id, field: null, message });
 
   if (s.mode === "add") {
-    const ok = volume >= Math.max(part.volume, toolVolume) - eps && volume <= part.volume + toolVolume + eps && pieces >= 1;
+    const ok =
+      volume >= Math.max(part.volume, tool.least) - eps &&
+      volume <= part.volume + tool.most + eps &&
+      pieces >= 1;
     if (!ok) {
       result.delete();
-      throw new ShapeCheckFailed(`${s.name} came out wrong when added, so your last good version was kept.`, s.id);
+      throw new ShapeCheckFailed(
+        `${s.name} came out wrong when added, so your last good version was kept.`,
+        s.id,
+      );
     }
-    if (pieces > part.pieces) warn(`${s.name} doesn't touch the rest of the part, so it will print as a separate piece.`);
+    if (pieces > part.pieces)
+      warn(
+        `${s.name} doesn't touch the rest of the part, so it will print as a separate piece.`,
+      );
   } else {
     const removed = part.volume - volume;
     if (pieces === 0 || volume <= eps) {
       result.delete();
-      throw new ShapeCheckFailed(`${s.name} would cut away the whole part. Make it smaller or move it.`, s.id);
+      throw new ShapeCheckFailed(
+        `${s.name} would cut away the whole part. Make it smaller or move it.`,
+        s.id,
+      );
     }
-    if (removed < -eps || removed > toolVolume + eps) {
+    if (removed < -eps || removed > tool.most + eps) {
       result.delete();
-      throw new ShapeCheckFailed(`${s.name} came out wrong when cut, so your last good version was kept.`, s.id);
+      throw new ShapeCheckFailed(
+        `${s.name} came out wrong when cut, so your last good version was kept.`,
+        s.id,
+      );
     }
-    if (removed <= eps) warn(`${s.name} doesn't cut anything. Move it so it overlaps the part.`);
-    else if (pieces > part.pieces) warn(`${s.name} splits the part into ${pieces} separate pieces.`);
+    if (removed <= eps)
+      warn(`${s.name} doesn't cut anything. Move it so it overlaps the part.`);
+    else if (pieces > part.pieces)
+      warn(`${s.name} splits the part into ${pieces} separate pieces.`);
   }
   return { shape: result, volume, pieces };
+}
+
+/** One outline as a flat drawing in sketch coordinates. */
+function drawProfile(p: Profile): Drawing {
+  switch (p.kind) {
+    case "rectangle":
+      return drawRectangle(p.width, p.height).translate(
+        p.x + p.width / 2,
+        p.y + p.height / 2,
+      );
+    case "circle":
+      return drawCircle(p.diameter / 2).translate(p.x, p.y);
+    case "polygon": {
+      const [first, ...rest] = p.points;
+      let pen = draw(first!);
+      for (const q of rest) pen = pen.lineTo(q);
+      return pen.close();
+    }
+  }
+}
+
+/**
+ * Pushes a sketch's outlines into a solid. Adding grows out of the face; cutting starts 1 mm outside the
+ * face (so no paper-thin skin is left) and goes into it. Each outline is checked against its exact
+ * area times its length before the outlines are joined.
+ */
+export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
+  const cut = s.mode === "cut";
+  const extra = cut ? 1 : 0;
+  const length = (cut && s.depth === 0 ? partSize + 2 : s.depth) + extra;
+  const origin = add3(s.plane.origin, scale(s.plane.normal, extra));
+  let tool: Shape3D | null = null;
+  let least = 0;
+  let most = 0;
+  try {
+    for (const p of s.profiles) {
+      const solid = drawProfile(p)
+        .sketchOnPlane(new Plane(origin, s.plane.xDir, s.plane.normal))
+        .extrude(cut ? -length : length) as Shape3D;
+      const want = profileArea(p) * length;
+      if (Math.abs(measureVolume(solid) - want) > 1e-6 * want) {
+        solid.delete();
+        throw new ShapeCheckFailed(
+          `${s.name} came out wrong, so your last good version was kept.`,
+          s.id,
+        );
+      }
+      least = Math.max(least, want);
+      most += want;
+      if (!tool) tool = solid;
+      else {
+        const joined: Shape3D = tool.fuse(solid);
+        tool.delete();
+        solid.delete();
+        tool = joined;
+      }
+    }
+  } catch (e) {
+    tool?.delete();
+    throw e;
+  }
+  if (!tool)
+    throw new ShapeCheckFailed(
+      `${s.name} is empty. Draw at least one shape in it.`,
+      s.id,
+    );
+  const v = measureVolume(tool);
+  if (v < least * (1 - 1e-6) || v > most * (1 + 1e-6)) {
+    tool.delete();
+    throw new ShapeCheckFailed(
+      `${s.name} came out wrong, so your last good version was kept.`,
+      s.id,
+    );
+  }
+  return { shape: tool, least: v, most: v };
+}
+
+/** The longest straight line through the part's bounding box: enough to cut through anything. */
+function partSpan(part: Part | null): number {
+  if (!part) return 0;
+  const [min, max] = part.shape.boundingBox.bounds;
+  return Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
 }
 
 /**
@@ -175,12 +334,18 @@ function drill(part: Part, h: HoleFeature, issues: Issue[]): Part {
   const [min, max] = bb.bounds;
   const height = max[2] - min[2];
   const edge = holeEdgeIssues(h, min, max, height);
-  if (hasErrors(edge)) throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
+  if (hasErrors(edge))
+    throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
   issues.push(...edge);
 
   const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
   const bottom = h.depth === 0 ? min[2] - extra : max[2] - h.depth;
-  const tool = makeCylinder(h.diameter / 2, max[2] + extra - bottom, [h.x, h.y, bottom], [0, 0, 1]);
+  const tool = makeCylinder(
+    h.diameter / 2,
+    max[2] + extra - bottom,
+    [h.x, h.y, bottom],
+    [0, 0, 1],
+  );
   let result: Shape3D;
   try {
     result = part.shape.cut(tool);
@@ -190,9 +355,16 @@ function drill(part: Part, h: HoleFeature, issues: Issue[]): Part {
   const volume = measureVolume(result);
   const removed = part.volume - volume;
   const most = maxHoleVolume(h, height);
-  if (!(volume > 0) || removed > most * (1 + 1e-6) + 1e-6 || removed < -1e-6 * part.volume) {
+  if (
+    !(volume > 0) ||
+    removed > most * (1 + 1e-6) + 1e-6 ||
+    removed < -1e-6 * part.volume
+  ) {
     result.delete();
-    throw new ShapeCheckFailed(`${h.name} came out wrong, so your last good version was kept.`, h.id);
+    throw new ShapeCheckFailed(
+      `${h.name} came out wrong, so your last good version was kept.`,
+      h.id,
+    );
   }
   if (removed <= 1e-9 * part.volume) {
     issues.push({
@@ -207,7 +379,12 @@ function drill(part: Part, h: HoleFeature, issues: Issue[]): Part {
 
 function failure(e: unknown, featureId: string, name: string): Issue {
   if (e instanceof ShapeCheckFailed)
-    return { severity: "error", featureId: e.featureId ?? featureId, field: e.field, message: e.message };
+    return {
+      severity: "error",
+      featureId: e.featureId ?? featureId,
+      field: e.field,
+      message: e.message,
+    };
   return {
     severity: "error",
     featureId,
@@ -218,7 +395,11 @@ function failure(e: unknown, featureId: string, name: string): Issue {
 
 /** Builds the whole design: each step in order, checking every result. */
 export function buildDocument(doc: ProjectDocument): BuildResult {
-  if (!doc.features.length) return { ok: false, issues: [kernelIssue("There's nothing to build yet.")] };
+  if (!doc.features.length)
+    return {
+      ok: false,
+      issues: [kernelIssue("There's nothing to build yet.")],
+    };
   const issues = validateDocument(doc);
   if (hasErrors(issues)) return { ok: false, issues };
 
@@ -227,9 +408,22 @@ export function buildDocument(doc: ProjectDocument): BuildResult {
     try {
       let next: Part;
       if (f.type === "hole") next = drill(part!, f, issues);
-      else if (!part) {
+      else if (f.type === "sketch") {
+        const tool = makeSketchTool(f, partSpan(part));
+        next = part
+          ? applyTool(part, tool, f, issues)
+          : {
+              shape: tool.shape,
+              volume: measureVolume(tool.shape),
+              pieces: tool.shape.solids.length,
+            };
+      } else if (!part) {
         const shape = makeShape(f);
-        next = { shape, volume: measureVolume(shape), pieces: shape.solids.length };
+        next = {
+          shape,
+          volume: measureVolume(shape),
+          pieces: shape.solids.length,
+        };
       } else next = combine(part, f, issues);
       part?.shape.delete();
       part = next;
@@ -238,7 +432,12 @@ export function buildDocument(doc: ProjectDocument): BuildResult {
       return { ok: false, issues: [failure(e, f.id, f.name)] };
     }
   }
-  return { ok: true, shape: part!.shape, measurements: measure(part!.shape), issues };
+  return {
+    ok: true,
+    shape: part!.shape,
+    measurements: measure(part!.shape),
+    issues,
+  };
 }
 
 export function measure(shape: Shape3D): Measurements {
@@ -260,11 +459,14 @@ export function tessellate(shape: Shape3D): MeshData {
     normals: new Float32Array(m.normals),
     indices: new Uint32Array(m.triangles),
     edges: new Float32Array(e.lines),
+    faces: new Uint32Array(m.faceGroups.flatMap((g) => [g.start, g.count])),
   };
 }
 
 export async function exportStl(shape: Shape3D): Promise<ArrayBuffer> {
-  return dropDegenerateTriangles(await shape.blobSTL({ binary: true, ...STL }).arrayBuffer());
+  return dropDegenerateTriangles(
+    await shape.blobSTL({ binary: true, ...STL }).arrayBuffer(),
+  );
 }
 
 /**
@@ -287,8 +489,14 @@ export function dropDegenerateTriangles(stl: ArrayBuffer): ArrayBuffer {
   const src = new Uint8Array(stl);
   out.set(src.subarray(0, 80));
   new DataView(out.buffer).setUint32(80, keep.length, true);
-  keep.forEach((t, i) => out.set(src.subarray(84 + t * 50, 84 + (t + 1) * 50), 84 + i * 50));
+  keep.forEach((t, i) =>
+    out.set(src.subarray(84 + t * 50, 84 + (t + 1) * 50), 84 + i * 50),
+  );
   return out.buffer;
 }
 
-const kernelIssue = (message: string): Issue => ({ severity: "error", field: null, message });
+const kernelIssue = (message: string): Issue => ({
+  severity: "error",
+  field: null,
+  message,
+});
