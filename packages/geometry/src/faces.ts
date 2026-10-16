@@ -47,3 +47,15 @@ export function trianglesInPlane(mesh: FaceMesh, plane: SketchPlane): [number, n
   }
   return out;
 }
+
+/** The faces a design step made (by its feature id). Empty when the mesh doesn't say who made what. */
+export function facesOf(mesh: Pick<MeshData, "owners">, id: string): number[] {
+  const out: number[] = [];
+  mesh.owners.forEach((o, f) => o === id && out.push(f));
+  return out;
+}
+
+/** The corners of some faces' triangles, three per triangle, as one flat list for drawing. */
+export function pointsOfFaces(mesh: FaceMesh, faces: number[]): Float32Array {
+  return new Float32Array(faces.flatMap((f) => facePoints(mesh, f).flat()));
+}

@@ -3,7 +3,7 @@
 import opencascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import type { Shape3D } from "replicad";
-import { buildDocument, exportStl, tessellate, useKernel } from "./kernel";
+import { buildDocument, exportStl, faceOwners, tessellate, useKernel } from "./kernel";
 import type { Request, Response } from "./protocol";
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -46,11 +46,19 @@ function rebuildWaiting() {
   const req = waiting;
   if (!req) return;
   waiting = null;
-  const r = buildDocument(req.document);
+  const r = buildDocument(req.document, true);
   if (!r.ok) return post({ id: req.id, kind: "rebuilt", ok: false, issues: r.issues });
   lastGood?.delete();
   lastGood = r.shape;
   const mesh = tessellate(r.shape);
+  // Which step made each face, so clicking the part can pick out a piece. Not knowing never stops the model showing.
+  try {
+    mesh.owners = faceOwners(mesh, r.pieces ?? [], req.document);
+  } catch {
+    mesh.owners = [];
+  } finally {
+    r.pieces?.forEach((p) => p.shape.delete());
+  }
   post({ id: req.id, kind: "rebuilt", ok: true, mesh, measurements: r.measurements, issues: r.issues }, [
     mesh.positions.buffer,
     mesh.normals.buffer,

@@ -33,6 +33,19 @@ export interface CameraState {
 
 const FOV = 45;
 
+export type Axis = "x" | "y" | "z";
+
+/** A move in progress or finished, in mm along x (left/right), y (front/back) and z (up). */
+export interface MoveEvent {
+  phase: "move" | "end";
+  by: [number, number, number];
+}
+
+const AXIS_DIRS: Record<Axis, [number, number, number]> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+const AXIS_COLORS: Record<Axis, number> = { x: 0xf0605a, y: 0x5fd068, z: 0x5b9cff };
+/** How long the move arrows look on screen, in pixels. */
+const GIZMO_PIXELS = 90;
+
 /** True when this browser/webview can create a WebGL2 context. */
 export function isWebGLAvailable(): boolean {
   try {
@@ -63,6 +76,18 @@ export class Viewport {
   private model: THREE.Group | null = null;
   private surface: THREE.Mesh | null = null;
   private highlight: THREE.Mesh | null = null;
+  private hover: THREE.Mesh | null = null;
+  /** The selected piece (and the face clicked on it), which moves with the arrows while they are dragged. */
+  private selection: THREE.Group | null = null;
+  private gizmo: THREE.Group | null = null;
+  private gizmoAt = new THREE.Vector3();
+  private drag: {
+    axis: Axis;
+    pointerId: number;
+    start: number;
+    by: [number, number, number];
+  } | null = null;
+  private moveListeners = new Set<(e: MoveEvent) => void>();
   private sketchLines: THREE.LineSegments | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private dimensionGroup: THREE.Group | null = null;
@@ -100,6 +125,13 @@ export class Viewport {
     sun.position.set(200, -300, 400);
     this.scene.add(sun);
     this.scene.add(buildPlate(w, d));
+
+    // Dragging a move arrow comes before orbiting: registered first, on the capture phase, so the orbit never sees it.
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener("pointerdown", (e) => this.onGizmoDown(e), { capture: true });
+    canvas.addEventListener("pointermove", (e) => this.onGizmoMove(e), { capture: true });
+    canvas.addEventListener("pointerup", (e) => this.onGizmoUp(e), { capture: true });
+    canvas.addEventListener("pointercancel", (e) => this.onGizmoUp(e, true), { capture: true });
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
@@ -208,6 +240,147 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** Lightly tints the piece under the pointer (triangle corners, three per triangle). Null clears it. */
+  setHover(positions: Float32Array | null): void {
+    if (this.hover) {
+      this.scene.remove(this.hover);
+      disposeObject(this.hover);
+      this.hover = null;
+    }
+    if (positions && positions.length) {
+      this.hover = overlay(positions, 0xffffff, 0.16);
+      this.hover.name = "hover";
+      this.scene.add(this.hover);
+    }
+    this.requestRender();
+  }
+
+  /** Shows the selected piece, and more strongly the face that was clicked on it. Null clears it. */
+  setSelection(selection: { piece: Float32Array; face: Float32Array | null } | null): void {
+    if (this.selection) {
+      this.scene.remove(this.selection);
+      disposeObject(this.selection);
+      this.selection = null;
+    }
+    if (selection && selection.piece.length) {
+      const group = new THREE.Group();
+      group.name = "selection";
+      group.add(overlay(selection.piece, 0xffc94d, 0.38));
+      if (selection.face?.length) group.add(overlay(selection.face, 0xffc94d, 0.4));
+      this.scene.add(group);
+      this.selection = group;
+    }
+    this.requestRender();
+  }
+
+  /** Shows move arrows at a point, one per axis given. Null or no axes hides them. */
+  setGizmo(gizmo: { at: [number, number, number]; axes: Axis[] } | null): void {
+    if (this.drag) this.drag = null;
+    if (this.gizmo) {
+      this.scene.remove(this.gizmo);
+      disposeObject(this.gizmo);
+      this.gizmo = null;
+    }
+    if (gizmo && gizmo.axes.length) {
+      this.gizmoAt.set(...gizmo.at);
+      this.gizmo = buildGizmo(gizmo.axes);
+      this.gizmo.position.copy(this.gizmoAt);
+      this.scene.add(this.gizmo);
+    }
+    this.requestRender();
+  }
+
+  /** Called while a move arrow is dragged and once when it is let go. */
+  onMove(fn: (e: MoveEvent) => void): () => void {
+    this.moveListeners.add(fn);
+    return () => this.moveListeners.delete(fn);
+  }
+
+  /** True while a move arrow is being dragged. */
+  get moving(): boolean {
+    return this.drag !== null;
+  }
+
+  private ray(clientX: number, clientY: number): THREE.Ray {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    return this.raycaster.ray;
+  }
+
+  /** Which move arrow is under a point of the window. */
+  private gizmoAxisAt(clientX: number, clientY: number): Axis | null {
+    if (!this.gizmo) return null;
+    this.ray(clientX, clientY);
+    const handles = this.gizmo.children.filter((c) => c.userData.handle);
+    const hit = this.raycaster.intersectObjects(handles, false)[0];
+    return (hit?.object.userData.axis as Axis | undefined) ?? null;
+  }
+
+  /** How far along an axis through the gizmo the pointer is, or null when looking straight down that axis. */
+  private alongAxis(axis: Axis, clientX: number, clientY: number): number | null {
+    const ray = this.ray(clientX, clientY);
+    const dir = new THREE.Vector3(...AXIS_DIRS[axis]);
+    const w = this.gizmoAt.clone().sub(ray.origin);
+    const b = dir.dot(ray.direction);
+    const denom = 1 - b * b;
+    if (denom < 1e-4) return null;
+    return (b * ray.direction.dot(w) - dir.dot(w)) / denom;
+  }
+
+  private onGizmoDown(e: PointerEvent): void {
+    if (e.button !== 0) return;
+    const axis = this.gizmoAxisAt(e.clientX, e.clientY);
+    if (!axis) return;
+    const start = this.alongAxis(axis, e.clientX, e.clientY);
+    if (start === null) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    this.renderer.domElement.setPointerCapture(e.pointerId);
+    this.drag = { axis, pointerId: e.pointerId, start, by: [0, 0, 0] };
+  }
+
+  private onGizmoMove(e: PointerEvent): void {
+    if (!this.drag) {
+      if (!e.buttons) this.renderer.domElement.style.cursor = this.gizmoAxisAt(e.clientX, e.clientY) ? "grab" : "";
+      return;
+    }
+    if (e.pointerId !== this.drag.pointerId) return;
+    e.stopImmediatePropagation();
+    const t = this.alongAxis(this.drag.axis, e.clientX, e.clientY);
+    if (t === null) return;
+    // Whole millimetres, or tenths while Shift is held.
+    const step = e.shiftKey ? 0.1 : 1;
+    const d = Math.round((t - this.drag.start) / step) * step;
+    const by = AXIS_DIRS[this.drag.axis].map((v) => Math.round(v * d * 10) / 10 + 0) as [number, number, number];
+    this.drag.by = by;
+    const offset = new THREE.Vector3(...by);
+    this.selection?.position.copy(offset);
+    this.gizmo?.position.copy(this.gizmoAt).add(offset);
+    this.renderer.domElement.style.cursor = "grabbing";
+    this.requestRender();
+    this.moveListeners.forEach((fn) => fn({ phase: "move", by }));
+  }
+
+  private onGizmoUp(e: PointerEvent, cancelled = false): void {
+    if (!this.drag || e.pointerId !== this.drag.pointerId) return;
+    e.stopImmediatePropagation();
+    const by: [number, number, number] = cancelled ? [0, 0, 0] : this.drag.by;
+    this.drag = null;
+    this.renderer.domElement.style.cursor = "";
+    if (this.renderer.domElement.hasPointerCapture(e.pointerId))
+      this.renderer.domElement.releasePointerCapture(e.pointerId);
+    if (cancelled) {
+      this.selection?.position.set(0, 0, 0);
+      this.gizmo?.position.copy(this.gizmoAt);
+      this.requestRender();
+    }
+    this.moveListeners.forEach((fn) => fn({ phase: "end", by }));
+  }
+
   /** Draws a sketch's outlines (pairs of points) on top of everything. Null clears them. */
   setSketchLines(lines: Float32Array | null): void {
     if (this.sketchLines) {
@@ -230,7 +403,10 @@ export class Viewport {
   pickPoint(clientX: number, clientY: number): [number, number, number] | null {
     if (!this.surface) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
-    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
     this.raycaster.setFromCamera(ndc, this.camera);
     const hit = this.raycaster.intersectObject(this.surface, false)[0];
     return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
@@ -255,7 +431,12 @@ export class Viewport {
         g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
         const line = new THREE.LineSegments(
           g,
-          new THREE.LineBasicMaterial({ color: kind === "part" ? 0xdfe6f5 : 0xffc94d, depthTest: false, transparent: true, opacity: 0.85 }),
+          new THREE.LineBasicMaterial({
+            color: kind === "part" ? 0xdfe6f5 : 0xffc94d,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.85,
+          }),
         );
         line.renderOrder = 4;
         group.add(line);
@@ -377,6 +558,17 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** Keeps the move arrows the same size on screen however far away they are. */
+  private sizeGizmo(): void {
+    if (!this.gizmo) return;
+    const h = this.container.clientHeight || 1;
+    const view = this.camera.view?.enabled ? this.camera.view : null;
+    const shown = view ? view.height / view.fullHeight : 1; // the part of the camera's frame on screen
+    const distance = this.camera.position.distanceTo(this.gizmo.position);
+    const worldHeight = 2 * distance * Math.tan((this.camera.fov * Math.PI) / 360) * shown;
+    this.gizmo.scale.setScalar((GIZMO_PIXELS * worldHeight) / h);
+  }
+
   /** Moves each measurement label over the middle of its line on screen. */
   private placeLabels(): void {
     if (!this.labels.length) return;
@@ -392,7 +584,8 @@ export class Viewport {
       const x = ((p.x + 1) / 2) * w;
       let y = ((1 - p.y) / 2) * h;
       // Labels that would cover one already placed step down until they're clear, so every number stays readable.
-      const hits = (yy: number) => placed.some((q) => Math.abs(q.x - x) < (q.w + lw) / 2 && Math.abs(q.y - yy) < (q.h + lh) / 2);
+      const hits = (yy: number) =>
+        placed.some((q) => Math.abs(q.x - x) < (q.w + lw) / 2 && Math.abs(q.y - yy) < (q.h + lh) / 2);
       for (let i = 0; i < 8 && hits(y); i++) y += lh;
       placed.push({ x, y, w: lw, h: lh });
       el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
@@ -405,6 +598,7 @@ export class Viewport {
     this.frameRequested = true;
     requestAnimationFrame(() => {
       this.frameRequested = false;
+      this.sizeGizmo();
       this.renderer.render(this.scene, this.camera);
       this.placeLabels();
       const s = this.getCameraState();
@@ -418,6 +612,55 @@ function roomAround(b: Bounds): Bounds {
   const size = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
   const pad = Math.max(10, size * 0.3, (60 - size) / 2);
   return { min: [b.min[0] - pad, b.min[1] - pad, b.min[2]], max: [b.max[0] + pad, b.max[1] + pad, b.max[2] + pad] };
+}
+
+/** A see-through tint drawn over some triangles of the part. */
+function overlay(positions: Float32Array, color: number, opacity: number): THREE.Mesh {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mesh = new THREE.Mesh(
+    g,
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  mesh.renderOrder = 2;
+  return mesh;
+}
+
+/**
+ * Move arrows one unit long (scaled to a fixed size on screen), drawn over everything. Each arrow has a thicker
+ * invisible handle around it so it is easy to grab.
+ */
+function buildGizmo(axes: Axis[]): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "gizmo";
+  const up = new THREE.Vector3(0, 1, 0);
+  for (const axis of axes) {
+    const dir = new THREE.Vector3(...AXIS_DIRS[axis]);
+    const turn = new THREE.Quaternion().setFromUnitVectors(up, dir);
+    const solid = (geometry: THREE.BufferGeometry, along: number, visible = true) => {
+      const m = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({
+          color: AXIS_COLORS[axis],
+          depthTest: false,
+          depthWrite: false,
+          transparent: true,
+          opacity: visible ? 1 : 0,
+        }),
+      );
+      m.quaternion.copy(turn);
+      m.position.copy(dir).multiplyScalar(along);
+      m.renderOrder = 10;
+      m.userData.axis = axis;
+      return m;
+    };
+    group.add(solid(new THREE.CylinderGeometry(0.025, 0.025, 0.8, 8), 0.4));
+    group.add(solid(new THREE.ConeGeometry(0.08, 0.22, 16), 0.89));
+    const handle = solid(new THREE.CylinderGeometry(0.11, 0.11, 1.0, 8), 0.5, false);
+    handle.userData.handle = true;
+    group.add(handle);
+  }
+  return group;
 }
 
 function disposeObject(root: THREE.Object3D): void {

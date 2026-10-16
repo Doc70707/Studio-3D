@@ -282,6 +282,37 @@ export function newHollow(doc: ProjectDocument): HollowFeature {
   return { id: newId(), type: "hollow", name: nextName(doc, "Hollow"), wall: 2, open: "top" };
 }
 
+export type Axis = "x" | "y" | "z";
+
+/** Which ways a step can be moved: holes always go down from the top, so they only slide across it. */
+export function movableAxes(f: Feature): Axis[] {
+  if (f.type === "hollow") return [];
+  if (f.type === "hole") return ["x", "y"];
+  return ["x", "y", "z"];
+}
+
+/**
+ * The same step moved by `by` mm along x (left/right), y (front/back) and z (up). Moves along an axis the step
+ * can't move along are ignored. Results are rounded to a millionth of a mm, so 0.1 + 0.2 stays 0.3.
+ */
+export function moveFeature<F extends Feature>(f: F, by: [number, number, number]): F {
+  const r = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
+  switch (f.type) {
+    case "hollow":
+      return f;
+    case "hole":
+      return { ...f, x: r(f.x + by[0]), y: r(f.y + by[1]) };
+    case "sketch": {
+      const o = f.plane.origin;
+      return { ...f, plane: { ...f.plane, origin: [r(o[0] + by[0]), r(o[1] + by[1]), r(o[2] + by[2])] } };
+    }
+    default: {
+      const s = f as ShapeFeature;
+      return { ...s, x: r(s.x + by[0]), y: r(s.y + by[1]), z: r(s.z + by[2]) } as F;
+    }
+  }
+}
+
 export function newDocument(): ProjectDocument {
   return { units: "mm", features: [{ id: newId(), ...DEFAULT_BOX }] };
 }

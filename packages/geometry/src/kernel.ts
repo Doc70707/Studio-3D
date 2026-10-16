@@ -7,8 +7,11 @@ import {
   drawRectangle,
   makeBaseBox,
   makeCylinder,
+  makeCompound,
   makeSphere,
+  makeVertex,
   measureArea,
+  DistanceQuery,
   measureVolume,
   Plane,
   type Drawing,
@@ -49,8 +52,14 @@ const MESH = { tolerance: 0.05, angularTolerance: 0.2 } as const;
 const STL = { tolerance: 0.01, angularTolerance: 0.1 } as const;
 
 export type BuildResult =
-  | { ok: true; shape: Shape3D; measurements: Measurements; issues: Issue[] }
+  | { ok: true; shape: Shape3D; measurements: Measurements; issues: Issue[]; pieces?: Piece[] }
   | { ok: false; issues: Issue[] };
+
+/** The solid one step added or cut, where it was used. Kept so the finished part's faces can be traced to it. */
+export interface Piece {
+  id: string;
+  shape: Shape3D;
+}
 
 /** What the finished box must measure. Used to catch the kernel silently returning the wrong shape. */
 export const expectedBoxVolume = (b: BoxFeature): number => shapeVolume(b);
@@ -164,11 +173,11 @@ interface Part {
  * - adding can't make the part smaller than either piece, or bigger than both together;
  * - cutting can remove nothing, but never more than the cutting shape itself.
  */
-function combine(part: Part, s: ShapeFeature, issues: Issue[]): Part {
+function combine(part: Part, s: ShapeFeature, issues: Issue[], keep?: Piece[]): Part {
   const tool = makeShape(s);
   const v = shapeVolume(s);
   const tol = tolerance(s);
-  return applyTool(part, { shape: tool, least: v * (1 - tol), most: v * (1 + tol) }, s, issues);
+  return applyTool(part, { shape: tool, least: v * (1 - tol), most: v * (1 + tol) }, s, issues, keep);
 }
 
 /** A cutting or adding shape, with the range its volume must fall in. */
@@ -183,12 +192,13 @@ function applyTool(
   tool: Tool,
   s: { id: string; name: string; mode: "add" | "cut" },
   issues: Issue[],
+  keep?: Piece[],
 ): Part {
   let result: Shape3D;
   try {
     result = s.mode === "add" ? part.shape.fuse(tool.shape) : part.shape.cut(tool.shape);
   } finally {
-    tool.shape.delete();
+    release(tool.shape, s.id, keep);
   }
   const volume = measureVolume(result);
   const pieces = result.solids.length;
@@ -304,7 +314,7 @@ function partSpan(part: Part | null): number {
  * Drills one hole straight down from the top of the part and checks the result.
  * The cut must remove some material but never more than the hole's own cylinder.
  */
-function drill(part: Part, h: HoleFeature, issues: Issue[]): Part {
+function drill(part: Part, h: HoleFeature, issues: Issue[], keep?: Piece[]): Part {
   const bb = part.shape.boundingBox;
   const [min, max] = bb.bounds;
   const height = max[2] - min[2];
@@ -324,7 +334,7 @@ function drill(part: Part, h: HoleFeature, issues: Issue[]): Part {
   try {
     result = part.shape.cut(tool);
   } finally {
-    tool.delete();
+    release(tool, h.id, keep);
   }
   const volume = measureVolume(result);
   const removed = part.volume - volume;
@@ -443,8 +453,17 @@ function failure(e: unknown, featureId: string, name: string): Issue {
   };
 }
 
-/** Builds the whole design: each step in order, checking every result. */
-export function buildDocument(doc: ProjectDocument): BuildResult {
+/** A used tool is either kept for tracing faces or deleted. */
+function release(tool: Shape3D, id: string, keep?: Piece[]) {
+  if (keep) keep.push({ id, shape: tool });
+  else tool.delete();
+}
+
+/**
+ * Builds the whole design: each step in order, checking every result.
+ * With `keepPieces`, the result also holds the solid each step used (the caller deletes them).
+ */
+export function buildDocument(doc: ProjectDocument, keepPieces = false): BuildResult {
   if (!doc.features.length)
     return {
       ok: false,
@@ -454,20 +473,19 @@ export function buildDocument(doc: ProjectDocument): BuildResult {
   if (hasErrors(issues)) return { ok: false, issues };
 
   let part: Part | null = null;
+  const keep: Piece[] | undefined = keepPieces ? [] : undefined;
   for (const f of doc.features) {
     try {
       let next: Part;
-      if (f.type === "hole") next = drill(part!, f, issues);
+      if (f.type === "hole") next = drill(part!, f, issues, keep);
       else if (f.type === "hollow") next = hollow(part!, f);
       else if (f.type === "sketch") {
         const tool = makeSketchTool(f, partSpan(part));
-        next = part
-          ? applyTool(part, tool, f, issues)
-          : {
-              shape: tool.shape,
-              volume: measureVolume(tool.shape),
-              pieces: tool.shape.solids.length,
-            };
+        if (part) next = applyTool(part, tool, f, issues, keep);
+        else {
+          next = { shape: tool.shape, volume: measureVolume(tool.shape), pieces: tool.shape.solids.length };
+          keep?.push({ id: f.id, shape: tool.shape.clone() });
+        }
       } else if (!part) {
         const shape = makeShape(f);
         next = {
@@ -475,11 +493,13 @@ export function buildDocument(doc: ProjectDocument): BuildResult {
           volume: measureVolume(shape),
           pieces: shape.solids.length,
         };
-      } else next = combine(part, f, issues);
+        keep?.push({ id: f.id, shape: shape.clone() });
+      } else next = combine(part, f, issues, keep);
       part?.shape.delete();
       part = next;
     } catch (e) {
       part?.shape.delete();
+      keep?.forEach((p) => p.shape.delete());
       return { ok: false, issues: [failure(e, f.id, f.name)] };
     }
   }
@@ -488,7 +508,84 @@ export function buildDocument(doc: ProjectDocument): BuildResult {
     shape: part!.shape,
     measurements: measure(part!.shape),
     issues,
+    pieces: keep,
   };
+}
+
+/** How far a mesh corner may be from the exact surface it lies on: float rounding, nothing more. */
+const ON_SURFACE = 1e-3;
+
+/**
+ * Which step made each face of the finished part, as a feature id per face of `mesh` ("" when none did).
+ * A face belongs to the last step whose solid has the face's surface on its own outside: each corner of the face's
+ * biggest triangle lies exactly on that solid's surface (corners are on the exact surface, unlike the middle of a
+ * triangle on a curve), and so does the triangle's middle, within the display's 0.05 mm accuracy.
+ * Faces no step's solid explains are the inside walls a hollow made, so they belong to the hollow.
+ */
+export function faceOwners(mesh: MeshData, pieces: Piece[], doc: ProjectDocument): string[] {
+  const hollowId = doc.features.find((f) => f.type === "hollow")?.id ?? "";
+  const surfaces = pieces.map((p) => {
+    const faces = p.shape.faces;
+    const shell = makeCompound(faces);
+    faces.forEach((f) => f.delete());
+    const [lo, hi] = p.shape.boundingBox.bounds;
+    return { id: p.id, shell, lo, hi, query: new DistanceQuery(shell) };
+  });
+  const owners: string[] = [];
+  try {
+    const n = mesh.faces.length / 2;
+    for (let f = 0; f < n; f++) {
+      const start = mesh.faces[2 * f]!;
+      const count = mesh.faces[2 * f + 1]!;
+      const corner = (i: number): [number, number, number] => {
+        const v = mesh.indices[i]! * 3;
+        return [mesh.positions[v]!, mesh.positions[v + 1]!, mesh.positions[v + 2]!];
+      };
+      // The face's biggest triangle: its corners are furthest apart, so least likely to all touch another solid.
+      let best = start;
+      let bestArea = -1;
+      for (let i = start; i < start + count; i += 3) {
+        const [a, b, c] = [corner(i), corner(i + 1), corner(i + 2)];
+        const area = triangleArea(a, b, c);
+        if (area > bestArea) [best, bestArea] = [i, area];
+      }
+      const pts = [corner(best), corner(best + 1), corner(best + 2)];
+      const mid = [0, 1, 2].map((k) => (pts[0]![k]! + pts[1]![k]! + pts[2]![k]!) / 3) as [number, number, number];
+      let owner = hollowId;
+      for (let p = surfaces.length - 1; p >= 0; p--) {
+        const s = surfaces[p]!;
+        const inside = (q: number[]) => q.every((v, k) => v >= s.lo[k]! - 0.1 && v <= s.hi[k]! + 0.1);
+        if (!inside(mid)) continue;
+        if (distanceTo(s.query, mid) > MESH.tolerance + ON_SURFACE) continue;
+        if (pts.every((q) => distanceTo(s.query, q) <= ON_SURFACE)) {
+          owner = s.id;
+          break;
+        }
+      }
+      owners.push(owner);
+    }
+  } finally {
+    surfaces.forEach((s) => {
+      s.query.delete();
+      s.shell.delete();
+    });
+  }
+  return owners;
+}
+
+function distanceTo(query: DistanceQuery, at: [number, number, number]): number {
+  const v = makeVertex(at);
+  try {
+    return query.distanceTo(v);
+  } finally {
+    v.delete();
+  }
+}
+
+function triangleArea(a: number[], b: number[], c: number[]): number {
+  const u = [b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!];
+  const w = [c[0]! - a[0]!, c[1]! - a[1]!, c[2]! - a[2]!];
+  return Math.hypot(u[1]! * w[2]! - u[2]! * w[1]!, u[2]! * w[0]! - u[0]! * w[2]!, u[0]! * w[1]! - u[1]! * w[0]!) / 2;
 }
 
 export function measure(shape: Shape3D): Measurements {
@@ -511,6 +608,7 @@ export function tessellate(shape: Shape3D): MeshData {
     indices: new Uint32Array(m.triangles),
     edges: new Float32Array(e.lines),
     faces: new Uint32Array(m.faceGroups.flatMap((g) => [g.start, g.count])),
+    owners: [],
   };
 }
 
