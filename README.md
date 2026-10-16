@@ -10,7 +10,7 @@ A beginner-first 3D design studio for making functional, dimensionally accurate 
 | 1. Running application | Done. App shell, 3D viewport, camera controls, tests, Windows CI |
 | 2. Real geometry proof | **In review.** Real box from the OCCT kernel, save/reopen, verified STL export |
 | 3. Guided "Make a Box" | Next |
-| 4. Editing and operations | **In progress.** Holes, undo/redo, more shapes and sketching on faces are in review |
+| 4. Editing and operations | **In progress.** Holes, undo/redo, more shapes, sketching on faces and measurements are in review |
 
 What works today:
 
@@ -28,6 +28,9 @@ What works today:
   with sizes and distances from the face's edges shown as you draw and exact numbers to type. Then push the drawing
   out of the face (a boss, a bracket) or cut it in (a pocket, a slot, a through hole). Outlines that cross themselves
   are refused with an explanation, and every push or cut is checked against its area times its depth.
+- Measurements in the 3D view: the part's width, depth and height are labelled, and the shape or hole you're editing
+  shows its size and its distance from the part's edges. The status bar shows exactly where the pointer is on the part.
+  The Sizes button (or M) turns the labels off and on.
 - Undo and redo (Ctrl+Z, Ctrl+Y) for every change. Typing a number counts as one step.
 - Export STL for your slicer. Tests check every exported mesh is watertight with exact dimensions, independently with trimesh.
 - 3D view of a 256 × 256 mm build plate with orbit, pan, zoom and standard views (keys 0–3).
@@ -36,7 +39,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: measurements in the 3D view, offsets, threads, print preparation.
+Not yet: offsets, threads, print preparation.
 
 ## Getting the Windows app (no setup needed)
 

@@ -16,6 +16,7 @@ const PATHS = {
   rectangle: "M4 6h16v12H4z",
   circle: "M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z",
   polygon: "M5 18L8 5l11 4-3 9z",
+  ruler: "M3 15l12-12 6 6-12 12zM7 11l2 2M10 8l2 2M13 5l2 2",
   face: "M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8",
 } as const;
 
