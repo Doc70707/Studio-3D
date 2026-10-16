@@ -9,6 +9,8 @@ export interface MeshData {
   edges: Float32Array;
   /** The faces of the shape: [first index, index count] pairs into `indices`, one pair per face. */
   faces: Uint32Array;
+  /** Which design step made each face (its feature id), or "" when no step did. Empty when not worked out. */
+  owners: string[];
 }
 
 export interface Measurements {
@@ -20,9 +22,7 @@ export interface Measurements {
   max: [number, number, number];
 }
 
-export type Request =
-  | { id: number; kind: "rebuild"; document: ProjectDocument }
-  | { id: number; kind: "exportStl" };
+export type Request = { id: number; kind: "rebuild"; document: ProjectDocument } | { id: number; kind: "exportStl" };
 
 export type Response =
   | { id: number; kind: "ready" }

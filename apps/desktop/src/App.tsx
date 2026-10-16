@@ -5,7 +5,9 @@ import {
   createGeometryWorker,
   faceOfTriangle,
   facePoints,
+  facesOf,
   outlineOfFace,
+  pointsOfFaces,
   trianglesInPlane,
   type Measurements,
   type MeshData,
@@ -13,9 +15,12 @@ import {
 import {
   PLATE_PLANE,
   hasErrors,
+  isSolidStep,
+  movableAxes,
   newSketch,
   validateDocument,
   validateSketch,
+  type FaceOutline,
   type Issue,
   type ProjectDocument,
   type SketchFeature,
@@ -69,6 +74,11 @@ export function App() {
   const [showSizes, setShowSizes] = useState(true);
   const [focusId, setFocusId] = useState<string | null>(null);
   const pointerReadout = useRef<HTMLSpanElement>(null);
+  /** The piece of the part picked by clicking it (or its card), and which of its faces was clicked. */
+  const [selection, setSelection] = useState<{ id: string; face: number | null } | null>(null);
+  /** How far the selected piece has been dragged so far, while its move arrows are held. */
+  const [moveBy, setMoveBy] = useState<[number, number, number] | null>(null);
+  const hovered = useRef<string | null>(null);
 
   // Viewport
   useEffect(() => {
@@ -191,9 +201,26 @@ export function App() {
     };
   };
 
+  /** The design step that made the face under the pointer, if the face is known. */
+  const ownerAt = (x: number, y: number) => {
+    const hit = faceAt(x, y);
+    const id = hit && meshRef.current?.owners[hit.face];
+    return hit && id ? { ...hit, id } : null;
+  };
+
+  const hoverPiece = (id: string | null) => {
+    if (hovered.current === id) return;
+    hovered.current = id;
+    const mesh = meshRef.current;
+    viewportRef.current?.setHover(id && mesh ? pointsOfFaces(mesh, facesOf(mesh, id)) : null);
+  };
+
   const onHostPointerMove = (e: React.PointerEvent) => {
     if (!picking) {
-      showPointer(e.buttons ? null : (viewportRef.current?.pickPoint(e.clientX, e.clientY) ?? null));
+      const still = !e.buttons && !viewportRef.current?.moving;
+      showPointer(still ? (viewportRef.current?.pickPoint(e.clientX, e.clientY) ?? null) : null);
+      const over = still && !draft ? ownerAt(e.clientX, e.clientY) : null;
+      hoverPiece(over && over.id !== selection?.id ? over.id : null);
       return;
     }
     if (e.buttons) return;
@@ -206,10 +233,22 @@ export function App() {
   const onHostPointerUp = (e: React.PointerEvent) => {
     const down = pointerDown.current;
     pointerDown.current = null;
-    if (!picking || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return; // a drag orbits instead
+    if (!down || e.button !== 0 || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return; // a drag orbits
+    if (!(e.target instanceof HTMLCanvasElement)) return; // a click on a floating panel, not the part
+    if (!picking) {
+      // A click picks the piece under the pointer; a click on empty space lets go of it.
+      if (draft) return;
+      const hit = ownerAt(e.clientX, e.clientY);
+      setSelection(hit ? { id: hit.id, face: hit.face } : null);
+      hoverPiece(null);
+      return;
+    }
     const hit = faceAt(e.clientX, e.clientY);
     if (!hit?.outline) return;
-    const o = hit.outline;
+    sketchOnFace(hit.outline);
+  };
+
+  const sketchOnFace = (o: FaceOutline) => {
     stopPicking();
     setSketchView("2d");
     setDraft({
@@ -225,7 +264,9 @@ export function App() {
     const el = pointerReadout.current;
     if (!el) return;
     const n = (v: number) => (Math.round(v * 10) / 10 + 0).toFixed(1);
-    el.textContent = p ? `Pointer on the part: left/right ${n(p[0])} · front/back ${n(p[1])} · height ${n(p[2])} mm` : "";
+    el.textContent = p
+      ? `Pointer on the part: left/right ${n(p[0])} · front/back ${n(p[1])} · height ${n(p[2])} mm`
+      : "";
     el.parentElement?.classList.toggle("showing-pointer", !!p);
   };
 
@@ -238,6 +279,42 @@ export function App() {
     const focused = built.doc.features.find((f) => f.id === focusId);
     vp.setDimensions([...partDimensions(m.min, m.max), ...(focused ? featureDimensions(focused, m) : [])]);
   }, [built, showSizes, focusId, draft]);
+
+  // The selected piece: tinted, with move arrows in its middle. Redrawn with each new model.
+  const selected = selection ? doc.features.find((f) => f.id === selection.id) : undefined;
+  useEffect(() => {
+    if (selection && !selected) setSelection(null); // removed, or undone away
+  }, [selection, selected]);
+  useEffect(() => {
+    const vp = viewportRef.current;
+    const mesh = meshRef.current;
+    if (!vp) return;
+    const faces = selection && mesh && !draft && !picking ? facesOf(mesh, selection.id) : [];
+    if (!faces.length || !selected) {
+      vp.setSelection(null);
+      vp.setGizmo(null);
+      return;
+    }
+    const piece = pointsOfFaces(mesh!, faces);
+    const face = selection!.face !== null && faces.includes(selection!.face) ? selection!.face : null;
+    vp.setSelection({ piece, face: face === null ? null : pointsOfFaces(mesh!, [face]) });
+    vp.setGizmo({ at: middleOf(piece), axes: movableAxes(selected) });
+    // The selected step's own values don't change where its faces are until the model is rebuilt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [built, kernelIssues, selection, selected?.id, selected?.type, draft, picking]);
+
+  // Dragging a move arrow moves the piece when it is let go: one undo step per move.
+  const selectedId = selection?.id;
+  const moveFeature = project.moveFeature;
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp || !selectedId) return;
+    return vp.onMove(({ phase, by }) => {
+      if (phase === "move") return setMoveBy(by);
+      setMoveBy(null);
+      if (by.some((v) => v !== 0)) moveFeature(selectedId, by);
+    });
+  }, [selectedId, moveFeature]);
 
   const sketchOnPlate = useCallback(() => {
     const m = built?.measurements;
@@ -366,7 +443,39 @@ export function App() {
         void project.newProject();
         return;
       }
-      if (mod || e.altKey || e.target instanceof HTMLInputElement) return;
+      const typing =
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLSelectElement ||
+        e.target instanceof HTMLTextAreaElement;
+      if (mod || e.altKey || typing) return;
+      if (selection && selected) {
+        if (e.key === "Escape") {
+          setSelection(null);
+          return;
+        }
+        if ((e.key === "Delete" || e.key === "Backspace") && canRemove(doc, selected.id)) {
+          e.preventDefault();
+          project.removeFeature(selected.id);
+          return;
+        }
+        // Arrow keys nudge the piece 1 mm (10 mm with Shift); Page Up / Page Down lift and lower it.
+        const step = e.shiftKey ? 10 : 1;
+        const nudge: Record<string, [number, number, number]> = {
+          ArrowLeft: [-step, 0, 0],
+          ArrowRight: [step, 0, 0],
+          ArrowUp: [0, step, 0],
+          ArrowDown: [0, -step, 0],
+          PageUp: [0, 0, step],
+          PageDown: [0, 0, -step],
+        };
+        const by = nudge[e.key];
+        const axes = movableAxes(selected);
+        if (by && by.some((v, i) => v !== 0 && axes.includes((["x", "y", "z"] as const)[i]!))) {
+          e.preventDefault();
+          project.moveFeature(selected.id, by);
+          return;
+        }
+      }
       if (key === "m") {
         setShowSizes((v) => !v);
         return;
@@ -376,7 +485,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [project, draft, picking, stopPicking]);
+  }, [project, draft, picking, stopPicking, selection, selected, doc]);
 
   // Window title and close guard
   // The title is only set once the geometry engine has loaded, so it also tells (and CI checks) that the kernel started.
@@ -386,6 +495,14 @@ export function App() {
     platform.setTitle(`${name}${dirty ? " •" : ""} — Studio 3D${suffix}`);
   }, [name, dirty, engine]);
   useEffect(() => platform.guardClose(() => dirtyRef.current), [dirtyRef]);
+
+  /** "top face", "curved face": what the clicked face is, in words. */
+  const faceName = (face: number) => outlineOfFace(meshRef.current!, face)?.label ?? "curved face";
+  /** Starts a sketch on the clicked face when it is flat; undefined when it isn't (or none was clicked). */
+  const sketchFace = (face: number | null) => {
+    const o = face !== null && meshRef.current ? outlineOfFace(meshRef.current, face) : null;
+    return o ? () => sketchOnFace(o) : undefined;
+  };
 
   const saveLabel = platform.capabilities.saveInPlace ? "Save" : "Download project";
   const saveStatus = dirty ? "Unsaved changes" : project.file ? "All changes saved" : "Not saved yet";
@@ -426,6 +543,18 @@ export function App() {
               Cancel
             </button>
           </div>
+        )}
+        {selection && selected && !draft && !picking && (
+          <SelectionBar
+            name={selected.name}
+            face={selection.face !== null && meshRef.current ? faceName(selection.face) : null}
+            moving={moveBy}
+            canMove={movableAxes(selected).length > 0}
+            canRemove={canRemove(doc, selected.id)}
+            onSketch={sketchFace(selection.face)}
+            onRemove={() => project.removeFeature(selected.id)}
+            onClose={() => setSelection(null)}
+          />
         )}
         {notice && (
           <div className={`toast glass ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
@@ -563,6 +692,8 @@ export function App() {
         onEditSketch={editSketch}
         picking={picking}
         onFocus={setFocusId}
+        selected={selection?.id ?? null}
+        onSelect={(id) => setSelection((s) => (id === null ? null : s?.id === id ? s : { id, face: null }))}
       />
 
       {draft && (
@@ -596,7 +727,10 @@ export function App() {
         </span>
         <span className="hint">
           <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
-          <span className="hint-text">Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view · M sizes</span>
+          <span className="hint-text">
+            Click a piece to select it · Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view · M
+            sizes
+          </span>
         </span>
       </footer>
     </div>
@@ -620,4 +754,74 @@ function dedupe(issues: Issue[]): Issue[] {
     seen.add(k);
     return true;
   });
+}
+
+/** A part needs at least one shape or sketch, so the last one can't be removed. */
+function canRemove(doc: ProjectDocument, id: string): boolean {
+  const f = doc.features.find((x) => x.id === id);
+  if (!f) return false;
+  return !isSolidStep(f) || doc.features.filter(isSolidStep).length > 1;
+}
+
+/** The middle of the box around some points (x, y, z triples). */
+function middleOf(points: Float32Array): [number, number, number] {
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < points.length; i++) {
+    lo[i % 3] = Math.min(lo[i % 3]!, points[i]!);
+    hi[i % 3] = Math.max(hi[i % 3]!, points[i]!);
+  }
+  return [0, 1, 2].map((k) => (lo[k]! + hi[k]!) / 2) as [number, number, number];
+}
+
+const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.round(Math.abs(n) * 10) / 10} mm`;
+
+/** What is selected, how far it is being moved, and what can be done with it. */
+function SelectionBar(props: {
+  name: string;
+  face: string | null;
+  moving: [number, number, number] | null;
+  canMove: boolean;
+  canRemove: boolean;
+  onSketch?: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  const m = props.moving;
+  const axis = m ? m.findIndex((v) => v !== 0) : -1;
+  return (
+    <div className="selection-bar glass" role="status" aria-label="Selected piece" data-testid="selection-bar">
+      <span className="selection-name">
+        <strong>{props.name}</strong>
+        {props.face && <span className="selection-face"> · {props.face}</span>}
+      </span>
+      <span className="selection-help">
+        {m
+          ? axis < 0
+            ? "Moving…"
+            : `Moving ${["left/right", "front/back", "up/down"][axis]} ${signed(m[axis]!)}`
+          : props.canMove
+            ? "Drag an arrow or press the arrow keys to move it"
+            : "Edit it in the panel"}
+      </span>
+      {props.onSketch && (
+        <button type="button" onClick={props.onSketch}>
+          <Icon name="pencil" />
+          Sketch on this face
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={props.onRemove}
+        disabled={!props.canRemove}
+        title={props.canRemove ? "Remove it (Delete key)" : "A part needs at least one shape"}
+      >
+        <Icon name="trash" />
+        Remove
+      </button>
+      <button type="button" className="icon-only" aria-label="Deselect" title="Deselect (Esc)" onClick={props.onClose}>
+        <Icon name="close" />
+      </button>
+    </div>
+  );
 }

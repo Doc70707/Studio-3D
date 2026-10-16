@@ -23,6 +23,9 @@ import {
   type CylinderFeature,
   type HoleFeature,
   type ThreadSize,
+  moveFeature,
+  movableAxes,
+  newSketch,
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
@@ -307,5 +310,25 @@ describe("threads", () => {
     expect(r.ok && r.document).toEqual(withThreads);
     const bad = parseProject(serializeProject(withThreads, app).replace('"M6"', '"M7"'));
     expect(!bad.ok && bad.error).toContain("thread");
+  });
+});
+
+describe("moving a step", () => {
+  const doc = { units: "mm" as const, features: [] };
+  it("a shape moves along all three axes, without rounding noise", () => {
+    const s = { ...newShape(doc, "box"), x: 0.1, y: -3, z: 0 };
+    const moved = moveFeature(s, [0.2, 10, 5]);
+    expect([moved.x, moved.y, moved.z]).toEqual([0.3, 7, 5]);
+    expect(movableAxes(s)).toEqual(["x", "y", "z"]);
+  });
+  it("a hole only slides across the top; a sketch's surface moves with it; a hollow doesn't move", () => {
+    const h = moveFeature(newHole(doc, { x: 1, y: 2 }), [3, 4, 99]);
+    expect([h.x, h.y]).toEqual([4, 6]);
+    expect(movableAxes(h)).toEqual(["x", "y"]);
+    const sk = newSketch(doc, { origin: [-30, -20, 30], xDir: [1, 0, 0], normal: [0, 0, 1] }, "top face", []);
+    expect(moveFeature(sk, [5, 0, -1]).plane).toEqual({ origin: [-25, -20, 29], xDir: [1, 0, 0], normal: [0, 0, 1] });
+    const hol = newHollow(doc);
+    expect(moveFeature(hol, [1, 1, 1])).toBe(hol);
+    expect(movableAxes(hol)).toEqual([]);
   });
 });

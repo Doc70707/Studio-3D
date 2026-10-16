@@ -1330,3 +1330,69 @@ input:focus-visible {
 .thread-picker .help {
   margin: 0;
 }
+
+/* The piece picked in the 3D view: its card is marked in the same yellow as its tint. */
+.shape-card.picked,
+.hole-card.picked {
+  border-color: rgba(255, 201, 77, 0.7);
+  box-shadow: 0 0 0 1px rgba(255, 201, 77, 0.35);
+}
+
+/* What is selected in the 3D view, floating at the top of the open space beside the panel. */
+.selection-bar {
+  --beside-panel: calc(var(--gap) + 316px);
+  position: absolute;
+  top: 88px;
+  left: calc(var(--beside-panel) + (100% - var(--beside-panel)) / 2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - var(--beside-panel) - 2 * var(--gap));
+  padding: 8px 8px 8px 16px;
+  border-radius: 16px;
+  background: var(--glass-strong);
+  transform: translateX(-50%);
+  animation: materialize 220ms var(--ease);
+  white-space: nowrap;
+}
+
+.selection-name strong {
+  font-weight: 650;
+}
+
+.selection-face,
+.selection-help {
+  color: var(--muted);
+}
+
+.selection-help {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.selection-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.selection-bar button.icon-only {
+  padding: 0 8px;
+}
+
+.selection-bar button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.selection-bar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

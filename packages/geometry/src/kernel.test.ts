@@ -21,12 +21,13 @@ import {
   buildDocument,
   expectedBoxVolume,
   exportStl,
+  faceOwners,
   makeShape,
   maxHoleVolume,
   tessellate,
   useKernel,
 } from "./kernel";
-import { faceCount, faceOfTriangle, outlineOfFace, trianglesInPlane } from "./faces";
+import { faceCount, faceOfTriangle, facePoints, outlineOfFace, trianglesInPlane } from "./faces";
 import {
   THREADS,
   threadProfile,
@@ -863,3 +864,111 @@ describe("STL checker itself", () => {
     expect(checkBinaryStl(both.buffer).watertight).toBe(false);
   });
 });
+
+describe("which step made each face (for clicking a piece of the part)", () => {
+  const owned = (doc: ProjectDocument) => {
+    const r = buildDocument(doc, true);
+    if (!r.ok) throw new Error(r.issues.map((i) => i.message).join("; "));
+    const mesh = tessellate(r.shape);
+    const t = performance.now();
+    const owners = faceOwners(mesh, r.pieces!, doc);
+    const ms = performance.now() - t;
+    r.pieces!.forEach((p) => p.shape.delete());
+    expect(owners).toHaveLength(faceCount(mesh));
+    /** The owner of the face with a triangle under a point of the part's surface. */
+    const at = (p: [number, number, number]) => {
+      for (let f = 0; f < owners.length; f++) {
+        const pts = facePoints(mesh, f);
+        for (let i = 0; i < pts.length; i += 3) if (onTriangle(p, pts[i]!, pts[i + 1]!, pts[i + 2]!)) return owners[f];
+      }
+      return undefined;
+    };
+    const count = (id: string) => owners.filter((o) => o === id).length;
+    return { owners, at, count, ms };
+  };
+
+  it("a block with a cylinder on top, a hole and a pocket: each face belongs to the step that made it", () => {
+    const block = { ...box({ wall: 0 }), id: "block" };
+    const peg = { ...shape("cylinder", { diameter: 10, height: 8, x: -15, y: 0, z: 30 }), id: "peg" };
+    const hole: HoleFeature = { id: "hole", type: "hole", name: "Hole 1", x: 20, y: 10, diameter: 6, depth: 0 };
+    const mesh = tessellate(designed({ units: "mm", features: [block] }).shape);
+    const front = [...Array(faceCount(mesh)).keys()]
+      .map((f) => outlineOfFace(mesh, f))
+      .find((o) => o?.label === "front face")!;
+    const pocket = {
+      ...newSketch(
+        { units: "mm", features: [] },
+        front.plane,
+        front.label,
+        [{ kind: "rectangle", x: 5, y: 5, width: 10, height: 8 } as Profile],
+        "cut",
+        4,
+      ),
+      id: "pocket",
+    };
+    const r = owned({ units: "mm", features: [block, peg, hole, pocket] });
+    expect(r.owners.every((o) => o)).toBe(true);
+    expect(r.at([0, 15, 30])).toBe("block"); // top of the block
+    expect(r.at([0, -20, 25])).toBe("block"); // front of the block, above the pocket
+    expect(r.at([-15, 0, 38])).toBe("peg"); // top of the peg
+    expect(r.at([-10, 0, 34])).toBe("peg"); // side of the peg
+    expect(r.at([23, 10, 15])).toBe("hole"); // inside the hole
+    expect(r.at([-30 + 10, -16, 9])).toBe("pocket"); // floor of the pocket, 4 mm in
+    for (const id of ["block", "peg", "hole", "pocket"]) expect(r.count(id)).toBeGreaterThan(0);
+  });
+
+  it("round shapes, and a dish cut by a sphere, belong to their own shapes", () => {
+    const block = { ...box({ wall: 0 }), id: "block" };
+    const cone = { ...shape("cone", { bottomDiameter: 12, topDiameter: 4, height: 10, x: -18, z: 30 }), id: "cone" };
+    const tube = { ...shape("tube", { outerDiameter: 12, innerDiameter: 6, height: 6, x: 18, z: 30 }), id: "tube" };
+    const dish = { ...shape("sphere", { diameter: 16, z: 24 }), mode: "cut", id: "dish" } as ShapeFeature;
+    const r = owned({ units: "mm", features: [block, cone, tube, dish] });
+    expect(r.owners.every((o) => o)).toBe(true);
+    expect(r.at([-18, 0, 40])).toBe("cone");
+    expect(r.at([18, 6, 33])).toBe("tube"); // outside of the tube
+    expect(r.at([18, 3, 33])).toBe("tube"); // inside of the tube
+    expect(r.at([0, 0, 24])).toBe("dish"); // bottom of the dish
+    expect(r.at([0, 15, 30])).toBe("block");
+  });
+
+  it("the inside walls a hollow makes belong to the hollow", () => {
+    const block = { ...box({ wall: 0 }), id: "block" };
+    const h = { ...newHollow({ units: "mm", features: [] }), id: "hollow", wall: 2, open: "top" as const };
+    const r = owned({ units: "mm", features: [block, h] });
+    expect(r.at([0, 0, 2])).toBe("hollow"); // inside floor
+    expect(r.at([0, -18, 15])).toBe("hollow"); // inside front wall
+    expect(r.at([0, -20, 15])).toBe("block"); // outside front wall
+    expect(r.at([0, 0, 0])).toBe("block"); // underneath
+  });
+
+  it("a threaded rod's faces belong to it, quickly enough to do after every change", () => {
+    const block = { ...box({ wall: 0, height: 10 }), id: "block" };
+    const rod = {
+      ...shape("cylinder", { diameter: 8, height: 15, z: 10 }),
+      thread: "M8" as const,
+      fit: 0.3,
+      id: "rod",
+    } as ShapeFeature;
+    const r = owned({ units: "mm", features: [block, rod] });
+    expect(r.count("rod")).toBeGreaterThan(0);
+    expect(r.at([0, 15, 10])).toBe("block");
+    expect(r.at([0, 0, 25])).toBe("rod");
+    expect(r.ms).toBeLessThan(1500);
+  });
+});
+
+/** Whether a point lies on a triangle (within the display mesh's accuracy). */
+function onTriangle(p: number[], a: number[], b: number[], c: number[]): boolean {
+  const sub = (u: number[], v: number[]) => u.map((x, i) => x - v[i]!);
+  const dotp = (u: number[], v: number[]) => u.reduce((t, x, i) => t + x * v[i]!, 0);
+  const cross = (u: number[], v: number[]) => [
+    u[1]! * v[2]! - u[2]! * v[1]!,
+    u[2]! * v[0]! - u[0]! * v[2]!,
+    u[0]! * v[1]! - u[1]! * v[0]!,
+  ];
+  const n = cross(sub(b, a), sub(c, a));
+  const len = Math.hypot(...n);
+  if (len < 1e-12 || Math.abs(dotp(sub(p, a), n)) / len > 0.06) return false;
+  const side = (u: number[], v: number[]) => dotp(cross(sub(v, u), sub(p, u)), n) >= -1e-9;
+  return side(a, b) && side(b, c) && side(c, a);
+}
