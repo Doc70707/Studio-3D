@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Viewport, isWebGLAvailable, type CameraState, type StandardView } from "@studio3d/viewport";
 import { GeometryClient, createGeometryWorker, type Measurements } from "@studio3d/geometry";
-import { hasErrors, validateBox, type BoxFeature, type Issue } from "@studio3d/document";
+import { hasErrors, validateDocument, type BoxFeature, type Issue, type ProjectDocument } from "@studio3d/document";
 import { BoxPanel } from "./BoxPanel";
 import { Icon } from "./Icon";
 import { platform } from "./platform";
@@ -15,7 +15,8 @@ const VIEW_BUTTONS: { view: StandardView; label: string; key: string }[] = [
 ];
 
 type Engine = "starting" | "ready" | "failed";
-type Built = { box: BoxFeature; measurements: Measurements };
+/** The last model the engine built, and the exact document it was built from. */
+type Built = { doc: ProjectDocument; box: BoxFeature; measurements: Measurements };
 
 export function App() {
   const project = useProject();
@@ -93,7 +94,7 @@ export function App() {
   }, [setNotice]);
 
   // Rebuild real geometry whenever the document changes and its values are valid.
-  const inputIssues = validateBox(box);
+  const inputIssues = validateDocument(doc);
   const inputOk = !hasErrors(inputIssues);
   useEffect(() => {
     const client = geometryRef.current;
@@ -107,8 +108,8 @@ export function App() {
           setBuilding(false);
           if (r.status === "built") {
             viewportRef.current?.setModel(r.mesh);
-            setBuilt({ box: doc.features[0]!, measurements: r.measurements });
-            setKernelIssues([]);
+            setBuilt({ doc, box, measurements: r.measurements });
+            setKernelIssues(r.issues); // warnings found while building, e.g. a hole that cuts nothing
           } else {
             setKernelIssues(r.issues);
           }
@@ -119,8 +120,9 @@ export function App() {
     return () => clearTimeout(timer);
   }, [doc, engine, inputOk]);
 
-  const issues = inputOk ? [...inputIssues, ...kernelIssues] : inputIssues;
-  const upToDate = inputOk && !building && kernelIssues.length === 0 && built !== null;
+  const issues = inputOk ? dedupe([...inputIssues, ...kernelIssues]) : inputIssues;
+  // Up to date only when the model on screen was built from exactly this document (not just "nothing is building yet").
+  const upToDate = inputOk && !building && !hasErrors(kernelIssues) && built?.doc === doc;
 
   const exportStl = useCallback(
     () =>
@@ -136,10 +138,22 @@ export function App() {
     [doc, name, run, setNotice],
   );
 
-  // Keyboard: views, and Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N
+  // Keyboard: views, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, and Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      // The app's undo replaces the text box's own undo, so one Ctrl+Z always means one design step.
+      if (mod && (key === "y" || (key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        project.redo();
+        return;
+      }
+      if (mod && key === "z") {
+        e.preventDefault();
+        project.undo();
+        return;
+      }
       if (mod && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void project.save(e.shiftKey);
@@ -241,6 +255,29 @@ export function App() {
               </button>
             )}
           </nav>
+          <span className="divider" aria-hidden="true" />
+          <nav className="group" aria-label="Edit">
+            <button
+              type="button"
+              className="icon-only"
+              aria-label="Undo"
+              title="Undo (Ctrl+Z)"
+              onClick={project.undo}
+              disabled={!project.canUndo}
+            >
+              <Icon name="undo" />
+            </button>
+            <button
+              type="button"
+              className="icon-only"
+              aria-label="Redo"
+              title="Redo (Ctrl+Y)"
+              onClick={project.redo}
+              disabled={!project.canRedo}
+            >
+              <Icon name="redo" />
+            </button>
+          </nav>
         </div>
 
         <nav className="glass bar segmented" aria-label="Camera views">
@@ -276,7 +313,11 @@ export function App() {
         issues={issues}
         measurements={built?.measurements ?? null}
         builtBox={built?.box ?? null}
+        holes={project.holes}
         onChange={project.updateBox}
+        onHoleChange={project.updateHole}
+        onAddHole={project.addHole}
+        onRemoveHole={project.removeHole}
         stale={!upToDate && built !== null}
       />
 
@@ -292,10 +333,23 @@ export function App() {
               ? "Geometry engine unavailable"
               : building
                 ? "Updating model…"
-                : "Model up to date"}
+                : upToDate
+                  ? "Model up to date"
+                  : "Showing your last good design"}
         </span>
         <span className="hint">Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view</span>
       </footer>
     </div>
   );
+}
+
+/** The kernel repeats the input checks it ran; show each message once. */
+function dedupe(issues: Issue[]): Issue[] {
+  const seen = new Set<string>();
+  return issues.filter((i) => {
+    const k = `${i.featureId}|${i.field}|${i.message}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }

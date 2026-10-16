@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useId, useState } from "react";
-import { hasErrors, type BoxFeature, type Issue } from "@studio3d/document";
+import { hasErrors, type BoxFeature, type HoleFeature, type Issue } from "@studio3d/document";
 import type { Measurements } from "@studio3d/geometry";
+import { Icon } from "./Icon";
 
 type NumericField = "width" | "depth" | "height" | "wall";
 
@@ -13,6 +14,7 @@ const FIELDS: { key: NumericField; label: string; help: string }[] = [
 
 interface Props {
   box: BoxFeature;
+  holes: HoleFeature[];
   issues: Issue[];
   measurements: Measurements | null;
   /** The values the shown model was built from (may lag behind `box` while it is invalid). */
@@ -20,15 +22,19 @@ interface Props {
   /** True when the 3D view shows an older valid version than the values typed. */
   stale: boolean;
   onChange: (patch: Partial<BoxFeature>) => void;
+  onHoleChange: (id: string, patch: Partial<HoleFeature>) => void;
+  onAddHole: () => void;
+  onRemoveHole: (id: string) => void;
 }
 
 export const BoxPanel = forwardRef<HTMLElement, Props>(function BoxPanel(
-  { box, issues, measurements, builtBox, stale, onChange },
+  { box, holes, issues, measurements, builtBox, stale, onChange, onHoleChange, onAddHole, onRemoveHole },
   ref,
 ) {
-  const general = issues.filter((i) => i.field === null);
+  const boxIssues = issues.filter((i) => i.featureId === undefined || i.featureId === box.id);
+  const general = boxIssues.filter((i) => i.field === null);
   return (
-    <aside className="panel glass" aria-label="Box settings" ref={ref}>
+    <aside className="panel glass" aria-label="Design" ref={ref}>
       <div className="panel-scroll">
         <h2>Box</h2>
         <p className="lead">Type a size and the box updates as you go.</p>
@@ -38,7 +44,7 @@ export const BoxPanel = forwardRef<HTMLElement, Props>(function BoxPanel(
             label={f.label}
             help={f.help}
             value={box[f.key]}
-            issue={issues.find((i) => i.field === f.key)}
+            issue={boxIssues.find((i) => i.field === f.key)}
             onCommit={(v) => onChange({ [f.key]: v })}
           />
         ))}
@@ -47,8 +53,32 @@ export const BoxPanel = forwardRef<HTMLElement, Props>(function BoxPanel(
             {i.message}
           </p>
         ))}
+
+        <section className="holes" aria-label="Holes">
+          <div className="section-head">
+            <h3>Holes</h3>
+            <button type="button" className="add" onClick={onAddHole}>
+              <Icon name="plus" />
+              Add hole
+            </button>
+          </div>
+          {holes.length === 0 && (
+            <p className="help">Add a hole for a screw, a drain or a cable. Holes go straight down from the top.</p>
+          )}
+          {holes.map((h) => (
+            <HoleCard
+              key={h.id}
+              hole={h}
+              box={box}
+              issues={issues.filter((i) => i.featureId === h.id)}
+              onChange={(patch) => onHoleChange(h.id, patch)}
+              onRemove={() => onRemoveHole(h.id)}
+            />
+          ))}
+        </section>
+
         {stale && hasErrors(issues) && (
-          <p className="help">The 3D view shows your last valid box until the values above are fixed.</p>
+          <p className="help">The 3D view shows your last valid design until the highlighted values are fixed.</p>
         )}
       </div>
       {builtBox && <Facts box={builtBox} measurements={measurements} />}
@@ -56,7 +86,94 @@ export const BoxPanel = forwardRef<HTMLElement, Props>(function BoxPanel(
   );
 });
 
-function NumberField(props: { label: string; help: string; value: number; issue?: Issue; onCommit: (v: number) => void }) {
+function HoleCard(props: {
+  hole: HoleFeature;
+  box: BoxFeature;
+  issues: Issue[];
+  onChange: (patch: Partial<HoleFeature>) => void;
+  onRemove: () => void;
+}) {
+  const { hole, box, issues, onChange } = props;
+  const through = hole.depth === 0;
+  const issueFor = (field: keyof HoleFeature) => issues.find((i) => i.field === field);
+  return (
+    <div className="hole-card" data-testid="hole">
+      <div className="hole-head">
+        <span className="hole-name">{hole.name}</span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Remove ${hole.name}`}
+          title="Remove this hole"
+          onClick={props.onRemove}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+      <div className="hole-grid">
+        <NumberField
+          label="From left"
+          name={`${hole.name} distance from left edge`}
+          value={hole.x}
+          issue={issueFor("x")}
+          onCommit={(v) => onChange({ x: v })}
+          compact
+        />
+        <NumberField
+          label="From front"
+          name={`${hole.name} distance from front edge`}
+          value={hole.y}
+          issue={issueFor("y")}
+          onCommit={(v) => onChange({ y: v })}
+          compact
+        />
+        <NumberField
+          label="Diameter"
+          name={`${hole.name} diameter`}
+          value={hole.diameter}
+          issue={issueFor("diameter")}
+          onCommit={(v) => onChange({ diameter: v })}
+          compact
+        />
+        {!through && (
+          <NumberField
+            label="Depth"
+            name={`${hole.name} depth`}
+            value={hole.depth}
+            issue={issueFor("depth")}
+            onCommit={(v) => onChange({ depth: v })}
+            compact
+          />
+        )}
+      </div>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={through}
+          onChange={(e) => onChange({ depth: e.target.checked ? 0 : Math.round(Math.min(5, box.height) * 100) / 100 })}
+        />
+        All the way through
+      </label>
+      {issues.map((i) => (
+        <p key={i.message} className={`issue ${i.severity}`} role={i.severity === "error" ? "alert" : undefined}>
+          {i.message}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function NumberField(props: {
+  label: string;
+  /** Accessible name when the visible label alone is ambiguous, e.g. "Hole 1 diameter". */
+  name?: string;
+  help?: string;
+  value: number;
+  issue?: Issue;
+  onCommit: (v: number) => void;
+  /** Compact fields show no help or message underneath; the caller shows messages instead. */
+  compact?: boolean;
+}) {
   const id = useId();
   const [text, setText] = useState(String(props.value));
   const [typingError, setTypingError] = useState<string | null>(null);
@@ -73,15 +190,16 @@ function NumberField(props: { label: string; help: string; value: number; issue?
   const message = typingError ?? props.issue?.message;
   const severity = typingError ? "error" : props.issue?.severity;
   return (
-    <div className="field">
+    <div className={props.compact ? "field compact" : "field"}>
       <label htmlFor={id}>{props.label}</label>
       <div className="input-row">
         <input
           id={id}
           inputMode="decimal"
           value={text}
+          aria-label={props.name}
           aria-invalid={severity === "error"}
-          aria-describedby={`${id}-help`}
+          aria-describedby={props.help ? `${id}-help` : undefined}
           onChange={(e) => {
             setText(e.target.value);
             const v = parse(e.target.value);
@@ -94,7 +212,13 @@ function NumberField(props: { label: string; help: string; value: number; issue?
         />
         <span className="unit">mm</span>
       </div>
-      {message ? (
+      {props.compact ? (
+        typingError && (
+          <p className="issue error" role="alert">
+            {typingError}
+          </p>
+        )
+      ) : message ? (
         <p className={`issue ${severity}`} role={severity === "error" ? "alert" : undefined}>
           {message}
         </p>

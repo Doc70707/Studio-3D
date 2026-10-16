@@ -1,8 +1,18 @@
 // The only module that talks to the geometry kernel (OCCT through replicad).
 // Everything else uses the plain data it returns, so the kernel can be swapped later.
-import { setOC, makeBaseBox, measureVolume, type Shape3D } from "replicad";
+import { setOC, makeBaseBox, makeCylinder, measureVolume, type Shape3D } from "replicad";
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
-import { hasErrors, validateBox, type BoxFeature, type Issue, type ProjectDocument } from "@studio3d/document";
+import {
+  boxOf,
+  hasErrors,
+  holesOf,
+  validateBox,
+  validateDocument,
+  type BoxFeature,
+  type HoleFeature,
+  type Issue,
+  type ProjectDocument,
+} from "@studio3d/document";
 import type { Measurements, MeshData } from "./protocol";
 
 export function useKernel(oc: OpenCascadeInstance): void {
@@ -48,15 +58,104 @@ export function buildBox(b: BoxFeature): BuildResult {
     return { ok: true, shape, measurements, issues };
   } catch {
     shape?.delete();
-    return { ok: false, issues: [kernelIssue("The geometry engine couldn't build this shape, so your last good version was kept.")] };
+    return {
+      ok: false,
+      issues: [kernelIssue("The geometry engine couldn't build this shape, so your last good version was kept.")],
+    };
   }
 }
 
-/** Builds every feature. Today a document holds a single box. */
+/** The most material a hole can remove: a full cylinder of its diameter and depth. */
+export function maxHoleVolume(h: HoleFeature, box: BoxFeature): number {
+  const depth = h.depth === 0 ? box.height : h.depth;
+  return Math.PI * (h.diameter / 2) ** 2 * depth;
+}
+
+/**
+ * Cuts one hole and checks the result. The cut must remove some material but never more than the
+ * hole's own cylinder, and must leave the outside size unchanged. Otherwise the kernel did something
+ * unexpected and the caller keeps the last good model.
+ */
+function cutHole(
+  shape: Shape3D,
+  h: HoleFeature,
+  box: BoxFeature,
+  before: number,
+): { shape: Shape3D; volume: number; issues: Issue[] } {
+  const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
+  const bottom = h.depth === 0 ? -extra : box.height - h.depth;
+  const tool = makeCylinder(
+    h.diameter / 2,
+    box.height + extra - bottom,
+    [h.x - box.width / 2, h.y - box.depth / 2, bottom],
+    [0, 0, 1],
+  );
+  let result: Shape3D;
+  try {
+    result = shape.cut(tool);
+  } finally {
+    tool.delete();
+  }
+  const volume = measureVolume(result);
+  const removed = before - volume;
+  const max = maxHoleVolume(h, box);
+  const size = result.boundingBox;
+  const sizeOk = near(size.width, box.width) && near(size.height, box.depth) && near(size.depth, box.height);
+  if (!(volume > 0) || removed > max * (1 + 1e-6) + 1e-6 || removed < -1e-6 * before || !sizeOk) {
+    result.delete();
+    throw new ShapeCheckFailed(`${h.name} came out wrong, so your last good version was kept.`, h.id);
+  }
+  const issues: Issue[] =
+    removed <= 1e-9 * before
+      ? [
+          {
+            severity: "warning",
+            featureId: h.id,
+            field: null,
+            message: `${h.name} doesn't cut anything. It's in the empty space inside the box. Make it deeper or move it onto a wall.`,
+          },
+        ]
+      : [];
+  return { shape: result, volume, issues };
+}
+
+class ShapeCheckFailed extends Error {
+  constructor(
+    message: string,
+    readonly featureId?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Builds the whole design: the box, then each hole in order. */
 export function buildDocument(doc: ProjectDocument): BuildResult {
-  const box = doc.features[0];
-  if (!box) return { ok: false, issues: [kernelIssue("There's nothing to build yet.")] };
-  return buildBox(box);
+  if (!doc.features.length) return { ok: false, issues: [kernelIssue("There's nothing to build yet.")] };
+  const issues = validateDocument(doc);
+  if (hasErrors(issues)) return { ok: false, issues };
+  const box = boxOf(doc);
+  const base = buildBox(box);
+  if (!base.ok) return { ok: false, issues: base.issues.map((i) => ({ ...i, featureId: i.featureId ?? box.id })) };
+
+  let shape = base.shape;
+  let volume = base.measurements.volume;
+  for (const h of holesOf(doc)) {
+    try {
+      const r = cutHole(shape, h, box, volume);
+      shape.delete();
+      shape = r.shape;
+      volume = r.volume;
+      issues.push(...r.issues);
+    } catch (e) {
+      shape.delete();
+      const message =
+        e instanceof ShapeCheckFailed
+          ? e.message
+          : `The geometry engine couldn't cut ${h.name}, so your last good version was kept.`;
+      return { ok: false, issues: [{ severity: "error", featureId: h.id, field: null, message }] };
+    }
+  }
+  return { ok: true, shape, measurements: measure(shape), issues };
 }
 
 export function measure(shape: Shape3D): Measurements {

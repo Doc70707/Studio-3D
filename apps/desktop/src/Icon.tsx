@@ -7,6 +7,10 @@ const PATHS = {
   check: "M5 12.5l4.5 4.5L19 7.5",
   alert: "M12 8v5M12 16.5v.5M10.3 3.9L2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
   close: "M6 6l12 12M18 6L6 18",
+  plus: "M12 5v14M5 12h14",
+  trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
+  undo: "M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3",
+  redo: "M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3",
 } as const;
 
 export function Icon({ name }: { name: keyof typeof PATHS }) {

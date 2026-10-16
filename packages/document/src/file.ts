@@ -1,7 +1,7 @@
 // The .s3d project file: versioned JSON.
 // Rules: never silently drop data we don't understand, never guess at a newer format,
 // and explain every rejection in plain language.
-import type { BoxFeature, Feature, ProjectDocument } from "./model";
+import type { BoxFeature, Feature, HoleFeature, ProjectDocument } from "./model";
 
 export const FILE_FORMAT = "studio3d-project";
 export const FILE_FORMAT_VERSION = 1;
@@ -42,7 +42,14 @@ export function serializeProject(doc: ProjectDocument, app: AppInfo, preserved: 
 
 const KNOWN_FILE_KEYS = new Set(["format", "formatVersion", "app", "document"]);
 const KNOWN_DOC_KEYS = new Set(["units", "features"]);
-const KNOWN_BOX_KEYS = new Set<string>(["id", "type", "name", "width", "depth", "height", "wall"]);
+const KNOWN_KEYS: Record<Feature["type"], Set<string>> = {
+  box: new Set(["id", "type", "name", "width", "depth", "height", "wall"]),
+  hole: new Set(["id", "type", "name", "x", "y", "diameter", "depth"]),
+};
+const NUMBERS: Record<Feature["type"], readonly string[]> = {
+  box: ["width", "depth", "height", "wall"],
+  hole: ["x", "y", "diameter", "depth"],
+};
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -82,7 +89,8 @@ export function parseProject(text: string): ParseResult {
   if (docRaw.units !== "mm") {
     return { ok: false, error: `This project uses units "${String(docRaw.units)}", which this version can't open.` };
   }
-  if (!Array.isArray(docRaw.features)) return { ok: false, error: "This project file is damaged: its list of shapes is missing." };
+  if (!Array.isArray(docRaw.features))
+    return { ok: false, error: "This project file is damaged: its list of shapes is missing." };
 
   const features: Feature[] = [];
   const preserved: Preserved = {
@@ -96,35 +104,39 @@ export function parseProject(text: string): ParseResult {
   for (const [i, f] of docRaw.features.entries()) {
     const where = `shape ${i + 1}`;
     if (!isObject(f)) return { ok: false, error: `This project file is damaged: ${where} is unreadable.` };
-    if (f.type !== "box") {
-      return { ok: false, error: `This project contains a kind of shape ("${String(f.type)}") this version doesn't support yet. The file has not been changed.` };
+    if (f.type !== "box" && f.type !== "hole") {
+      return {
+        ok: false,
+        error: `This project contains a kind of shape ("${String(f.type)}") this version doesn't support yet. The file has not been changed.`,
+      };
+    }
+    if ((i === 0) !== (f.type === "box")) {
+      return { ok: false, error: "This project file is damaged: it must contain exactly one box, listed first." };
     }
     if (typeof f.id !== "string" || !f.id || seen.has(f.id)) {
       return { ok: false, error: `This project file is damaged: ${where} has a missing or duplicate ID.` };
     }
     seen.add(f.id);
-    const nums = ["width", "depth", "height", "wall"] as const;
-    for (const k of nums) {
+    for (const k of NUMBERS[f.type]) {
       if (typeof f[k] !== "number" || !Number.isFinite(f[k])) {
         return { ok: false, error: `This project file is damaged: the ${k} of ${where} isn't a number.` };
       }
     }
-    const box: BoxFeature = {
-      id: f.id,
-      type: "box",
-      name: typeof f.name === "string" && f.name ? f.name : "Box",
-      width: f.width as number,
-      depth: f.depth as number,
-      height: f.height as number,
-      wall: f.wall as number,
-    };
-    const extra = pickUnknown(f, KNOWN_BOX_KEYS);
+    const name = typeof f.name === "string" && f.name ? f.name : f.type === "box" ? "Box" : `Hole ${i}`;
+    const feature: Feature =
+      f.type === "box"
+        ? ({ id: f.id, type: "box", name, width: f.width, depth: f.depth, height: f.height, wall: f.wall } as BoxFeature)
+        : ({ id: f.id, type: "hole", name, x: f.x, y: f.y, diameter: f.diameter, depth: f.depth } as HoleFeature);
+    const extra = pickUnknown(f, KNOWN_KEYS[f.type]);
     if (Object.keys(extra).length) {
-      preserved.features[box.id] = extra;
-      warnings.push(`${box.name} has settings from a newer version (${Object.keys(extra).join(", ")}). They'll be kept when you save, but aren't used.`);
+      preserved.features[feature.id] = extra;
+      warnings.push(
+        `${name} has settings from a newer version (${Object.keys(extra).join(", ")}). They'll be kept when you save, but aren't used.`,
+      );
     }
-    features.push(box);
+    features.push(feature);
   }
+  if (!features.length) return { ok: false, error: "This project file is damaged: it has no box in it." };
   if (Object.keys(preserved.file).length || Object.keys(preserved.document).length) {
     warnings.push("This project has data from a newer version. It'll be kept when you save, but isn't used.");
   }
