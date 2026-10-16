@@ -1,27 +1,24 @@
 // Project state: the document (source of truth), where it's saved, and whether it has unsaved changes.
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
-  boxOf,
   canRedo,
   canUndo,
   emptyPreserved,
   holesOf,
   newDocument,
-  newHole,
   parseProject,
   record,
   redo as redoStep,
   serializeProject,
   startHistory,
   undo as undoStep,
-  type BoxFeature,
-  type HoleFeature,
+  type Feature,
   type Preserved,
   type ProjectDocument,
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.3.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.4.0" };
 
 const fingerprint = (doc: ProjectDocument) => JSON.stringify(doc);
 
@@ -46,40 +43,32 @@ export function useProject() {
   const dirty = fingerprint(doc) !== savedPrint;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
-  const box = boxOf(doc);
   const holes = holesOf(doc);
   const name = file?.name.replace(/\.s3d$/i, "") ?? "Untitled";
 
-  const updateBox = useCallback(
-    (patch: Partial<Omit<BoxFeature, "id" | "type">>) =>
+  /** Changes some numbers (or the add/cut mode) of one shape or hole. Typing in one field is one undo step. */
+  const updateFeature = useCallback(
+    (id: string, patch: Partial<Record<string, number | string>>) =>
       edit(
-        (d) => ({ ...d, features: d.features.map((f) => (f.type === "box" ? { ...f, ...patch } : f)) }),
-        `box.${Object.keys(patch).join()}`,
+        (d) => ({ ...d, features: d.features.map((f) => (f.id === id ? ({ ...f, ...patch } as Feature) : f)) }),
+        `${id}.${Object.keys(patch).join()}`,
       ),
     [edit],
   );
 
-  const updateHole = useCallback(
-    (id: string, patch: Partial<Omit<HoleFeature, "id" | "type">>) =>
-      edit(
-        (d) => ({ ...d, features: d.features.map((f) => (f.id === id && f.type === "hole" ? { ...f, ...patch } : f)) }),
-        `hole.${id}.${Object.keys(patch).join()}`,
-      ),
-    [edit],
-  );
-
-  const addHole = useCallback(
-    () =>
+  /** Adds a new shape before the holes (holes are always drilled last), or a hole at the end. */
+  const addFeature = useCallback(
+    (feature: Feature) =>
       edit((d) => {
-        const used = new Set(holesOf(d).map((h) => h.name));
-        let n = 1;
-        while (used.has(`Hole ${n}`)) n++;
-        return { ...d, features: [...d.features, newHole(boxOf(d), n)] };
+        if (feature.type === "hole") return { ...d, features: [...d.features, feature] };
+        const firstHole = d.features.findIndex((f) => f.type === "hole");
+        const at = firstHole === -1 ? d.features.length : firstHole;
+        return { ...d, features: [...d.features.slice(0, at), feature, ...d.features.slice(at)] };
       }, null),
     [edit],
   );
 
-  const removeHole = useCallback(
+  const removeFeature = useCallback(
     (id: string) => edit((d) => ({ ...d, features: d.features.filter((f) => f.id !== id) }), null),
     [edit],
   );
@@ -161,7 +150,6 @@ export function useProject() {
   return useMemo(
     () => ({
       doc,
-      box,
       holes,
       file,
       name,
@@ -171,10 +159,9 @@ export function useProject() {
       setNotice,
       busy,
       run,
-      updateBox,
-      updateHole,
-      addHole,
-      removeHole,
+      updateFeature,
+      addFeature,
+      removeFeature,
       undo,
       redo,
       canUndo: undoable,
@@ -192,10 +179,9 @@ export function useProject() {
       notice,
       busy,
       run,
-      updateBox,
-      updateHole,
-      addHole,
-      removeHole,
+      updateFeature,
+      addFeature,
+      removeFeature,
       undo,
       redo,
       undoable,

@@ -10,7 +10,7 @@ A beginner-first 3D design studio for making functional, dimensionally accurate 
 | 1. Running application | Done. App shell, 3D viewport, camera controls, tests, Windows CI |
 | 2. Real geometry proof | **In review.** Real box from the OCCT kernel, save/reopen, verified STL export |
 | 3. Guided "Make a Box" | Next |
-| 4. Editing and operations | **In progress.** Holes (cut by the kernel) and undo/redo are in review |
+| 4. Editing and operations | **In progress.** Holes, undo/redo and more shapes are in review |
 
 What works today:
 
@@ -20,6 +20,8 @@ What works today:
 - Outside size, inside space and material volume, measured from the real geometry.
 - New, Open, Save, Save as (Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S). Desktop saves are atomic and keep a `.bak`
   of the previous version. You're asked before unsaved changes are thrown away or the window closes.
+- Shapes: box, cylinder, tube, cone and sphere, each placed anywhere on the plate and set to add material or cut it
+  away. Every shape and every add or cut is checked against the exact maths, and impossible results keep your last good part.
 - Holes: add round holes that go straight down from the top, all the way through or to a set depth. Each cut is
   checked against the hand calculation, holes that run off an edge are explained, and a hole that cuts nothing gets a warning.
 - Undo and redo (Ctrl+Z, Ctrl+Y) for every change. Typing a number counts as one step.
@@ -30,7 +32,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: guided workflow, holes on the sides, more shapes, print preparation.
+Not yet: sketching on a face, measurements in the 3D view, offsets, threads, print preparation.
 
 ## Getting the Windows app (no setup needed)
 

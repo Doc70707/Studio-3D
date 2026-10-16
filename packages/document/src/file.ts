@@ -1,10 +1,10 @@
 // The .s3d project file: versioned JSON.
 // Rules: never silently drop data we don't understand, never guess at a newer format,
 // and explain every rejection in plain language.
-import type { BoxFeature, Feature, HoleFeature, ProjectDocument } from "./model";
+import { SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
 
 export const FILE_FORMAT = "studio3d-project";
-export const FILE_FORMAT_VERSION = 1;
+export const FILE_FORMAT_VERSION = 2;
 export const FILE_EXTENSION = "s3d";
 
 export interface AppInfo {
@@ -42,13 +42,25 @@ export function serializeProject(doc: ProjectDocument, app: AppInfo, preserved: 
 
 const KNOWN_FILE_KEYS = new Set(["format", "formatVersion", "app", "document"]);
 const KNOWN_DOC_KEYS = new Set(["units", "features"]);
-const KNOWN_KEYS: Record<Feature["type"], Set<string>> = {
-  box: new Set(["id", "type", "name", "width", "depth", "height", "wall"]),
-  hole: new Set(["id", "type", "name", "x", "y", "diameter", "depth"]),
-};
+/** The numbers each kind of step stores. */
 const NUMBERS: Record<Feature["type"], readonly string[]> = {
-  box: ["width", "depth", "height", "wall"],
+  box: ["x", "y", "z", ...SIZE_FIELDS.box],
+  cylinder: ["x", "y", "z", ...SIZE_FIELDS.cylinder],
+  tube: ["x", "y", "z", ...SIZE_FIELDS.tube],
+  cone: ["x", "y", "z", ...SIZE_FIELDS.cone],
+  sphere: ["x", "y", "z", ...SIZE_FIELDS.sphere],
   hole: ["x", "y", "diameter", "depth"],
+};
+const TYPES = new Set(Object.keys(NUMBERS));
+const knownKeys = (type: Feature["type"]) =>
+  new Set(["id", "type", "name", ...(type === "hole" ? [] : ["mode"]), ...NUMBERS[type]]);
+const DEFAULT_NAMES: Record<Feature["type"], string> = {
+  box: "Box",
+  cylinder: "Cylinder",
+  tube: "Tube",
+  cone: "Cone",
+  sphere: "Sphere",
+  hole: "Hole",
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -59,7 +71,24 @@ function pickUnknown(obj: Record<string, unknown>, known: Set<string>): Record<s
 
 /** Upgrades older file versions in place. Each step takes version n to n + 1. */
 const MIGRATIONS: Record<number, (file: Record<string, unknown>) => void> = {
-  // 1: (file) => { ...upgrade to version 2... },
+  // Version 1 had one box centred on the plate, with holes measured from the box's left and front edges.
+  // Version 2 places every shape and hole from the centre of the plate.
+  1: (file) => {
+    const doc = file.document;
+    if (!isObject(doc) || !Array.isArray(doc.features)) return;
+    const box = doc.features[0];
+    if (!isObject(box) || box.type !== "box") return;
+    const halfW = typeof box.width === "number" ? box.width / 2 : 0;
+    const halfD = typeof box.depth === "number" ? box.depth / 2 : 0;
+    for (const f of doc.features) {
+      if (!isObject(f)) continue;
+      if (f.type === "box") Object.assign(f, { mode: "add", x: 0, y: 0, z: 0 });
+      if (f.type === "hole" && typeof f.x === "number" && typeof f.y === "number") {
+        f.x -= halfW;
+        f.y -= halfD;
+      }
+    }
+  },
 };
 
 export function parseProject(text: string): ParseResult {
@@ -102,32 +131,35 @@ export function parseProject(text: string): ParseResult {
   const seen = new Set<string>();
 
   for (const [i, f] of docRaw.features.entries()) {
-    const where = `shape ${i + 1}`;
+    const where = `step ${i + 1}`;
     if (!isObject(f)) return { ok: false, error: `This project file is damaged: ${where} is unreadable.` };
-    if (f.type !== "box" && f.type !== "hole") {
+    if (typeof f.type !== "string" || !TYPES.has(f.type)) {
       return {
         ok: false,
         error: `This project contains a kind of shape ("${String(f.type)}") this version doesn't support yet. The file has not been changed.`,
       };
     }
-    if ((i === 0) !== (f.type === "box")) {
-      return { ok: false, error: "This project file is damaged: it must contain exactly one box, listed first." };
+    const type = f.type as Feature["type"];
+    if (i === 0 && type === "hole") {
+      return { ok: false, error: "This project file is damaged: it has to start with a shape, not a hole." };
     }
     if (typeof f.id !== "string" || !f.id || seen.has(f.id)) {
       return { ok: false, error: `This project file is damaged: ${where} has a missing or duplicate ID.` };
     }
     seen.add(f.id);
-    for (const k of NUMBERS[f.type]) {
+    for (const k of NUMBERS[type]) {
       if (typeof f[k] !== "number" || !Number.isFinite(f[k])) {
         return { ok: false, error: `This project file is damaged: the ${k} of ${where} isn't a number.` };
       }
     }
-    const name = typeof f.name === "string" && f.name ? f.name : f.type === "box" ? "Box" : `Hole ${i}`;
-    const feature: Feature =
-      f.type === "box"
-        ? ({ id: f.id, type: "box", name, width: f.width, depth: f.depth, height: f.height, wall: f.wall } as BoxFeature)
-        : ({ id: f.id, type: "hole", name, x: f.x, y: f.y, diameter: f.diameter, depth: f.depth } as HoleFeature);
-    const extra = pickUnknown(f, KNOWN_KEYS[f.type]);
+    if (type !== "hole" && f.mode !== "add" && f.mode !== "cut") {
+      return { ok: false, error: `This project file is damaged: ${where} doesn't say whether it adds or cuts.` };
+    }
+    const name = typeof f.name === "string" && f.name ? f.name : `${DEFAULT_NAMES[type]} ${i + 1}`;
+    const known = knownKeys(type);
+    const feature = Object.fromEntries(Object.entries(f).filter(([k]) => known.has(k))) as unknown as Feature;
+    feature.name = name;
+    const extra = pickUnknown(f, known);
     if (Object.keys(extra).length) {
       preserved.features[feature.id] = extra;
       warnings.push(
@@ -136,7 +168,7 @@ export function parseProject(text: string): ParseResult {
     }
     features.push(feature);
   }
-  if (!features.length) return { ok: false, error: "This project file is damaged: it has no box in it." };
+  if (!features.length) return { ok: false, error: "This project file is damaged: it has no shapes in it." };
   if (Object.keys(preserved.file).length || Object.keys(preserved.document).length) {
     warnings.push("This project has data from a newer version. It'll be kept when you save, but isn't used.");
   }

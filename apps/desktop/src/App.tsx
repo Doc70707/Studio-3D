@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Viewport, isWebGLAvailable, type CameraState, type StandardView } from "@studio3d/viewport";
 import { GeometryClient, createGeometryWorker, type Measurements } from "@studio3d/geometry";
-import { hasErrors, validateDocument, type BoxFeature, type Issue, type ProjectDocument } from "@studio3d/document";
-import { BoxPanel } from "./BoxPanel";
+import { hasErrors, validateDocument, type Issue, type ProjectDocument } from "@studio3d/document";
+import { DesignPanel } from "./DesignPanel";
 import { Icon } from "./Icon";
 import { platform } from "./platform";
 import { useProject } from "./useProject";
@@ -16,11 +16,11 @@ const VIEW_BUTTONS: { view: StandardView; label: string; key: string }[] = [
 
 type Engine = "starting" | "ready" | "failed";
 /** The last model the engine built, and the exact document it was built from. */
-type Built = { doc: ProjectDocument; box: BoxFeature; measurements: Measurements };
+type Built = { doc: ProjectDocument; measurements: Measurements };
 
 export function App() {
   const project = useProject();
-  const { doc, box, dirty, dirtyRef, name, notice, setNotice, busy, run } = project;
+  const { doc, dirty, dirtyRef, name, notice, setNotice, busy, run } = project;
 
   const hostRef = useRef<HTMLDivElement>(null);
   const topbarRef = useRef<HTMLElement>(null);
@@ -108,7 +108,7 @@ export function App() {
           setBuilding(false);
           if (r.status === "built") {
             viewportRef.current?.setModel(r.mesh);
-            setBuilt({ doc, box, measurements: r.measurements });
+            setBuilt({ doc, measurements: r.measurements });
             setKernelIssues(r.issues); // warnings found while building, e.g. a hole that cuts nothing
           } else {
             setKernelIssues(r.issues);
@@ -307,18 +307,17 @@ export function App() {
         </button>
       </header>
 
-      <BoxPanel
+      <DesignPanel
         ref={panelRef}
-        box={box}
+        doc={doc}
+        holes={project.holes}
         issues={issues}
         measurements={built?.measurements ?? null}
-        builtBox={built?.box ?? null}
-        holes={project.holes}
-        onChange={project.updateBox}
-        onHoleChange={project.updateHole}
-        onAddHole={project.addHole}
-        onRemoveHole={project.removeHole}
+        builtDoc={built?.doc ?? null}
         stale={!upToDate && built !== null}
+        onChange={project.updateFeature}
+        onAdd={project.addFeature}
+        onRemove={project.removeFeature}
       />
 
       <footer className="statusbar glass" ref={statusRef}>

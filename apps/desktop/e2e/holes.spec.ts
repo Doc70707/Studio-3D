@@ -37,9 +37,9 @@ test("a hole off the edge is explained and the last good model is kept", async (
   await page.getByRole("button", { name: "Add hole" }).click();
   await current(page);
   const good = await volume(page).innerText();
-  await field(page, "Hole 1 distance from left edge").fill("1");
+  await field(page, "Hole 1 left / right position").fill("-29");
   await expect(page.getByText("runs off the left edge")).toBeVisible();
-  await expect(field(page, "Hole 1 distance from left edge")).toHaveAttribute("aria-invalid", "true");
+  await expect(field(page, "Hole 1 left / right position")).toHaveAttribute("aria-invalid", "true");
   await expect(host(page)).toHaveAttribute("data-geometry", "stale");
   await expect(volume(page)).toHaveText(good);
   await expect(page.getByRole("button", { name: "Export STL" })).toBeDisabled();
@@ -103,7 +103,7 @@ test("Ctrl+Z inside a text box undoes the design, not just the text", async ({ p
 test("holes are saved and reopened exactly", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
   await field(page, "Hole 1 diameter").fill("3.5");
-  await field(page, "Hole 1 distance from left edge").fill("12.25");
+  await field(page, "Hole 1 left / right position").fill("12.25");
   await current(page);
   const saved = await volume(page).innerText();
   const download = page.waitForEvent("download");
@@ -116,7 +116,7 @@ test("holes are saved and reopened exactly", async ({ page }) => {
   await page.getByRole("button", { name: "Open…" }).click();
   await (await chooser).setFiles(path);
   await expect(field(page, "Hole 1 diameter")).toHaveValue("3.5");
-  await expect(field(page, "Hole 1 distance from left edge")).toHaveValue("12.25");
+  await expect(field(page, "Hole 1 left / right position")).toHaveValue("12.25");
   await current(page);
   await expect(volume(page)).toHaveText(saved);
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled(); // opening starts a fresh history
