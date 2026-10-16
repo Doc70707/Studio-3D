@@ -360,6 +360,144 @@ input:focus-visible {
 }
 
 /* Measurements card */
+/* Shapes */
+.shape-card {
+  margin-bottom: 10px;
+  border-radius: 16px;
+  background: var(--fill);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: border-color 160ms var(--ease), background-color 160ms var(--ease);
+}
+
+.shape-card.open {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(94, 168, 255, 0.35);
+}
+
+.shape-card.has-error {
+  border-color: rgba(255, 171, 164, 0.6);
+}
+
+.shape-card > .issue {
+  margin: 0 12px 10px;
+}
+
+.shape-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 4px;
+}
+
+.shape-toggle {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 8px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shape-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mode-dot {
+  grid-row: span 2;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.mode-dot.cut {
+  background: transparent;
+  border: 2px dashed var(--warning);
+}
+
+.shape-name {
+  font-weight: 650;
+}
+
+.shape-summary {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shape-body {
+  padding: 4px 12px 12px;
+}
+
+.segmented-small {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  margin-bottom: 14px;
+  padding: 3px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.segmented-small button {
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.segmented-small button[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.92);
+  color: #0d1424;
+  font-weight: 650;
+}
+
+.segmented-small button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.position {
+  margin-top: 4px;
+}
+
+.position-title {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.hole-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.panel .add-row button.add {
+  height: 30px;
+  padding: 0 10px;
+}
+
 /* Holes */
 .holes {
   margin-top: 22px;
@@ -709,4 +847,13 @@ input:focus-visible {
   .input-row {
     border-color: #8a96b3;
   }
+}
+
+/* The three position boxes are narrow, so their unit is in the heading instead */
+.hole-grid.three .unit {
+  display: none;
+}
+
+.hole-grid.three .input-row {
+  padding-right: 0;
 }
