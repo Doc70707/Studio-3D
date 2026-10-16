@@ -366,7 +366,7 @@ function ShapeCard(props: {
 
 const surfaceWord = (sk: SketchFeature) => (sk.surface === "plate" ? "plate" : "face");
 
-/** A sketch in the list: what it does and how far, with the drawing itself edited on the sketch screen. */
+/** The hollow step: how thick the walls are and which side is left open. */
 function HollowCard(props: {
   hollow: HollowFeature;
   issues: Issue[];
@@ -440,6 +440,7 @@ function HollowCard(props: {
   );
 }
 
+/** A sketch in the list: what it does and how far, with the drawing itself edited on the sketch screen. */
 function SketchCard(props: {
   sketch: SketchFeature;
   first: boolean;
