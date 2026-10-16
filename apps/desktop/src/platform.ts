@@ -21,13 +21,23 @@ export interface Platform {
   /** Saves to `target` if given (desktop only), otherwise asks where. Returns where it went, or null if cancelled. */
   saveProject(text: string, suggestedName: string, target?: FileRef): Promise<FileRef | null>;
   exportStl(data: ArrayBuffer, suggestedName: string): Promise<FileRef | null>;
-  /** `hasUnsavedChanges` is read when the user tries to close the app. */
-  guardClose(hasUnsavedChanges: () => boolean): () => void;
+  /**
+   * `hasUnsavedChanges` is read when the user tries to close the app. `onDiscard` runs when they choose to close
+   * without saving (desktop only: a browser can't tell a deliberate close from a crash).
+   */
+  guardClose(hasUnsavedChanges: () => boolean, onDiscard: () => Promise<void>): () => void;
+  /** The crash-recovery copy of unsaved work, kept outside the user's own files. */
+  recovery: {
+    read(): Promise<string | null>;
+    write(text: string): Promise<void>;
+    clear(): Promise<void>;
+  };
   /** Asks before throwing away unsaved work. */
   confirmDiscard(message: string): Promise<boolean>;
   setTitle(title: string): void;
 }
 
+const RECOVERY_KEY = "studio3d.recovery";
 const PROJECT_FILTER = { name: "Studio 3D project", extensions: [FILE_EXTENSION] };
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const withExt = (name: string, ext: string) => (name.toLowerCase().endsWith(`.${ext}`) ? name : `${name}.${ext}`);
@@ -62,7 +72,7 @@ const desktop: Platform = {
     return { name: baseName(path), path };
   },
 
-  guardClose(hasUnsavedChanges) {
+  guardClose(hasUnsavedChanges, onDiscard) {
     const win = getCurrentWindow();
     const off = win.onCloseRequested(async (event) => {
       if (!hasUnsavedChanges()) return;
@@ -72,9 +82,17 @@ const desktop: Platform = {
         okLabel: "Close without saving",
         cancelLabel: "Keep working",
       });
-      if (!leave) event.preventDefault();
+      if (!leave) return event.preventDefault();
+      // The user chose to throw the work away, so don't offer it back next time.
+      await onDiscard().catch(() => {});
     });
     return () => void off.then((f) => f());
+  },
+
+  recovery: {
+    read: () => invoke<string | null>("read_recovery"),
+    write: (text) => invoke("write_recovery", { text }),
+    clear: () => invoke("clear_recovery"),
   },
 
   confirmDiscard(message) {
@@ -124,6 +142,27 @@ const browser: Platform = {
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
+  },
+
+  // Local storage can be switched off or full; recovery is then simply unavailable, never an error that stops work.
+  recovery: {
+    async read() {
+      try {
+        return localStorage.getItem(RECOVERY_KEY);
+      } catch {
+        return null;
+      }
+    },
+    async write(text) {
+      localStorage.setItem(RECOVERY_KEY, text);
+    },
+    async clear() {
+      try {
+        localStorage.removeItem(RECOVERY_KEY);
+      } catch {
+        // nothing to clear
+      }
+    },
   },
 
   async confirmDiscard(message) {

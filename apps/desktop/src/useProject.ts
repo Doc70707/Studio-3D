@@ -1,5 +1,5 @@
 // Project state: the document (source of truth), where it's saved, and whether it has unsaved changes.
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   canRedo,
   canUndo,
@@ -8,22 +8,39 @@ import {
   moveFeature as moved,
   newDocument,
   parseProject,
+  parseRecovery,
   record,
   redo as redoStep,
   serializeProject,
+  serializeRecovery,
   startHistory,
   undo as undoStep,
   type Feature,
   type Preserved,
   type ProjectDocument,
+  type RecoveryResult,
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.10.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.11.0" };
+
+/** How long after the last edit the unsaved work is backed up. */
+export const BACKUP_DELAY_MS = 2000;
+
+/** Unsaved work found from a session that ended without saving, waiting for the user to restore or discard it. */
+export type RecoveryOffer = Extract<RecoveryResult, { ok: true }>;
 
 const fingerprint = (doc: ProjectDocument) => JSON.stringify(doc);
 
 export type Notice = { kind: "info" | "error"; text: string } | null;
+
+/** "at 21:30" today, otherwise "on 16 Oct 2026, 21:30". */
+export function whenSaved(iso: string): string {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date().toDateString()) return `at ${time}`;
+  return `on ${d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}, ${time}`;
+}
 
 export function useProject() {
   const [history, setHistory] = useState(() => startHistory(newDocument()));
@@ -172,6 +189,125 @@ export function useProject() {
     [doc, file, name, run],
   );
 
+  // Crash recovery. While unsaved work exists, a copy of it is kept outside the user's file, a moment after each
+  // edit. On the next start, a copy left behind means the app closed without saving: the user can restore it.
+  // Backups wait while that offer is open, so new edits never overwrite work the user hasn't decided about.
+  const [recovery, setRecovery] = useState<"checking" | "offered" | "ready">("checking");
+  const [offer, setOffer] = useState<RecoveryOffer | null>(null);
+  /** The document the backup copy currently holds, so the status bar can say the work is safe. */
+  const [backedUpDoc, setBackedUpDoc] = useState<ProjectDocument | null>(null);
+  const hasBackup = useRef(false);
+  const warnedBackup = useRef(false);
+  // Backup writes and removals run one at a time, in order, so a late write can't land after a removal.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = useCallback(<T,>(op: () => Promise<T>): Promise<T> => {
+    const next = queue.current.then(op, op);
+    queue.current = next.catch(() => {});
+    return next;
+  }, []);
+  const forgetBackup = useCallback(() => {
+    hasBackup.current = false;
+    setBackedUpDoc(null);
+    return enqueue(() => platform.recovery.clear());
+  }, [enqueue]);
+
+  useEffect(() => {
+    let cancelled = false;
+    platform.recovery.read().then(
+      (text) => {
+        if (cancelled) return;
+        if (text === null) return setRecovery("ready");
+        const found = parseRecovery(text);
+        if (found.ok) {
+          setOffer(found);
+          return setRecovery("offered");
+        }
+        void enqueue(() => platform.recovery.clear()).catch(() => {});
+        setNotice({ kind: "error", text: `${found.error} It has been removed.` });
+        setRecovery("ready");
+      },
+      () => !cancelled && setRecovery("ready"), // no backup folder: the app works, just without recovery
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [enqueue]);
+
+  useEffect(() => {
+    if (recovery !== "ready") return;
+    if (!dirty) {
+      if (hasBackup.current) void forgetBackup().catch(() => {});
+      return;
+    }
+    const timer = setTimeout(() => {
+      const text = serializeRecovery({
+        savedAt: new Date().toISOString(),
+        file,
+        project: serializeProject(doc, APP_INFO, preserved.current),
+      });
+      enqueue(() => platform.recovery.write(text)).then(
+        () => {
+          hasBackup.current = true;
+          setBackedUpDoc(doc);
+        },
+        (e: unknown) => {
+          if (warnedBackup.current) return;
+          warnedBackup.current = true;
+          const why = e instanceof Error ? e.message : String(e);
+          setNotice({ kind: "error", text: `Your unsaved work couldn't be backed up (${why}). Save often to keep it safe.` });
+        },
+      );
+    }, BACKUP_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [recovery, dirty, doc, file, enqueue, forgetBackup]);
+
+  /** Brings back the unsaved work from the last session. It stays unsaved until the user saves it. */
+  const restoreBackup = useCallback(
+    () =>
+      run(async () => {
+        if (!offer || !(await okToDiscard())) return;
+        preserved.current = offer.parsed.preserved;
+        setDoc(offer.parsed.document);
+        setFile(offer.snapshot.file);
+        setSavedPrint(""); // never matches a document, so the work shows as unsaved
+        hasBackup.current = true; // the copy is still there until this work is saved or backed up again
+        setOffer(null);
+        setRecovery("ready");
+        setNotice({
+          kind: "info",
+          text: [
+            `Restored your unsaved work from ${whenSaved(offer.snapshot.savedAt)}. Save it to keep it.`,
+            ...offer.parsed.warnings,
+          ].join(" "),
+        });
+      }),
+    [offer, okToDiscard, run],
+  );
+
+  /** Throws away the unsaved work from the last session. */
+  const discardBackup = useCallback(
+    () =>
+      run(async () => {
+        await forgetBackup();
+        setOffer(null);
+        setRecovery("ready");
+      }),
+    [forgetBackup, run],
+  );
+
+  const backedUp = dirty && backedUpDoc === doc;
+
+  /**
+   * For "close without saving": that work is deliberately thrown away, so its backup goes too. A backup from an
+   * earlier crash the user hasn't decided about yet is kept for next time.
+   */
+  const recoveryRef = useRef(recovery);
+  recoveryRef.current = recovery;
+  const discardOnClose = useCallback(
+    async () => (recoveryRef.current === "offered" ? undefined : forgetBackup()),
+    [forgetBackup],
+  );
+
   const undoable = canUndo(history);
   const redoable = canRedo(history);
   return useMemo(
@@ -197,6 +333,11 @@ export function useProject() {
       newProject,
       openProject,
       save,
+      recoveryOffer: offer,
+      restoreBackup,
+      discardBackup,
+      discardOnClose,
+      backedUp,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -218,6 +359,11 @@ export function useProject() {
       newProject,
       openProject,
       save,
+      offer,
+      restoreBackup,
+      discardBackup,
+      discardOnClose,
+      backedUp,
     ],
   );
 }

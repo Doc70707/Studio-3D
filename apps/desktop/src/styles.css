@@ -945,6 +945,68 @@ input:focus-visible {
   background: var(--fill-hover);
 }
 
+/* Unsaved work found from a session that closed without saving. */
+.recovery {
+  position: absolute;
+  top: 88px;
+  left: 50%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  width: min(480px, calc(100% - 32px));
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-strong);
+  line-height: 1.45;
+  transform: translateX(-50%);
+  animation: materialize 320ms var(--ease);
+}
+
+.recovery > .icon {
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.recovery h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.recovery p {
+  margin: 0 0 4px;
+}
+
+.recovery .actions {
+  grid-column: 2;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.recovery button {
+  height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.recovery button:hover {
+  background: var(--fill-hover);
+}
+
+.recovery button.restore {
+  background: linear-gradient(180deg, var(--button), var(--button-strong));
+  color: var(--on-accent);
+}
+
+.recovery button.restore:hover {
+  filter: brightness(1.08);
+}
+
 /* While sketching, the drawing screen takes over; the design panels step back. */
 .app.sketching .topbar,
 .app.sketching .panel,

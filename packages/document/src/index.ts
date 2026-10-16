@@ -3,3 +3,4 @@ export * from "./file";
 export * from "./history";
 export * from "./sketch";
 export * from "./threads";
+export * from "./recovery";

@@ -20,6 +20,9 @@ What works today:
 - Outside size, inside space and material volume, measured from the real geometry.
 - New, Open, Save, Save as (Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S). Desktop saves are atomic and keep a `.bak`
   of the previous version. You're asked before unsaved changes are thrown away or the window closes.
+- Crash recovery: while you have unsaved changes, a backup copy is kept a couple of seconds after each edit (on
+  Windows in the app's data folder, in the browser build in local storage). If Studio 3D closes without saving, the
+  next start offers to restore it. Saving, or choosing to close without saving, removes the backup.
 - Shapes: box, cylinder, tube, cone and sphere, each placed anywhere on the plate and set to add material or cut it
   away. Every shape and every add or cut is checked against the exact maths, and impossible results keep your last good part.
 - Holes: add round holes that go straight down from the top, all the way through or to a set depth. Each cut is

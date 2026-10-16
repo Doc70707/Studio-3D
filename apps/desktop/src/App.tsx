@@ -31,7 +31,7 @@ import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
 import { platform } from "./platform";
-import { useProject } from "./useProject";
+import { useProject, whenSaved } from "./useProject";
 
 const VIEW_BUTTONS: { view: StandardView; label: string; key: string }[] = [
   { view: "iso", label: "3D", key: "0" },
@@ -494,7 +494,8 @@ export function App() {
     const suffix = engine === "failed" ? " (geometry engine unavailable)" : "";
     platform.setTitle(`${name}${dirty ? " •" : ""} — Studio 3D${suffix}`);
   }, [name, dirty, engine]);
-  useEffect(() => platform.guardClose(() => dirtyRef.current), [dirtyRef]);
+  const { discardOnClose } = project;
+  useEffect(() => platform.guardClose(() => dirtyRef.current, discardOnClose), [dirtyRef, discardOnClose]);
 
   /** "top face", "curved face": what the clicked face is, in words. */
   const faceName = (face: number) => outlineOfFace(meshRef.current!, face)?.label ?? "curved face";
@@ -505,7 +506,14 @@ export function App() {
   };
 
   const saveLabel = platform.capabilities.saveInPlace ? "Save" : "Download project";
-  const saveStatus = dirty ? "Unsaved changes" : project.file ? "All changes saved" : "Not saved yet";
+  const saveStatus = dirty
+    ? project.backedUp
+      ? "Unsaved changes (backed up)"
+      : "Unsaved changes"
+    : project.file
+      ? "All changes saved"
+      : "Not saved yet";
+  const offer = project.recoveryOffer;
 
   return (
     <div className={`app${draft ? " sketching" : ""}${picking ? " picking" : ""}`}>
@@ -555,6 +563,32 @@ export function App() {
             onRemove={() => project.removeFeature(selected.id)}
             onClose={() => setSelection(null)}
           />
+        )}
+        {offer && !draft && (
+          <section
+            className="recovery glass"
+            role="alertdialog"
+            aria-labelledby="recovery-title"
+            data-testid="recovery"
+          >
+            <Icon name="alert" />
+            <div>
+              <h2 id="recovery-title">Restore your unsaved work?</h2>
+              <p>
+                Studio 3D closed before {offer.snapshot.file ? offer.snapshot.file.name : "your design"} was saved. A
+                backup from {whenSaved(offer.snapshot.savedAt)} is ready to restore.
+              </p>
+              <p className="muted">New changes aren't backed up until you choose.</p>
+            </div>
+            <div className="actions">
+              <button type="button" className="restore" onClick={() => void project.restoreBackup()}>
+                Restore
+              </button>
+              <button type="button" onClick={() => void project.discardBackup()}>
+                Discard
+              </button>
+            </div>
+          </section>
         )}
         {notice && (
           <div className={`toast glass ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
