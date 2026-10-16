@@ -537,7 +537,8 @@ input:focus-visible {
   letter-spacing: -0.01em;
 }
 
-.panel button.add {
+.panel button.add,
+.sketch-side button.add {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -555,7 +556,8 @@ input:focus-visible {
     transform 100ms ease-out;
 }
 
-.panel button.add:hover {
+.panel button.add:hover,
+.sketch-side button.add:hover {
   background: rgba(94, 168, 255, 0.24);
 }
 
@@ -1107,6 +1109,12 @@ input:focus-visible {
   stroke-dasharray: 6 4;
 }
 
+.sketch-canvas .profile.hole path,
+.sketch-canvas .profile.hole circle {
+  fill: rgba(8, 12, 20, 0.55);
+  stroke-dasharray: 3 3;
+}
+
 .sketch-canvas .profile.selected path,
 .sketch-canvas .profile.selected circle {
   stroke: #ffffff;
@@ -1270,4 +1278,20 @@ input:focus-visible {
 
 .hole-card.focused {
   border-color: rgba(255, 201, 77, 0.55);
+}
+
+.sketch-side .offset-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sketch-side .offset-row .field {
+  flex: 1;
+}
+
+.sketch-side .offset-row button.add {
+  flex: none;
+  height: 36px;
 }

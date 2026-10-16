@@ -6,7 +6,9 @@ import {
   faceOutline,
   hasErrors,
   newDocument,
+  nestingDepths,
   newSketch,
+  offsetProfile,
   parseProject,
   polygonArea,
   selfIntersects,
@@ -247,5 +249,86 @@ describe("sketches in project files", () => {
     const r = parseProject(JSON.stringify(file));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain("damaged");
+  });
+});
+
+describe("offsets", () => {
+  it("grows and shrinks a rectangle evenly on every side", () => {
+    expect(offsetProfile(rect, 2)).toEqual({ kind: "rectangle", x: -2, y: -2, width: 14, height: 9 });
+    expect(offsetProfile(rect, -2)).toEqual({ kind: "rectangle", x: 2, y: 2, width: 6, height: 1 });
+    expect(offsetProfile(rect, -3)).toBeNull(); // a 5 mm tall rectangle can't shrink by 3 mm on each side
+  });
+
+  it("changes a circle's diameter by twice the offset", () => {
+    expect(offsetProfile({ kind: "circle", x: 1, y: 2, diameter: 10 }, 1.5)).toMatchObject({
+      diameter: 13,
+      x: 1,
+      y: 2,
+    });
+    expect(offsetProfile({ kind: "circle", x: 0, y: 0, diameter: 10 }, -5)).toBeNull();
+  });
+
+  it("moves every side of an outline out by the same distance, keeping sharp corners", () => {
+    const L: Profile = {
+      kind: "polygon",
+      points: [
+        [0, 0],
+        [40, 0],
+        [40, 5],
+        [5, 5],
+        [5, 30],
+        [0, 30],
+      ],
+    };
+    const grown = offsetProfile(L, 1)!;
+    expect(grown).toEqual({
+      kind: "polygon",
+      points: [
+        [-1, -1],
+        [41, -1],
+        [41, 6],
+        [6, 6],
+        [6, 31],
+        [-1, 31],
+      ],
+    });
+    // Drawn the other way round, outwards is still outwards.
+    const reversed: Profile = { kind: "polygon", points: [...(L as { points: [number, number][] }).points].reverse() };
+    expect(Math.abs(polygonArea((offsetProfile(reversed, 1) as { points: [number, number][] }).points))).toBeCloseTo(
+      Math.abs(polygonArea((grown as { points: [number, number][] }).points)),
+      9,
+    );
+  });
+
+  it("refuses an inward offset that would make an arm of the outline vanish", () => {
+    const L: Profile = {
+      kind: "polygon",
+      points: [
+        [0, 0],
+        [40, 0],
+        [40, 5],
+        [5, 5],
+        [5, 30],
+        [0, 30],
+      ],
+    };
+    expect(offsetProfile(L, -1)).not.toBeNull();
+    expect(offsetProfile(L, -3)).toBeNull(); // the arms are only 5 mm wide
+  });
+});
+
+describe("holes in sketches", () => {
+  it("an outline drawn inside another is a hole, and an island inside that adds again", () => {
+    const outer: Profile = { kind: "rectangle", x: 0, y: 0, width: 40, height: 40 };
+    const hole: Profile = { kind: "rectangle", x: 5, y: 5, width: 30, height: 30 };
+    const island: Profile = { kind: "circle", x: 20, y: 20, diameter: 10 };
+    const apart: Profile = { kind: "circle", x: 60, y: 20, diameter: 10 };
+    expect(nestingDepths([outer, hole, island, apart])).toEqual([0, 1, 2, 0]);
+  });
+
+  it("outlines that only overlap are joined, not holes", () => {
+    const a: Profile = { kind: "rectangle", x: 0, y: 0, width: 20, height: 20 };
+    const b: Profile = { kind: "rectangle", x: 10, y: 10, width: 20, height: 20 };
+    expect(nestingDepths([a, b])).toEqual([0, 0]);
   });
 });

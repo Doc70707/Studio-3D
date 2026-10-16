@@ -237,3 +237,100 @@ export function selfIntersects(points: Point2[]): boolean {
   }
   return false;
 }
+
+const tidy2 = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
+
+/**
+ * A copy of an outline moved outwards by `distance` mm (inwards when negative), keeping sharp corners.
+ * Returns null when an inward offset would make the outline vanish or turn inside out.
+ */
+export function offsetProfile(p: Profile, distance: number): Profile | null {
+  if (p.kind === "rectangle") {
+    const width = p.width + 2 * distance;
+    const height = p.height + 2 * distance;
+    if (width <= 0 || height <= 0) return null;
+    return {
+      kind: "rectangle",
+      x: tidy2(p.x - distance),
+      y: tidy2(p.y - distance),
+      width: tidy2(width),
+      height: tidy2(height),
+    };
+  }
+  if (p.kind === "circle") {
+    const diameter = p.diameter + 2 * distance;
+    return diameter > 0 ? { kind: "circle", x: p.x, y: p.y, diameter: tidy2(diameter) } : null;
+  }
+  const pts = p.points;
+  const n = pts.length;
+  const ccw = polygonArea(pts) > 0 ? 1 : -1;
+  // Each side, moved out along its outward normal.
+  const sides = pts.map((a, i) => {
+    const b = pts[(i + 1) % n]!;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    const nx = (ccw * dy) / len;
+    const ny = (-ccw * dx) / len;
+    return { a: [a[0] + nx * distance, a[1] + ny * distance] as Point2, d: [dx / len, dy / len] as Point2 };
+  });
+  const out: Point2[] = sides.map((s, i) => {
+    const prev = sides[(i + n - 1) % n]!;
+    const denom = prev.d[0] * s.d[1] - prev.d[1] * s.d[0];
+    if (Math.abs(denom) < 1e-12) return s.a; // a straight-through corner
+    const t = ((s.a[0] - prev.a[0]) * s.d[1] - (s.a[1] - prev.a[1]) * s.d[0]) / denom;
+    return [tidy2(prev.a[0] + prev.d[0] * t), tidy2(prev.a[1] + prev.d[1] * t)];
+  });
+  // Every side must still point the same way, or the outline has folded over itself.
+  const folded = out.some((q, i) => {
+    const r = out[(i + 1) % n]!;
+    const s = sides[i]!.d;
+    return (r[0] - q[0]) * s[0] + (r[1] - q[1]) * s[1] <= 1e-9;
+  });
+  if (folded || selfIntersects(out) || polygonArea(out) * ccw <= 0) return null;
+  return { kind: "polygon", points: out };
+}
+
+/** Points around a profile's outline, used to tell whether one profile sits inside another. */
+function outlineSamples(p: Profile): Point2[] {
+  if (p.kind === "rectangle")
+    return [
+      [p.x, p.y],
+      [p.x + p.width, p.y],
+      [p.x + p.width, p.y + p.height],
+      [p.x, p.y + p.height],
+    ];
+  if (p.kind === "circle")
+    return Array.from({ length: 32 }, (_, i): Point2 => {
+      const a = (i / 32) * 2 * Math.PI;
+      return [p.x + (p.diameter / 2) * Math.cos(a), p.y + (p.diameter / 2) * Math.sin(a)];
+    });
+  return p.points;
+}
+
+/** True when a point is strictly inside a profile. */
+export function insideProfile(q: Point2, p: Profile): boolean {
+  if (p.kind === "rectangle") return q[0] > p.x && q[0] < p.x + p.width && q[1] > p.y && q[1] < p.y + p.height;
+  if (p.kind === "circle") return Math.hypot(q[0] - p.x, q[1] - p.y) < p.diameter / 2;
+  let inside = false;
+  const pts = p.points;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i]!;
+    const [xj, yj] = pts[j]!;
+    if (yi > q[1] !== yj > q[1] && q[0] < ((xj - xi) * (q[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * How deep each profile is nested: 0 for an outline on its own, 1 for one drawn entirely inside another
+ * (a hole), 2 for an island inside that hole, and so on. Even depths add material, odd depths are holes.
+ */
+export function nestingDepths(profiles: Profile[]): number[] {
+  return profiles.map((p, i) => {
+    const samples = outlineSamples(p);
+    return profiles.filter(
+      (q, j) => j !== i && profileArea(q) > profileArea(p) && samples.every((s) => insideProfile(s, q)),
+    ).length;
+  });
+}

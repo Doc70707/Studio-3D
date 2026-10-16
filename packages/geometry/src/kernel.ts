@@ -22,6 +22,7 @@ import {
   validateDocument,
   validateShape,
   add3,
+  nestingDepths,
   profileArea,
   scale,
   type BoxFeature,
@@ -227,11 +228,15 @@ export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
   const extra = cut ? 1 : 0;
   const length = (cut && s.depth === 0 ? partSize + 2 : s.depth) + extra;
   const origin = add3(s.plane.origin, scale(s.plane.normal, extra));
+  const depths = nestingDepths(s.profiles);
+  // Outlines on their own add; one drawn inside another is a hole in it; an island in a hole adds again.
+  const order = s.profiles.map((p, i) => ({ p, depth: depths[i]! })).sort((a, b) => a.depth - b.depth);
   let tool: Shape3D | null = null;
-  let least = 0;
   let most = 0;
+  let biggest = 0;
+  let holes = 0;
   try {
-    for (const p of s.profiles) {
+    for (const { p, depth } of order) {
       const solid = drawProfile(p)
         .sketchOnPlane(new Plane(origin, s.plane.xDir, s.plane.normal))
         .extrude(cut ? -length : length) as Shape3D;
@@ -240,14 +245,16 @@ export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
         solid.delete();
         throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
       }
-      least = Math.max(least, want);
-      most += want;
+      if (depth % 2 === 0) {
+        most += want;
+        biggest = Math.max(biggest, want);
+      } else holes += want;
       if (!tool) tool = solid;
       else {
-        const joined: Shape3D = tool.fuse(solid);
+        const next: Shape3D = depth % 2 === 0 ? tool.fuse(solid) : tool.cut(solid);
         tool.delete();
         solid.delete();
-        tool = joined;
+        tool = next;
       }
     }
   } catch (e) {
@@ -256,9 +263,14 @@ export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
   }
   if (!tool) throw new ShapeCheckFailed(`${s.name} is empty. Draw at least one shape in it.`, s.id);
   const v = measureVolume(tool);
-  if (v < least * (1 - 1e-6) || v > most * (1 + 1e-6)) {
+  // Joined outlines can't be bigger than all of them together, or smaller than the biggest minus every hole.
+  if (v > most * (1 + 1e-6) || v < (biggest - holes) * (1 - 1e-6) - 1e-9) {
     tool.delete();
     throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
+  }
+  if (v <= 1e-9 * most) {
+    tool.delete();
+    throw new ShapeCheckFailed(`The holes in ${s.name} cover all of it, so there's nothing left to make.`, s.id);
   }
   return { shape: tool, least: v, most: v };
 }
