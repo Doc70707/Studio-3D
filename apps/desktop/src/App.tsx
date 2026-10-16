@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Viewport, isWebGLAvailable, type CameraState, type StandardView } from "@studio3d/viewport";
+import { Viewport, isWebGLAvailable, partDimensions, type CameraState, type StandardView } from "@studio3d/viewport";
 import {
   GeometryClient,
   createGeometryWorker,
@@ -23,6 +23,7 @@ import {
 import { DesignPanel } from "./DesignPanel";
 import { SketchEditor, type SketchDraft } from "./SketchEditor";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
+import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
 import { platform } from "./platform";
 import { useProject } from "./useProject";
@@ -64,6 +65,10 @@ export function App() {
   /** The sketch being drawn, if any. Its preview is built live, but it only joins the design on Done. */
   const [draft, setDraft] = useState<SketchDraft | null>(null);
   const [sketchView, setSketchView] = useState<"2d" | "3d">("2d");
+  /** Measurements in the 3D view: the part's overall size, plus where the selected shape or hole sits. */
+  const [showSizes, setShowSizes] = useState(true);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const pointerReadout = useRef<HTMLSpanElement>(null);
 
   // Viewport
   useEffect(() => {
@@ -141,6 +146,7 @@ export function App() {
           if (r.status === "built") {
             meshRef.current = r.mesh;
             viewportRef.current?.setModel(r.mesh);
+            viewportRef.current?.setPartBounds({ min: r.measurements.min, max: r.measurements.max });
             setBuilt({ doc: shownDoc, measurements: r.measurements });
             setKernelIssues(r.issues); // warnings found while building, e.g. a hole that cuts nothing
           } else {
@@ -186,7 +192,11 @@ export function App() {
   };
 
   const onHostPointerMove = (e: React.PointerEvent) => {
-    if (!picking || e.buttons) return;
+    if (!picking) {
+      showPointer(e.buttons ? null : (viewportRef.current?.pickPoint(e.clientX, e.clientY) ?? null));
+      return;
+    }
+    if (e.buttons) return;
     const hit = faceAt(e.clientX, e.clientY);
     viewportRef.current?.setHighlight(hit?.outline ? new Float32Array(hit.points.flat()) : null);
     setPickMessage(
@@ -209,6 +219,25 @@ export function App() {
       area: [0, 0, o.width, o.height],
     });
   };
+
+  /** Where the pointer is on the part, written in the status bar (updated directly: it changes on every move). */
+  const showPointer = (p: [number, number, number] | null) => {
+    const el = pointerReadout.current;
+    if (!el) return;
+    const n = (v: number) => (Math.round(v * 10) / 10 + 0).toFixed(1);
+    el.textContent = p ? `Pointer on the part: left/right ${n(p[0])} · front/back ${n(p[1])} · height ${n(p[2])} mm` : "";
+    el.parentElement?.classList.toggle("showing-pointer", !!p);
+  };
+
+  // Measurement lines and labels in the 3D view.
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const m = built?.measurements;
+    if (!showSizes || !m || draft) return vp.setDimensions([]);
+    const focused = built.doc.features.find((f) => f.id === focusId);
+    vp.setDimensions([...partDimensions(m.min, m.max), ...(focused ? featureDimensions(focused, m) : [])]);
+  }, [built, showSizes, focusId, draft]);
 
   const sketchOnPlate = useCallback(() => {
     const m = built?.measurements;
@@ -338,6 +367,10 @@ export function App() {
         return;
       }
       if (mod || e.altKey || e.target instanceof HTMLInputElement) return;
+      if (key === "m") {
+        setShowSizes((v) => !v);
+        return;
+      }
       const b = VIEW_BUTTONS.find((v) => v.key === e.key);
       if (b) viewportRef.current?.setView(b.view);
     };
@@ -367,6 +400,7 @@ export function App() {
         onPointerUp={onHostPointerUp}
         data-camera-view={camera?.view ?? ""}
         data-camera-position={camera ? camera.position.join(",") : ""}
+        data-camera-target={camera ? camera.target.join(",") : ""}
         data-geometry={engine === "ready" ? (shownCurrent ? "current" : building ? "building" : "stale") : engine}
       >
         {webglError && (
@@ -488,6 +522,17 @@ export function App() {
               {b.label}
             </button>
           ))}
+          <span className="divider" aria-hidden="true" />
+          <button
+            type="button"
+            aria-pressed={showSizes}
+            title="Show sizes in the 3D view (M)"
+            onClick={() => setShowSizes((v) => !v)}
+            disabled={webglError}
+          >
+            <Icon name="ruler" />
+            Sizes
+          </button>
         </nav>
 
         <button
@@ -517,6 +562,7 @@ export function App() {
         onSketchOnPlate={sketchOnPlate}
         onEditSketch={editSketch}
         picking={picking}
+        onFocus={setFocusId}
       />
 
       {draft && (
@@ -548,7 +594,10 @@ export function App() {
                   ? "Model up to date"
                   : "Showing your last good design"}
         </span>
-        <span className="hint">Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view</span>
+        <span className="hint">
+          <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
+          <span className="hint-text">Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view · M sizes</span>
+        </span>
       </footer>
     </div>
   );

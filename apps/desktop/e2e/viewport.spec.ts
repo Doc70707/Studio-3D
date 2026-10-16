@@ -4,6 +4,13 @@ const host = (page: Page) => page.locator("main.viewport-host");
 const cameraPos = async (page: Page) =>
   ((await host(page).getAttribute("data-camera-position")) ?? "").split(",").map(Number);
 const distance = (p: number[]) => Math.hypot(p[0] ?? 0, p[1] ?? 0, p[2] ?? 0);
+const cameraTarget = async (page: Page) =>
+  ((await host(page).getAttribute("data-camera-target")) ?? "").split(",").map(Number);
+/** How far the camera is from the point it orbits around. */
+const orbitRadius = async (page: Page) => {
+  const [p, t] = [await cameraPos(page), await cameraTarget(page)];
+  return distance(p.map((v, i) => v - (t[i] ?? 0)));
+};
 
 test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
@@ -47,7 +54,7 @@ test("standard view buttons move the camera", async ({ page }) => {
     await expect(page.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
   }
   await page.getByRole("button", { name: "Top", exact: true }).click();
-  // Camera sits directly above the plate centre (orbit controls nudge it a hair off the pole).
+  // Camera sits directly above the part's centre, which is on the plate centre (orbit controls nudge it a hair off the pole).
   await expect.poll(async () => Math.max(...(await cameraPos(page)).slice(0, 2).map(Math.abs))).toBeLessThan(0.01);
   expect((await cameraPos(page))[2]).toBeGreaterThan(0);
 });
@@ -61,6 +68,7 @@ test("keyboard shortcuts change the view", async ({ page }) => {
 
 test("dragging orbits the camera", async ({ page }) => {
   const before = await cameraPos(page);
+  const radius = await orbitRadius(page);
   const box = (await page.getByTestId("viewport-canvas").boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
@@ -69,8 +77,8 @@ test("dragging orbits the camera", async ({ page }) => {
   await expect(host(page)).toHaveAttribute("data-camera-view", "custom");
   const after = await cameraPos(page);
   expect(after).not.toEqual(before);
-  // Orbiting keeps the same distance from the target (the plate centre).
-  expect(distance(after)).toBeCloseTo(distance(before), 0);
+  // Orbiting keeps the same distance from the point it turns around (the middle of the part).
+  expect(await orbitRadius(page)).toBeCloseTo(radius, 0);
 });
 
 test("scrolling zooms in", async ({ page }) => {
@@ -90,6 +98,6 @@ test("right-drag pans the view", async ({ page }) => {
   await page.mouse.up({ button: "right" });
   const after = await cameraPos(page);
   expect(after).not.toEqual(before);
-  // The target moved off the plate centre, so the camera's distance from the origin changes.
+  // The target moved, so the camera's distance from the origin changes.
   expect(Math.abs(distance(after) - distance(before))).toBeGreaterThan(0.001);
 });

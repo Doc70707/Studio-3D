@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { placeCamera, type Bounds, type StandardView } from "./views";
+import { boundsRadius, placeCamera, type Bounds, type StandardView } from "./views";
+import { dimensionLines, labelPoint, type Dimension } from "./dimensions";
 
 export interface ViewportOptions {
   /** Build plate size in millimetres. */
@@ -53,6 +54,9 @@ export class Viewport {
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private plateBounds: Bounds;
+  /** What the standard views frame: the part with room around it for its measurements, or the plate when empty. */
+  private framed: Bounds | null = null;
+  private partBounds: Bounds | null = null;
   private view: StandardView | "custom" = "iso";
   private frameRequested = false;
   private listeners = new Set<(s: CameraState) => void>();
@@ -61,6 +65,9 @@ export class Viewport {
   private highlight: THREE.Mesh | null = null;
   private sketchLines: THREE.LineSegments | null = null;
   private readonly raycaster = new THREE.Raycaster();
+  private dimensionGroup: THREE.Group | null = null;
+  private labels: { el: HTMLElement; at: THREE.Vector3 }[] = [];
+  private readonly labelLayer: HTMLDivElement;
   private safeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
   /** Vertical field of view and aspect of the uncovered area, used to fit standard views. */
   private fit = { fov: FOV, aspect: 1 };
@@ -82,6 +89,9 @@ export class Viewport {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.domElement.setAttribute("data-testid", "viewport-canvas");
     container.appendChild(this.renderer.domElement);
+    this.labelLayer = document.createElement("div");
+    this.labelLayer.className = "dimension-labels";
+    container.appendChild(this.labelLayer);
 
     this.camera.up.set(0, 0, 1);
 
@@ -107,7 +117,8 @@ export class Viewport {
   }
 
   setView(view: StandardView): void {
-    const p = placeCamera(view, this.plateBounds, this.fit.fov, this.fit.aspect);
+    if (this.partBounds) this.framed = roomAround(this.partBounds);
+    const p = placeCamera(view, this.framed ?? this.plateBounds, this.fit.fov, this.fit.aspect);
     this.camera.up.set(...p.up);
     this.camera.position.set(...p.position);
     this.controls.target.set(...p.target);
@@ -215,6 +226,54 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** The point on the model under a point of the window, or null. */
+  pickPoint(clientX: number, clientY: number): [number, number, number] | null {
+    if (!this.surface) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObject(this.surface, false)[0];
+    return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  }
+
+  /** Shows measurement lines with labels that always face the screen. Replaces the previous ones. */
+  setDimensions(dimensions: Dimension[]): void {
+    if (this.dimensionGroup) {
+      this.scene.remove(this.dimensionGroup);
+      disposeObject(this.dimensionGroup);
+      this.dimensionGroup = null;
+    }
+    this.labelLayer.replaceChildren();
+    this.labels = [];
+    if (dimensions.length) {
+      const group = new THREE.Group();
+      group.name = "dimensions";
+      for (const kind of ["part", "feature"] as const) {
+        const pts = dimensions.filter((d) => d.kind === kind).flatMap(dimensionLines);
+        if (!pts.length) continue;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+        const line = new THREE.LineSegments(
+          g,
+          new THREE.LineBasicMaterial({ color: kind === "part" ? 0xdfe6f5 : 0xffc94d, depthTest: false, transparent: true, opacity: 0.85 }),
+        );
+        line.renderOrder = 4;
+        group.add(line);
+      }
+      this.scene.add(group);
+      this.dimensionGroup = group;
+      for (const d of dimensions) {
+        const el = document.createElement("span");
+        el.className = `dimension-label ${d.kind}`;
+        el.dataset.testid = "dimension";
+        el.textContent = d.text;
+        this.labelLayer.appendChild(el);
+        this.labels.push({ el, at: new THREE.Vector3(...labelPoint(d)) });
+      }
+    }
+    this.requestRender();
+  }
+
   /** Points the camera straight at a flat surface, with `up` pointing up on screen, framing `size` mm. */
   lookAt(
     target: [number, number, number],
@@ -235,6 +294,25 @@ export class Viewport {
     this.controls.update();
     this.view = "custom";
     this.requestRender();
+  }
+
+  /**
+   * Tells the view how big the part is, so the standard views frame it rather than the whole plate.
+   * While a standard view is showing, it reframes when the part no longer fits or has shrunk a lot,
+   * but not on every small change, so the view doesn't jump while you type.
+   */
+  setPartBounds(bounds: Bounds | null): void {
+    this.partBounds = bounds;
+    if (this.view === "custom") return;
+    const next = bounds ? roomAround(bounds) : null;
+    const r = (b: Bounds | null) => (b ? boundsRadius(b) : 0);
+    const fits =
+      next &&
+      this.framed &&
+      next.min.every((v, i) => v >= this.framed!.min[i]!) &&
+      next.max.every((v, i) => v <= this.framed!.max[i]!) &&
+      r(next) > r(this.framed) * 0.5;
+    if (!fits) this.setView(this.view);
   }
 
   /** Keeps the scene centred in the part of the view that floating panels don't cover. */
@@ -270,6 +348,7 @@ export class Viewport {
     disposeObject(this.scene);
     this.renderer.dispose();
     this.renderer.domElement.remove();
+    this.labelLayer.remove();
   }
 
   private resize(): void {
@@ -298,6 +377,28 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** Moves each measurement label over the middle of its line on screen. */
+  private placeLabels(): void {
+    if (!this.labels.length) return;
+    const { clientWidth: w, clientHeight: h } = this.container;
+    const p = new THREE.Vector3();
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    for (const { el, at } of this.labels) {
+      p.copy(at).project(this.camera);
+      const visible = p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2;
+      el.style.visibility = visible ? "visible" : "hidden";
+      const lw = el.offsetWidth + 4;
+      const lh = el.offsetHeight + 2;
+      const x = ((p.x + 1) / 2) * w;
+      let y = ((1 - p.y) / 2) * h;
+      // Labels that would cover one already placed step down until they're clear, so every number stays readable.
+      const hits = (yy: number) => placed.some((q) => Math.abs(q.x - x) < (q.w + lw) / 2 && Math.abs(q.y - yy) < (q.h + lh) / 2);
+      for (let i = 0; i < 8 && hits(y); i++) y += lh;
+      placed.push({ x, y, w: lw, h: lh });
+      el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+    }
+  }
+
   // Render only when something changed, so an idle app uses no GPU.
   private requestRender(): void {
     if (this.frameRequested) return;
@@ -305,10 +406,18 @@ export class Viewport {
     requestAnimationFrame(() => {
       this.frameRequested = false;
       this.renderer.render(this.scene, this.camera);
+      this.placeLabels();
       const s = this.getCameraState();
       this.listeners.forEach((fn) => fn(s));
     });
   }
+}
+
+/** The part's box with space around it for measurement labels, never smaller than 60 mm across. */
+function roomAround(b: Bounds): Bounds {
+  const size = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
+  const pad = Math.max(10, size * 0.3, (60 - size) / 2);
+  return { min: [b.min[0] - pad, b.min[1] - pad, b.min[2]], max: [b.max[0] + pad, b.max[1] + pad, b.max[2] + pad] };
 }
 
 function disposeObject(root: THREE.Object3D): void {

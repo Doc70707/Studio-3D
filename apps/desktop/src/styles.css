@@ -1228,3 +1228,46 @@ input:focus-visible {
 .sketch-issues .issue {
   margin: 2px 0;
 }
+
+/* ---------- Measurements in the 3D view ---------- */
+
+.dimension-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dimension-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: rgba(10, 14, 28, 0.82);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+}
+
+.dimension-label.feature {
+  color: #ffd36b;
+  box-shadow: 0 0 0 1px rgba(255, 201, 77, 0.45) inset;
+}
+
+.hint .pointer-readout {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.hint.showing-pointer .hint-text {
+  display: none;
+}
+
+.hole-card.focused {
+  border-color: rgba(255, 201, 77, 0.55);
+}

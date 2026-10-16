@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useState } from "react";
 import {
   FIELD_LABELS,
   SHAPES,
@@ -56,11 +56,13 @@ interface Props {
   onEditSketch: (id: string) => void;
   /** Waiting for a face to be clicked. */
   picking: boolean;
+  /** Tells which shape or hole is being worked on, so the 3D view can show its measurements. */
+  onFocus: (id: string | null) => void;
 }
 
 /** The left panel: every shape in the part, then its holes, then the measurements. */
 export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
-  { doc, holes, issues, measurements, builtDoc, stale, onChange, onAdd, onRemove, ...sketching },
+  { doc, holes, issues, measurements, builtDoc, stale, onChange, onAdd, onRemove, onFocus, ...sketching },
   ref,
 ) {
   const shapes = shapesOf(doc);
@@ -68,6 +70,9 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
   const solidCount = doc.features.filter(isSolidStep).length;
   const [selected, setSelected] = useState<string | null>(shapes[0]?.id ?? null);
   const open = shapes.some((s) => s.id === selected) ? selected : (shapes[0]?.id ?? null);
+  const [holeFocus, setHoleFocus] = useState<string | null>(null);
+  const focused = holes.some((h) => h.id === holeFocus) ? holeFocus : open;
+  useEffect(() => onFocus(focused), [focused, onFocus]);
   const general = issues.filter((i) => i.featureId === undefined);
   // New shapes go in the middle of the part, standing on top of it, so they are easy to see.
   const where = measurements
@@ -82,6 +87,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
     const s = newShape(doc, type, where);
     onAdd(s);
     setSelected(s.id);
+    setHoleFocus(null);
   };
 
   return (
@@ -99,7 +105,10 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               only={solidCount === 1}
               open={s.id === open}
               issues={issues.filter((x) => x.featureId === s.id)}
-              onOpen={() => setSelected(s.id === open ? null : s.id)}
+              onOpen={() => {
+                setSelected(s.id === open ? null : s.id);
+                setHoleFocus(null);
+              }}
               onChange={(patch) => onChange(s.id, patch)}
               onRemove={() => onRemove(s.id)}
             />
@@ -183,6 +192,8 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
             <HoleCard
               key={h.id}
               hole={h}
+              focused={h.id === focused}
+              onFocus={() => setHoleFocus(h.id)}
               issues={issues.filter((i) => i.featureId === h.id)}
               onChange={(patch) => onChange(h.id, patch)}
               onRemove={() => onRemove(h.id)}
@@ -429,6 +440,8 @@ function SketchCard(props: {
 
 function HoleCard(props: {
   hole: HoleFeature;
+  focused: boolean;
+  onFocus: () => void;
   issues: Issue[];
   onChange: (patch: Patch) => void;
   onRemove: () => void;
@@ -437,7 +450,12 @@ function HoleCard(props: {
   const through = hole.depth === 0;
   const issueFor = (field: keyof HoleFeature) => issues.find((i) => i.field === field);
   return (
-    <div className="hole-card" data-testid="hole">
+    <div
+      className={`hole-card${props.focused ? " focused" : ""}`}
+      data-testid="hole"
+      onFocusCapture={props.onFocus}
+      onPointerDown={props.onFocus}
+    >
       <div className="hole-head">
         <span className="hole-name">{hole.name}</span>
         <button
