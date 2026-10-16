@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BOX, FILE_FORMAT_VERSION, hasErrors, newDocument, parseProject, serializeProject, validateBox, type BoxFeature } from "./index";
+import {
+  DEFAULT_BOX,
+  FILE_FORMAT_VERSION,
+  hasErrors,
+  newDocument,
+  parseProject,
+  serializeProject,
+  validateBox,
+  type BoxFeature,
+} from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
 const box = (over: Partial<BoxFeature> = {}): BoxFeature => ({ id: "b1", ...DEFAULT_BOX, ...over });
@@ -94,5 +103,43 @@ describe("project file", () => {
     const file = JSON.parse(serializeProject(newDocument(), app));
     file.document.features.push({ ...file.document.features[0] });
     expect(parseProject(JSON.stringify(file)).ok).toBe(false);
+  });
+});
+
+describe("holes in project files", () => {
+  const hole = { id: "h1", type: "hole", name: "Hole 1", x: 30, y: 20, diameter: 5, depth: 0 };
+  const withFeatures = (features: unknown[]) => {
+    const file = JSON.parse(serializeProject(newDocument(), app));
+    file.document.features = features;
+    return JSON.stringify(file);
+  };
+
+  it("reads a box followed by holes", () => {
+    const b = JSON.parse(serializeProject(newDocument(), app)).document.features[0];
+    const r = parseProject(withFeatures([b, hole, { ...hole, id: "h2", depth: 4 }]));
+    expect(r.ok && r.document.features.map((f) => f.type)).toEqual(["box", "hole", "hole"]);
+  });
+
+  it.each([
+    ["a hole before the box", () => [hole]],
+    ["no shapes at all", () => []],
+    [
+      "two boxes",
+      () => {
+        const b = JSON.parse(serializeProject(newDocument(), app)).document.features[0];
+        return [b, { ...b, id: "b2" }];
+      },
+    ],
+  ])("rejects %s as damaged", (_, features) => {
+    const r = parseProject(withFeatures(features()));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("damaged");
+  });
+
+  it("rejects a hole with a missing number", () => {
+    const b = JSON.parse(serializeProject(newDocument(), app)).document.features[0];
+    const r = parseProject(withFeatures([b, { ...hole, diameter: "big" }]));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("diameter");
   });
 });
