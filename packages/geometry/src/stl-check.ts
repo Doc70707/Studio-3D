@@ -16,7 +16,9 @@ export function checkBinaryStl(buf: ArrayBuffer): StlReport {
   const n = view.getUint32(80, true);
   if (buf.byteLength !== 84 + n * 50) throw new Error(`STL size mismatch: header says ${n} triangles`);
 
-  const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
+  // Corners within 1e-8 mm are the same corner (as in trimesh), so surfaces meeting at a seam must really join.
+  const q = (v: number) => Math.round(v * 1e8) + 0;
+  const key = (x: number, y: number, z: number) => `${q(x)},${q(y)},${q(z)}`;
   const ids = new Map<string, number>();
   const id = (x: number, y: number, z: number) => {
     const k = key(x, y, z);

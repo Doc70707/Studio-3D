@@ -28,6 +28,11 @@ import {
 } from "./kernel";
 import { faceCount, faceOfTriangle, outlineOfFace, trianglesInPlane } from "./faces";
 import {
+  THREADS,
+  threadProfile,
+  threadVolume,
+  type CylinderFeature,
+  type ThreadSize,
   newHollow,
   type OpenSide,
   PLATE_PLANE,
@@ -40,6 +45,7 @@ import {
   type SketchFeature,
 } from "@studio3d/document";
 import { checkBinaryStl } from "./stl-check";
+import { measureVolume } from "replicad";
 
 const require = createRequire(import.meta.url);
 const OUT = new URL("../../../test-output/", import.meta.url).pathname;
@@ -752,6 +758,82 @@ describe("hollow", () => {
   });
 });
 
+// Threads take a few seconds each to build: the helix has to be swept and joined to the core.
+describe("threads", { timeout: 120_000 }, () => {
+  const solid = (): ShapeFeature =>
+    ({ ...newShape({ units: "mm", features: [] }, "box"), width: 60, depth: 40, height: 30 }) as ShapeFeature;
+  const bolt = (thread: ThreadSize, height: number, over: Partial<CylinderFeature> = {}): ShapeFeature =>
+    ({
+      ...newShape({ units: "mm", features: [] }, "cylinder"),
+      diameter: THREADS[thread].diameter,
+      height,
+      thread,
+      fit: 0.3,
+      ...over,
+    }) as ShapeFeature;
+  const tapped = (thread: ThreadSize, depth = 0, fit = 0.3): HoleFeature => ({
+    id: `h-${thread}`,
+    type: "hole",
+    name: "Hole 1",
+    x: 0,
+    y: 0,
+    diameter: THREADS[thread].diameter,
+    depth,
+    thread,
+    fit,
+  });
+
+  it.each(["M3", "M8", "M20"] as const)("an %s bolt has the exact ISO thread volume, 0.3 mm smaller across", (size) => {
+    const r = designed({ units: "mm", features: [bolt(size, 12)] });
+    const t = threadProfile(size, 0.3, true);
+    expect(rel(r.measurements.volume, threadVolume(t, 12))).toBeLessThan(2e-5);
+    const d = THREADS[size].diameter - 0.3;
+    r.measurements.size.forEach((v, i) => expect(Math.abs(v - [d, d, 12][i]!)).toBeLessThan(1e-2));
+  });
+
+  it("a threaded hole through a block removes exactly the thread's space", () => {
+    const r = designed({ units: "mm", features: [solid(), tapped("M5")] });
+    const removed = 72000 - r.measurements.volume;
+    expect(rel(removed, threadVolume(threadProfile("M5", 0.3, false), 30))).toBeLessThan(2e-5);
+  });
+
+  it("a blind threaded hole 10 mm deep", () => {
+    const r = designed({ units: "mm", features: [solid(), tapped("M6", 10)] });
+    expect(rel(72000 - r.measurements.volume, threadVolume(threadProfile("M6", 0.3, false), 10))).toBeLessThan(2e-5);
+  });
+
+  it("a bolt screwed into its threaded hole doesn't touch it anywhere, so it will turn", () => {
+    // The hole's thread starts 1 mm below the part; lifting the bolt to a whole number of pitches above that
+    // lines the two threads up, like screwing it in.
+    const p = THREADS.M8.pitch;
+    const holed = designed({ units: "mm", features: [solid(), tapped("M8")] });
+    const screwed = makeShape(bolt("M8", 4, { id: "bolt", z: 5 * p - 1 }));
+    expect(measureVolume(holed.shape.intersect(screwed))).toBeLessThan(1e-6);
+    // The check can see contact: the same bolt half a millimetre off centre bites into the hole's thread.
+    const offCentre = makeShape(bolt("M8", 4, { id: "bolt", z: 5 * p - 1, x: 0.5 }));
+    expect(measureVolume(holed.shape.intersect(offCentre))).toBeGreaterThan(0.1);
+  });
+
+  it("a threaded rod standing on a block is one piece and exports watertight", async () => {
+    const r = designed({ units: "mm", features: [solid(), bolt("M8", 15, { z: 30 })] });
+    expect(r.measurements.size[2]).toBeCloseTo(45, 6);
+    expect(rel(r.measurements.volume, 72000 + threadVolume(threadProfile("M8", 0.3, true), 15))).toBeLessThan(2e-5);
+    const stl = await exportStl(r.shape);
+    writeFileSync(`${OUT}thread.stl`, Buffer.from(stl));
+    const report = checkBinaryStl(stl);
+    expect(report.watertight).toBe(true);
+    writeFileSync(
+      `${OUT}thread.expected.json`,
+      JSON.stringify({ volume: r.measurements.volume, size: r.measurements.size }),
+    );
+  });
+
+  it("a thread too short for two turns is refused, with the shortest length", () => {
+    const r = buildDocument({ units: "mm", features: [bolt("M8", 2)] });
+    expect(!r.ok && r.issues[0]!.message).toContain("at least 2.5 mm long");
+  });
+});
+
 describe("STL checker itself", () => {
   it("notices a missing triangle", async () => {
     const stl = await exportStl(built(box({ wall: 0 })).shape);
@@ -759,5 +841,25 @@ describe("STL checker itself", () => {
     const cut = stl.slice(0, 84 + (n - 1) * 50);
     new DataView(cut).setUint32(80, n - 1, true);
     expect(checkBinaryStl(cut).watertight).toBe(false);
+  });
+
+  it("notices two closed pieces stuck together at a seam, even when their corners differ by a hair", async () => {
+    const a = await exportStl(built(box({ wall: 0, width: 10, depth: 10, height: 10 })).shape);
+    // The same block moved right by its own width, plus a hair, so the two share their touching face.
+    const b = a.slice(0);
+    const view = new DataView(b);
+    const n = view.getUint32(80, true);
+    for (let t = 0; t < n; t++)
+      for (let v = 0; v < 3; v++) {
+        const o = 84 + t * 50 + 12 + v * 12;
+        view.setFloat32(o, view.getFloat32(o, true) + 10, true);
+        view.setFloat32(o + 4, view.getFloat32(o + 4, true) + 1e-13, true);
+      }
+    const both = new Uint8Array(84 + 2 * n * 50);
+    both.set(new Uint8Array(a), 0);
+    both.set(new Uint8Array(b, 84), 84 + n * 50);
+    new DataView(both.buffer).setUint32(80, 2 * n, true);
+    expect(checkBinaryStl(a).watertight).toBe(true);
+    expect(checkBinaryStl(both.buffer).watertight).toBe(false);
   });
 });

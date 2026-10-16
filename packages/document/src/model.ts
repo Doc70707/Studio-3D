@@ -2,6 +2,15 @@
 // All lengths are stored in millimetres. Positions are measured from the centre of the build plate:
 // x to the right (red axis), y to the back (green axis), z up from the plate.
 import { profileArea, selfIntersects, type Profile, type SketchPlane, PROFILE_LABELS, dot, length3 } from "./sketch";
+import {
+  MAX_FIT,
+  THREADS,
+  isThreadSize,
+  threadProfile,
+  threadVolume,
+  type ThreadProfile,
+  type ThreadSize,
+} from "./threads";
 
 export type Units = "mm";
 
@@ -28,7 +37,15 @@ export interface BoxFeature extends Placed {
   wall: number;
 }
 
-export interface CylinderFeature extends Placed {
+/** Optional ISO thread on a cylinder or hole. With a thread, the diameter comes from the thread size. */
+interface Threadable {
+  thread?: ThreadSize;
+  /** Extra room across the thread so printed parts turn, in mm. */
+  fit?: number;
+}
+
+/** A cylinder. With a thread it becomes a threaded rod (adding) or a threaded hole (cutting). */
+export interface CylinderFeature extends Placed, Threadable {
   type: "cylinder";
   diameter: number;
   height: number;
@@ -63,7 +80,7 @@ export type ShapeType = ShapeFeature["type"];
  * A round hole drilled straight down from the top of the part.
  * x and y are the hole's centre, measured from the centre of the build plate. depth = 0 means all the way through.
  */
-export interface HoleFeature {
+export interface HoleFeature extends Threadable {
   id: string;
   type: "hole";
   name: string;
@@ -347,6 +364,7 @@ export function validateShape(s: ShapeFeature): Issue[] {
   if (issues.length) return issues;
 
   if (s.type === "box") issues.push(...validateBoxWall(s));
+  if (s.type === "cylinder") issues.push(...threadIssues(s, s.height));
   if (s.type === "tube") {
     if (s.innerDiameter < LIMITS.minSize)
       add(
@@ -410,6 +428,7 @@ export function validateHole(h: HoleFeature): Issue[] {
   if (h.diameter < HOLE_LIMITS.minDiameter)
     add("diameter", `A hole needs to be at least ${fmt(HOLE_LIMITS.minDiameter)} across.`);
   if (h.depth < 0) add("depth", "Depth can't be negative. Use 0 to go all the way through.");
+  issues.push(...threadIssues(h, h.depth));
   return issues;
 }
 
@@ -423,7 +442,7 @@ export function holeEdgeIssues(
   max: readonly number[],
   partHeight: number,
 ): Issue[] {
-  const r = h.diameter / 2;
+  const r = holeDiameter(h) / 2;
   const issue = (severity: Severity, field: string, message: string): Issue => ({
     severity,
     featureId: h.id,
@@ -593,6 +612,8 @@ export const hasErrors = (issues: Issue[]) => issues.some((i) => i.severity === 
 /** Exact material volume of one shape on its own, used to check what the geometry engine returns. */
 export function shapeVolume(s: ShapeFeature): number {
   const disc = (d: number) => Math.PI * (d / 2) ** 2;
+  const t = threadOf(s);
+  if (t) return threadVolume(t, (s as CylinderFeature).height);
   switch (s.type) {
     case "box": {
       const outer = s.width * s.depth * s.height;
@@ -614,6 +635,8 @@ export function shapeVolume(s: ShapeFeature): number {
 
 /** The shape's outer size along x, y and z. */
 export function shapeSize(s: ShapeFeature): [number, number, number] {
+  const t = threadOf(s);
+  if (t) return [2 * t.major, 2 * t.major, (s as CylinderFeature).height];
   switch (s.type) {
     case "box":
       return [s.width, s.depth, s.height];
@@ -628,4 +651,37 @@ export function shapeSize(s: ShapeFeature): [number, number, number] {
     case "sphere":
       return [s.diameter, s.diameter, s.diameter];
   }
+}
+
+/**
+ * The thread on a cylinder or hole, if it has one. Adding a threaded cylinder makes a bolt (a little smaller than
+ * the ISO size so it turns in a printed hole); cutting one, or a threaded hole, makes room for a bolt.
+ */
+export function threadOf(f: Feature): ThreadProfile | null {
+  if ((f.type !== "cylinder" && f.type !== "hole") || !f.thread) return null;
+  return threadProfile(f.thread, f.fit ?? 0, f.type === "cylinder" && f.mode === "add");
+}
+
+/** The widest a hole cuts: its diameter, or for a threaded hole the outside of the thread's grooves. */
+export const holeDiameter = (h: HoleFeature): number => {
+  const t = threadOf(h);
+  return t ? 2 * t.major : h.diameter;
+};
+
+/** Checks the thread settings of a cylinder or hole; `length` is how long the thread is (0 = through). */
+function threadIssues(f: CylinderFeature | HoleFeature, length: number): Issue[] {
+  if (f.thread === undefined) return [];
+  const issue = (field: string, message: string): Issue[] => [{ severity: "error", featureId: f.id, field, message }];
+  if (!isThreadSize(f.thread)) return issue("thread", "Choose a thread size from the list.");
+  const fit = f.fit ?? 0;
+  if (!Number.isFinite(fit)) return issue("fit", "Fit clearance needs to be a number.");
+  if (fit < 0) return issue("fit", "Fit clearance can't be negative. Use 0 for the exact ISO size.");
+  if (fit > MAX_FIT) return issue("fit", `Fit clearance can be at most ${fmt(MAX_FIT)}.`);
+  const pitch = THREADS[f.thread].pitch;
+  if (length > 0 && length < 2 * pitch)
+    return issue(
+      f.type === "hole" ? "depth" : "height",
+      `An ${f.thread} thread needs at least two turns: make it at least ${fmt(2 * pitch)} long.`,
+    );
+  return [];
 }

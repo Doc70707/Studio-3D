@@ -20,22 +20,17 @@ const ready = opencascade({ locateFile: () => wasmUrl, print: () => {}, printErr
   (e: unknown) => post({ id: 0, kind: "fatal", error: `The geometry engine failed to start: ${String(e)}` }),
 );
 
+/** The newest rebuild not started yet. Older ones are answered as superseded without building them. */
+let waiting: Extract<Request, { kind: "rebuild" }> | null = null;
+
 self.onmessage = async (ev: MessageEvent<Request>) => {
   await ready;
   const req = ev.data;
   if (req.kind === "rebuild") {
-    const r = buildDocument(req.document);
-    if (!r.ok) return post({ id: req.id, kind: "rebuilt", ok: false, issues: r.issues });
-    lastGood?.delete();
-    lastGood = r.shape;
-    const mesh = tessellate(r.shape);
-    post({ id: req.id, kind: "rebuilt", ok: true, mesh, measurements: r.measurements, issues: r.issues }, [
-      mesh.positions.buffer,
-      mesh.normals.buffer,
-      mesh.indices.buffer,
-      mesh.edges.buffer,
-      mesh.faces.buffer,
-    ]);
+    // A slow build (threads take seconds) lets several edits pile up; only the newest is worth building.
+    if (waiting) post({ id: waiting.id, kind: "rebuilt", ok: false, issues: [] });
+    waiting = req;
+    setTimeout(rebuildWaiting, 0);
   } else if (req.kind === "exportStl") {
     if (!lastGood) return post({ id: req.id, kind: "stl", ok: false, error: "There's no valid model to export yet." });
     try {
@@ -46,3 +41,21 @@ self.onmessage = async (ev: MessageEvent<Request>) => {
     }
   }
 };
+
+function rebuildWaiting() {
+  const req = waiting;
+  if (!req) return;
+  waiting = null;
+  const r = buildDocument(req.document);
+  if (!r.ok) return post({ id: req.id, kind: "rebuilt", ok: false, issues: r.issues });
+  lastGood?.delete();
+  lastGood = r.shape;
+  const mesh = tessellate(r.shape);
+  post({ id: req.id, kind: "rebuilt", ok: true, mesh, measurements: r.measurements, issues: r.issues }, [
+    mesh.positions.buffer,
+    mesh.normals.buffer,
+    mesh.indices.buffer,
+    mesh.edges.buffer,
+    mesh.faces.buffer,
+  ]);
+}

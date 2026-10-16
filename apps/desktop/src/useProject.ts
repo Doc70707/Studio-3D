@@ -18,7 +18,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.8.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.9.0" };
 
 const fingerprint = (doc: ProjectDocument) => JSON.stringify(doc);
 

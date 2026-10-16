@@ -1,7 +1,11 @@
 import { forwardRef, useEffect, useState } from "react";
 import {
+  DEFAULT_FIT,
   FIELD_LABELS,
   OPEN_SIDES,
+  THREADS,
+  THREAD_SIZES,
+  threadLabel,
   SHAPES,
   SIZE_FIELDS,
   PROFILE_LABELS,
@@ -21,6 +25,7 @@ import {
   type ShapeFeature,
   type ShapeType,
   type SketchFeature,
+  type ThreadSize,
 } from "@studio3d/document";
 import type { Measurements } from "@studio3d/geometry";
 import { Icon } from "./Icon";
@@ -250,6 +255,7 @@ function summary(s: ShapeFeature): string {
     case "box":
       return `${mm(s.width)} × ${mm(s.depth)} × ${mm(s.height)} mm${s.wall > 0 ? `, ${mm(s.wall)} walls` : ""}`;
     case "cylinder":
+      if (s.thread) return `${s.thread} ${s.mode === "add" ? "threaded rod" : "thread"} × ${mm(s.height)} mm`;
       return `Ø${mm(s.diameter)} × ${mm(s.height)} mm`;
     case "tube":
       return `Ø${mm(s.outerDiameter)} / Ø${mm(s.innerDiameter)} × ${mm(s.height)} mm`;
@@ -317,16 +323,33 @@ function ShapeCard(props: {
               Cut away
             </button>
           </div>
-          {SIZE_FIELDS[s.type].map((k) => (
-            <NumberField
-              key={k}
-              label={FIELD_LABELS[k]!}
-              help={HELP[k]}
-              value={value(k)}
-              issue={issueFor(k)}
-              onCommit={(v) => onChange({ [k]: v })}
+          {SIZE_FIELDS[s.type]
+            .filter((k) => !(s.type === "cylinder" && s.thread && k === "diameter"))
+            .map((k) => (
+              <NumberField
+                key={k}
+                label={FIELD_LABELS[k]!}
+                help={HELP[k]}
+                value={value(k)}
+                issue={issueFor(k)}
+                onCommit={(v) => onChange({ [k]: v })}
+              />
+            ))}
+          {s.type === "cylinder" && (
+            <ThreadPicker
+              id={s.id}
+              name={s.name}
+              thread={s.thread}
+              fit={s.fit}
+              help={
+                s.mode === "add"
+                  ? "Turns the cylinder into a threaded rod, like a bolt without a head."
+                  : "Cuts a threaded hole that a bolt of this size screws into."
+              }
+              issues={issues}
+              onChange={onChange}
             />
-          ))}
+          )}
           <div className="position">
             <span className="position-title">Position (mm)</span>
             <div className="hole-grid three">
@@ -590,14 +613,16 @@ function HoleCard(props: {
           onCommit={(v) => onChange({ y: v })}
           compact
         />
-        <NumberField
-          label="Diameter"
-          name={`${hole.name} diameter`}
-          value={hole.diameter}
-          issue={issueFor("diameter")}
-          onCommit={(v) => onChange({ diameter: v })}
-          compact
-        />
+        {!hole.thread && (
+          <NumberField
+            label="Diameter"
+            name={`${hole.name} diameter`}
+            value={hole.diameter}
+            issue={issueFor("diameter")}
+            onCommit={(v) => onChange({ diameter: v })}
+            compact
+          />
+        )}
         {!through && (
           <NumberField
             label="Depth"
@@ -613,11 +638,82 @@ function HoleCard(props: {
         <input type="checkbox" checked={through} onChange={(e) => onChange({ depth: e.target.checked ? 0 : 5 })} />
         All the way through
       </label>
+      <ThreadPicker
+        id={hole.id}
+        name={hole.name}
+        thread={hole.thread}
+        fit={hole.fit}
+        help="Cuts a thread inside the hole that a bolt of this size screws into."
+        issues={issues}
+        onChange={onChange}
+        compact
+      />
       {issues.map((i) => (
         <p key={i.message} className={`issue ${i.severity}`} role={i.severity === "error" ? "alert" : undefined}>
           {i.message}
         </p>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Picks an ISO metric thread (or none) and, with a thread, how much room to leave so printed threads turn.
+ * Choosing a size also sets the plain diameter to match, so switching the thread off keeps the same size.
+ */
+function ThreadPicker(props: {
+  id: string;
+  name: string;
+  thread: ThreadSize | undefined;
+  fit: number | undefined;
+  help: string;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  compact?: boolean;
+}) {
+  const { thread, issues, onChange } = props;
+  const threadIssue = issues.find((i) => i.field === "thread");
+  return (
+    <div className="thread-picker">
+      <div className={props.compact ? "field compact" : "field"}>
+        <label htmlFor={`${props.id}-thread`}>Thread</label>
+        <div className="input-row select-row">
+          <select
+            id={`${props.id}-thread`}
+            aria-label={`${props.name} thread`}
+            value={thread ?? ""}
+            aria-invalid={threadIssue ? true : undefined}
+            onChange={(e) => {
+              const size = e.target.value as ThreadSize | "";
+              onChange(
+                size
+                  ? { thread: size, fit: props.fit ?? DEFAULT_FIT, diameter: THREADS[size].diameter }
+                  : { thread: undefined, fit: undefined },
+              );
+            }}
+          >
+            <option value="">None (smooth)</option>
+            {THREAD_SIZES.map((size) => (
+              <option key={size} value={size}>
+                {threadLabel(size)}
+              </option>
+            ))}
+          </select>
+        </div>
+        {!props.compact && <p className="help">{props.help}</p>}
+      </div>
+      {thread && (
+        <NumberField
+          label="Fit clearance"
+          name={`${props.name} fit clearance`}
+          help="Extra room so printed threads turn. 0.2 to 0.4 mm suits most printers; 0 is the exact ISO size."
+          value={props.fit ?? 0}
+          issue={issues.find((i) => i.field === "fit")}
+          onCommit={(fit) => onChange({ fit })}
+          compact={props.compact}
+        />
+      )}
+      {thread && <p className="help">Threads take a few seconds to build the first time.</p>}
     </div>
   );
 }

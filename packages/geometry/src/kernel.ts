@@ -18,6 +18,8 @@ import type { OpenCascadeInstance } from "replicad-opencascadejs";
 import {
   hasErrors,
   holeEdgeIssues,
+  threadOf,
+  threadVolume,
   shapeSize,
   shapeVolume,
   validateDocument,
@@ -36,6 +38,7 @@ import {
   type ShapeFeature,
 } from "@studio3d/document";
 import type { Measurements, MeshData } from "./protocol";
+import { makeThread } from "./threads";
 
 export function useKernel(oc: OpenCascadeInstance): void {
   setOC(oc);
@@ -75,8 +78,11 @@ function makeRaw(s: ShapeFeature): Shape3D {
       }
       return shape.translate([s.x, s.y, s.z]);
     }
-    case "cylinder":
+    case "cylinder": {
+      const thread = threadOf(s);
+      if (thread) return makeThread(thread, s.height).translate([s.x, s.y, s.z]);
       return makeCylinder(s.diameter / 2, s.height, [s.x, s.y, s.z], [0, 0, 1]);
+    }
     case "tube": {
       const outer = makeCylinder(s.outerDiameter / 2, s.height, [s.x, s.y, s.z], [0, 0, 1]);
       const inner = makeCylinder(s.innerDiameter / 2, s.height + 2, [s.x, s.y, s.z - 1], [0, 0, 1]);
@@ -100,7 +106,11 @@ function makeRaw(s: ShapeFeature): Shape3D {
   }
 }
 
-const near = (a: number, b: number, scale = 1) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b), scale);
+/**
+ * How far a kernel volume may be from the exact maths. Flat and round shapes are exact to rounding; a thread's
+ * helix is stored as a fitted curve, which is within about a part in a million; 1 in 10,000 leaves room.
+ */
+const tolerance = (f: { type: string; thread?: unknown }) => (f.thread ? 1e-4 : 1e-6);
 
 /**
  * Makes one shape and checks it against the exact maths: volume and size must match,
@@ -113,7 +123,10 @@ export function makeShape(s: ShapeFeature): Shape3D {
   const bb = shape.boundingBox;
   const size = [bb.width, bb.height, bb.depth];
   const want = shapeSize(s);
-  const ok = Math.abs(volume - expected) <= 1e-6 * expected && size.every((v, i) => near(v, want[i]!));
+  const tol = tolerance(s);
+  const ok =
+    Math.abs(volume - expected) <= tol * expected &&
+    size.every((v, i) => Math.abs(v - want[i]!) <= (tol === 1e-6 ? 1e-6 * Math.max(1, want[i]!) : 1e-2));
   if (!ok) {
     shape.delete();
     throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
@@ -135,6 +148,8 @@ export function buildBox(b: BoxFeature): BuildResult {
 /** The most material a hole can remove: a full cylinder of its diameter and depth. */
 export function maxHoleVolume(h: HoleFeature, partHeight: number): number {
   const depth = h.depth === 0 ? partHeight : h.depth;
+  const thread = threadOf(h);
+  if (thread) return threadVolume(thread, depth) * (1 + tolerance(h));
   return Math.PI * (h.diameter / 2) ** 2 * depth;
 }
 
@@ -152,7 +167,8 @@ interface Part {
 function combine(part: Part, s: ShapeFeature, issues: Issue[]): Part {
   const tool = makeShape(s);
   const v = shapeVolume(s);
-  return applyTool(part, { shape: tool, least: v, most: v }, s, issues);
+  const tol = tolerance(s);
+  return applyTool(part, { shape: tool, least: v * (1 - tol), most: v * (1 + tol) }, s, issues);
 }
 
 /** A cutting or adding shape, with the range its volume must fall in. */
@@ -298,7 +314,12 @@ function drill(part: Part, h: HoleFeature, issues: Issue[]): Part {
 
   const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
   const bottom = h.depth === 0 ? min[2] - extra : max[2] - h.depth;
-  const tool = makeCylinder(h.diameter / 2, max[2] + extra - bottom, [h.x, h.y, bottom], [0, 0, 1]);
+  const thread = threadOf(h);
+  // A threaded tool is made in 5 mm steps of length (any extra pokes out of the top, cutting nothing), so a thread
+  // already built is reused while the part's height or the hole's depth changes a little.
+  const tool = thread
+    ? makeThread(thread, Math.ceil((max[2] + extra - bottom) / 5) * 5).translate([h.x, h.y, bottom])
+    : makeCylinder(h.diameter / 2, max[2] + extra - bottom, [h.x, h.y, bottom], [0, 0, 1]);
   let result: Shape3D;
   try {
     result = part.shape.cut(tool);
