@@ -57,6 +57,9 @@ What works today:
 - 3D view of a 256 × 256 mm build plate with standard views (keys 0–3). Mouse controls work like Civil 3D and
   AutoCAD: hold the wheel and drag to pan, Shift + wheel-drag to orbit, scroll to zoom in where the pointer is, and
   double-click the wheel to fit everything on screen. Left-drag also orbits and right-drag pans.
+- A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
+  Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
+  with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.
 - A clean frosted-glass interface: the 3D view fills the window and the controls float over it. Text contrast is
   checked by a test, and the app respects Windows' reduced motion, reduced transparency and high contrast settings.
 

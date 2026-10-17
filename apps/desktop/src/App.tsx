@@ -14,8 +14,13 @@ import {
 } from "@studio3d/geometry";
 import {
   PLATE_PLANE,
+  SHAPES,
   hasErrors,
+  isHollow,
   movableAxes,
+  newHole,
+  newHollow,
+  newShape,
   newSketch,
   validateDocument,
   validateSketch,
@@ -24,13 +29,14 @@ import {
   type ProjectDocument,
   type SketchFeature,
 } from "@studio3d/document";
-import { DesignPanel } from "./DesignPanel";
+import { DesignPanel, SHAPE_ORDER, placeNew } from "./DesignPanel";
+import { MenuBar, type Menu } from "./MenuBar";
 import { SketchEditor, type SketchDraft } from "./SketchEditor";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
 import { platform } from "./platform";
-import { useProject, whenSaved } from "./useProject";
+import { APP_INFO, useProject, whenSaved } from "./useProject";
 
 const VIEW_BUTTONS: { view: StandardView; label: string; key: string }[] = [
   { view: "iso", label: "3D", key: "0" },
@@ -78,6 +84,8 @@ export function App() {
   /** How far the selected piece has been dragged so far, while its move arrows are held. */
   const [moveBy, setMoveBy] = useState<[number, number, number] | null>(null);
   const hovered = useRef<string | null>(null);
+  /** Help > Keyboard and mouse / About. */
+  const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
 
   // Viewport
   useEffect(() => {
@@ -526,6 +534,110 @@ export function App() {
       : "Not saved yet";
   const offer = project.recoveryOffer;
 
+  // The menu bar: every command in one place, with its shortcut. Items are greyed out (with the reason) when they
+  // can't run right now, never hidden, so the menus always look the same.
+  const noView = webglError ? "The 3D view isn't available" : undefined;
+  const addAndSelect = (f: Parameters<typeof project.addFeature>[0]) => {
+    project.addFeature(f);
+    setSelection({ id: f.id, face: null });
+  };
+  const where = placeNew(built?.measurements ?? null);
+  const hasHollow = doc.features.some(isHollow);
+  const menus: Menu[] = [
+    {
+      label: "File",
+      items: [
+        { label: "New", shortcut: "Ctrl+N", onSelect: () => void project.newProject(), disabled: busy },
+        { label: "Open…", shortcut: "Ctrl+O", onSelect: () => void project.openProject(), disabled: busy },
+        { label: saveLabel, shortcut: "Ctrl+S", onSelect: () => void project.save(false), disabled: busy },
+        ...(platform.capabilities.saveInPlace
+          ? [{ label: "Save as…", shortcut: "Ctrl+Shift+S", onSelect: () => void project.save(true), disabled: busy }]
+          : []),
+        "separator",
+        {
+          label: "Export STL…",
+          onSelect: () => void exportStl(),
+          disabled: busy || !exportable,
+          reason: empty ? "Add a shape to export" : "Fix the highlighted values to export",
+        },
+      ],
+    },
+    {
+      label: "Edit",
+      items: [
+        { label: "Undo", shortcut: "Ctrl+Z", onSelect: project.undo, disabled: !project.canUndo },
+        { label: "Redo", shortcut: "Ctrl+Y", onSelect: project.redo, disabled: !project.canRedo },
+        "separator",
+        {
+          label: "Delete",
+          shortcut: "Del",
+          onSelect: () => selected && project.removeFeature(selected.id),
+          disabled: !selected,
+          reason: "Select a piece first",
+        },
+        { label: "Deselect", shortcut: "Esc", onSelect: () => setSelection(null), disabled: !selection },
+      ],
+    },
+    {
+      label: "View",
+      items: [
+        ...VIEW_BUTTONS.map((b) => ({
+          label: b.view === "iso" ? "3D view" : `${b.label} view`,
+          shortcut: b.key,
+          onSelect: () => viewportRef.current?.setView(b.view),
+          disabled: webglError,
+          reason: noView,
+        })),
+        "separator" as const,
+        {
+          label: "Fit all",
+          shortcut: "Wheel double-click",
+          onSelect: () => viewportRef.current?.zoomExtents(),
+          disabled: webglError,
+          reason: noView,
+        },
+        { label: "Show sizes", shortcut: "M", checked: showSizes, onSelect: () => setShowSizes((v) => !v) },
+      ],
+    },
+    {
+      label: "Create",
+      items: [
+        ...SHAPE_ORDER.map((type) => ({
+          label: SHAPES[type].label,
+          onSelect: () => addAndSelect(newShape(doc, type, where)),
+        })),
+        "separator" as const,
+        { label: "Hole", onSelect: () => addAndSelect(newHole(doc, where)) },
+        "separator" as const,
+        {
+          label: "Sketch on a face",
+          onSelect: startPicking,
+          disabled: !built,
+          reason: "Add a shape first, then pick one of its faces",
+        },
+        { label: "Sketch on the plate", onSelect: sketchOnPlate },
+      ],
+    },
+    {
+      label: "Modify",
+      items: [
+        {
+          label: "Hollow out",
+          onSelect: () => addAndSelect(newHollow(doc)),
+          disabled: hasHollow,
+          reason: "The part is already hollowed; change its walls in the panel",
+        },
+      ],
+    },
+    {
+      label: "Help",
+      items: [
+        { label: "Keyboard and mouse", onSelect: () => setDialog("shortcuts") },
+        { label: `About ${APP_INFO.name}`, onSelect: () => setDialog("about") },
+      ],
+    },
+  ];
+
   return (
     <div className={`app${draft ? " sketching" : ""}${picking ? " picking" : ""}`}>
       <main
@@ -616,52 +728,44 @@ export function App() {
 
       <header className="topbar" ref={topbarRef}>
         <div className="glass bar">
-          <span className="brand">
+          <span className="brand" title={`${APP_INFO.name} ${APP_INFO.version}`}>
             <span className="logo" aria-hidden="true" />
-            Studio 3D
+            <span className="visually-hidden">{APP_INFO.name}</span>
           </span>
+          <MenuBar menus={menus} />
           <span className="divider" aria-hidden="true" />
-          <nav className="group" aria-label="File">
+          <nav className="group" aria-label="Quick access">
             <button
               type="button"
+              className="icon-only"
+              aria-label="New"
+              title="New project (Ctrl+N)"
               onClick={() => void project.newProject()}
               disabled={busy}
-              title="New project (Ctrl+N)"
             >
               <Icon name="new" />
-              New
             </button>
             <button
               type="button"
+              className="icon-only"
+              aria-label="Open…"
+              title="Open a project (Ctrl+O)"
               onClick={() => void project.openProject()}
               disabled={busy}
-              title="Open a project (Ctrl+O)"
             >
               <Icon name="open" />
-              Open…
             </button>
             <button
               type="button"
+              className="icon-only"
+              aria-label={saveLabel}
+              title={`${saveLabel} (Ctrl+S)`}
               onClick={() => void project.save(false)}
               disabled={busy}
-              title={`${saveLabel} (Ctrl+S)`}
             >
               <Icon name="save" />
-              {saveLabel}
             </button>
-            {platform.capabilities.saveInPlace && (
-              <button
-                type="button"
-                onClick={() => void project.save(true)}
-                disabled={busy}
-                title="Save as a new file (Ctrl+Shift+S)"
-              >
-                Save as…
-              </button>
-            )}
-          </nav>
-          <span className="divider" aria-hidden="true" />
-          <nav className="group" aria-label="Edit">
+            <span className="divider" aria-hidden="true" />
             <button
               type="button"
               className="icon-only"
@@ -788,6 +892,70 @@ export function App() {
           </span>
         </span>
       </footer>
+
+      {dialog && <HelpDialog kind={dialog} onClose={() => setDialog(null)} />}
+    </div>
+  );
+}
+
+const SHORTCUTS: [string, string][] = [
+  ["Orbit", "Shift + wheel-drag, or left-drag"],
+  ["Pan", "Wheel-drag, or right-drag"],
+  ["Zoom", "Scroll (zooms where the pointer is)"],
+  ["Fit everything on screen", "Double-click the wheel"],
+  ["3D / Top / Front / Right view", "0 / 1 / 2 / 3"],
+  ["Show or hide sizes", "M"],
+  ["Select a piece", "Click it"],
+  ["Move the selected piece", "Drag its arrows, or arrow keys (Shift = 10 mm), Page Up / Page Down"],
+  ["Delete the selected piece", "Delete"],
+  ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
+  ["New / Open / Save / Save as", "Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S"],
+  ["Menus", "Alt, or Alt + the menu's first letter"],
+  ["Sketch: Select / Rectangle / Circle / Outline", "V / R / C / L"],
+  ["Sketch: type a size while drawing", "Type the number, Tab to the next box, Enter"],
+  ["Sketch: close an outline", "Enter, or click its first corner"],
+];
+
+/** Help > Keyboard and mouse, and Help > About. */
+function HelpDialog({ kind, onClose }: { kind: "shortcuts" | "about"; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const title = kind === "shortcuts" ? "Keyboard and mouse" : `About ${APP_INFO.name}`;
+  return (
+    <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog glass" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
+        <h2>{title}</h2>
+        {kind === "shortcuts" ? (
+          <table className="shortcuts">
+            <tbody>
+              {SHORTCUTS.map(([what, how]) => (
+                <tr key={what}>
+                  <th scope="row">{what}</th>
+                  <td>{how}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <>
+            <p>Version {APP_INFO.version}</p>
+            <p className="muted">
+              Design parts for 3D printing. Geometry by Open CASCADE Technology through replicad; the notices that come
+              with the app list every open-source licence.
+            </p>
+          </>
+        )}
+        <div className="actions">
+          <button type="button" className="primary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

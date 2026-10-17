@@ -42,7 +42,7 @@ const HELP: Record<string, string> = {
   topDiameter: "Distance across the top. Use 0 for a point.",
 };
 
-const SHAPE_ORDER: ShapeType[] = ["box", "cylinder", "tube", "cone", "sphere"];
+export const SHAPE_ORDER: ShapeType[] = ["box", "cylinder", "tube", "cone", "sphere"];
 
 type Patch = Record<string, unknown>;
 
@@ -116,14 +116,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked]);
   const general = issues.filter((i) => i.featureId === undefined);
-  // New shapes go in the middle of the part, standing on top of it, so they are easy to see.
-  const where = measurements
-    ? {
-        x: round((measurements.min[0] + measurements.max[0]) / 2),
-        y: round((measurements.min[1] + measurements.max[1]) / 2),
-        z: round(measurements.max[2]),
-      }
-    : { x: 0, y: 0, z: 0 };
+  const where = placeNew(measurements);
 
   const addShape = (type: ShapeType) => {
     const s = newShape(doc, type, where);
@@ -294,6 +287,16 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
 });
 
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** New shapes go in the middle of the part, standing on top of it, so they are easy to see. */
+export function placeNew(measurements: Measurements | null): { x: number; y: number; z: number } {
+  if (!measurements) return { x: 0, y: 0, z: 0 };
+  return {
+    x: round((measurements.min[0] + measurements.max[0]) / 2),
+    y: round((measurements.min[1] + measurements.max[1]) / 2),
+    z: round(measurements.max[2]),
+  };
+}
 const mm = (n: number) => `${round(n)}`;
 
 /** A short description of a shape's size, shown when its card is closed. */

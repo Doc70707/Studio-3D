@@ -141,15 +141,12 @@ export class Viewport {
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
     this.controls.zoomToCursor = true;
     // Pressing the wheel would otherwise start the browser's auto-scroll; a double-click of the wheel fits the part.
-    let lastWheelClick = 0;
-    canvas.addEventListener("pointerdown", (e) => {
-      if (e.button !== 1) return;
-      e.preventDefault();
-      if (e.timeStamp - lastWheelClick < 400) {
-        lastWheelClick = 0;
-        this.zoomExtents();
-      } else lastWheelClick = e.timeStamp;
+    // Double-clicking the wheel fits everything on screen (as in AutoCAD). The browser counts the clicks, using the
+    // system's double-click speed.
+    canvas.addEventListener("auxclick", (e) => {
+      if (e.button === 1 && e.detail === 2) this.zoomExtents();
     });
+    canvas.addEventListener("pointerdown", (e) => e.button === 1 && e.preventDefault()); // no autoscroll
     this.controls.addEventListener("change", () => {
       this.view = "custom";
       this.requestRender();

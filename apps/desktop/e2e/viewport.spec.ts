@@ -144,10 +144,6 @@ test("double-clicking the wheel fits everything back on screen", async ({ page }
   await page.mouse.wheel(0, -1500);
   await expect.poll(() => orbitRadius(page)).toBeLessThan(radius * 0.6);
   await dragWith(page, "middle");
-  await page.mouse.move(x, y);
-  await page.mouse.down({ button: "middle" });
-  await page.mouse.up({ button: "middle" });
-  await page.mouse.down({ button: "middle" });
-  await page.mouse.up({ button: "middle" });
+  await page.mouse.dblclick(x, y, { button: "middle" });
   await expect.poll(() => orbitRadius(page)).toBeGreaterThan(radius * 0.8);
 });
