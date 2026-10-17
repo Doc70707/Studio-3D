@@ -21,7 +21,28 @@ import {
   type Profile,
   type SketchFeature,
 } from "@studio3d/document";
-import { anyTyped, liveValues, startTyping, typedPoint, typeKey, TYPED_FIELDS, type Typed } from "./dynamicInput";
+import {
+  anyTyped,
+  liveValues,
+  startPointEntry,
+  startTyping,
+  typedPoint,
+  typeKey,
+  TYPED_FIELDS,
+  type Typed,
+} from "./dynamicInput";
+import {
+  SNAP_LABELS,
+  boundaryEdges,
+  constrain,
+  editSide,
+  findSnap,
+  isPointKey,
+  parsePoint,
+  sideOf,
+  snapScene,
+  type Snap,
+} from "./precision";
 import { Icon } from "./Icon";
 import { NumberField } from "./NumberField";
 
@@ -65,12 +86,14 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
     label: "Outline",
     key: "l",
     hint:
-      "Click each corner, or type a length (Tab for the angle) and press Enter. " +
-      "Click the first corner again, press Enter, or double-click to close the shape.",
+      "Click each corner, or type a length (Tab for the angle), or a point: x,y  @dx,dy  @length<angle, then Enter. " +
+      "F8 locks to straight across or up. Click the first corner, press Enter or double-click to close.",
   },
 ];
 
 const SNAP_PX = 10;
+/** Angle steps the outline tool can click to, in degrees (0 = off). */
+const ANGLE_STEPS = [0, 15, 30, 45, 90];
 const round = (n: number) => Math.round(n * 100) / 100 + 0;
 const mm = (n: number) => `${round(n)} mm`;
 const same = (a: Point2, b: Point2) => Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9;
@@ -100,6 +123,11 @@ export function SketchEditor(props: {
   const [offsetError, setOffsetError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
   const [cursor, setCursor] = useState<Point2 | null>(null);
+  /** Ortho lock (F8): outline sides only go straight across or straight up. Shift flips it while held. */
+  const [ortho, setOrtho] = useState(false);
+  const [angleStep, setAngleStep] = useState(0);
+  /** What the pointer is held to right now: an object snap, or an angle from the last corner. */
+  const [hold, setHold] = useState<{ snap: Snap | null; angle: number | null }>({ snap: null, angle: null });
   /** Sizes typed while drawing; they start empty for every new shape and every new outline corner. */
   // Kept with the shape (or corner) they were typed for, so a new one starts with empty boxes straight away.
   const [typedFor, setTypedFor] = useState<{
@@ -175,42 +203,34 @@ export function SketchEditor(props: {
   /** The grid the pointer snaps to: finer when zoomed in. */
   const step = k >= 12 ? 0.5 : k >= 2.5 ? 1 : 5;
 
-  /** Corners worth snapping to: the face's corners and every corner already drawn. */
-  const snapTargets = useMemo(() => {
-    const pts: Point2[] = [];
-    if (draft.face) pts.push(...draft.face.triangles);
-    for (const p of s.profiles) {
-      if (p.kind === "rectangle")
-        pts.push([p.x, p.y], [p.x + p.width, p.y], [p.x, p.y + p.height], [p.x + p.width, p.y + p.height]);
-      else if (p.kind === "circle") pts.push([p.x, p.y]);
-      else pts.push(...p.points);
-    }
-    return pts;
-  }, [draft.face, s.profiles]);
+  /** Everything worth snapping to: the face's outline, every shape drawn, and the outline being drawn. */
+  const faceEdges = useMemo(() => (draft.face ? boundaryEdges(draft.face.triangles) : []), [draft.face]);
+  const drawing = pending?.kind === "polygon" ? pending.points : null;
+  const scene = useMemo(() => snapScene(s.profiles, faceEdges, drawing ?? []), [s.profiles, faceEdges, drawing]);
 
-  const snap = useCallback(
-    (e: { clientX: number; clientY: number; altKey: boolean }): Point2 => {
+  /**
+   * Where the pointer puts a point: on an object snap if one is near (Alt turns snaps off), else held to ortho or an
+   * angle step from the outline's last corner, else on the grid.
+   */
+  const locate = useCallback(
+    (e: { clientX: number; clientY: number; altKey: boolean; shiftKey: boolean }) => {
       const rect = svgRef.current!.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      const raw = fromScreen(px, py);
-      if (e.altKey) return [round(raw[0]), round(raw[1])];
-      const extra = pending?.kind === "polygon" ? pending.points : [];
-      let best: Point2 | null = null;
-      let bestD = SNAP_PX;
-      for (const q of [...snapTargets, ...extra]) {
-        const [sx, sy] = toScreen(q);
-        const d = Math.hypot(sx - px, sy - py);
-        if (d < bestD) {
-          bestD = d;
-          best = q;
-        }
+      const raw = fromScreen(e.clientX - rect.left, e.clientY - rect.top);
+      const free = { snap: null, angle: null };
+      if (e.altKey) return { point: [round(raw[0]), round(raw[1])] as Point2, ...free };
+      const last = drawing?.length ? drawing[drawing.length - 1]! : null;
+      const snapped = findSnap(scene, raw, last, SNAP_PX, toScreen);
+      if (snapped) return { point: snapped.point, snap: snapped, angle: null };
+      if (last) {
+        const held = constrain(last, raw, { ortho: ortho !== e.shiftKey, step: angleStep }, step);
+        if (held.angle !== null) return { point: held.point, snap: null, angle: held.angle };
       }
-      if (best) return [round(best[0]), round(best[1])];
-      return [round(Math.round(raw[0] / step) * step), round(Math.round(raw[1] / step) * step)];
+      const point: Point2 = [round(Math.round(raw[0] / step) * step), round(Math.round(raw[1] / step) * step)];
+      return { point, ...free };
     },
-    [fromScreen, toScreen, snapTargets, pending, step],
+    [fromScreen, toScreen, scene, drawing, ortho, angleStep, step],
   );
+  const snap = (e: Parameters<typeof locate>[0]) => locate(e).point;
 
   const addProfile = (p: Profile) => {
     setProfiles([...s.profiles, p]);
@@ -245,11 +265,14 @@ export function SketchEditor(props: {
   };
 
   /** Where the shape being drawn gets its next point from: the corner, centre or last outline corner. */
-  const from = (p: NonNullable<Pending>): Point2 => (p.kind === "polygon" ? p.points[p.points.length - 1]! : p.start);
+  // An outline whose first corner is still being typed measures from the origin.
+  const from = (p: NonNullable<Pending>): Point2 =>
+    p.kind === "polygon" ? (p.points[p.points.length - 1] ?? [0, 0]) : p.start;
   /** The pointer's point, with any typed sizes taking over. */
   const aim = (p: NonNullable<Pending>, pointer: Point2 | null) => typedPoint(p.kind, from(p), pointer, typed);
 
   const addCorner = (points: Point2[], p: Point2) => {
+    if (!points.length) return setPending({ kind: "polygon", points: [p] });
     if (points.length >= 3 && same(p, points[0]!)) return closePolygon(points);
     if (!same(p, points[points.length - 1]!)) setPending({ kind: "polygon", points: [...points, p] });
   };
@@ -257,6 +280,7 @@ export function SketchEditor(props: {
   /** Enter with typed sizes: finish the shape (or the outline's corner) with them. */
   const commitTyped = () => {
     if (!pending) return;
+    if (typed?.point !== undefined && !parsePoint(typed.point, from(pending))) return; // not a whole point yet
     const p = aim(pending, cursor);
     if (pending.kind === "polygon") addCorner(pending.points, p);
     else if (finishShape(pending.kind, pending.start, p)) setPending(null);
@@ -325,8 +349,10 @@ export function SketchEditor(props: {
       });
       return;
     }
-    const p = snap(e);
+    const where = locate(e);
+    const p = where.point;
     setCursor(p);
+    setHold({ snap: where.snap, angle: where.angle });
     const d = drag.current;
     if (d) {
       const dx = p[0] - d.start[0];
@@ -398,10 +424,23 @@ export function SketchEditor(props: {
         }
         return;
       }
+      if (e.key === "F8") {
+        e.preventDefault();
+        setOrtho((o) => !o);
+        return;
+      }
       if (typing || mod || e.altKey) return;
+      // An outline's first corner can be typed as a point straight away, before any click.
+      if (tool === "polygon" && !pending && isPointKey(e.key) && e.key !== "," && e.key !== "<") {
+        e.preventDefault();
+        const start: Pending = { kind: "polygon", points: [] };
+        setPending(start);
+        setTypedFor({ pending: start, typed: { ...startPointEntry(), point: e.key } });
+        return;
+      }
       // Typing a size while drawing: the keys go into the boxes at the pointer.
       if (pending && typed) {
-        const next = typeKey(typed, e.key, e.shiftKey);
+        const next = typeKey(typed, e.key, e.shiftKey, pending.kind === "polygon");
         if (next) {
           e.preventDefault();
           setTyped(next);
@@ -411,7 +450,10 @@ export function SketchEditor(props: {
           e.preventDefault();
           return commitTyped();
         }
-        if (e.key === "Escape" && typed.values.some((v) => v)) return setTyped(startTyping(pending.kind));
+        if (e.key === "Escape" && (typed.point || typed.values.some((v) => v))) {
+          if (pending.kind === "polygon" && !pending.points.length) return setPending(null);
+          return setTyped(startTyping(pending.kind));
+        }
       }
       if (e.key === "Escape") {
         if (pending) setPending(null);
@@ -494,6 +536,33 @@ export function SketchEditor(props: {
           ))}
         </div>
         <span className="divider" aria-hidden="true" />
+        <div className="group" role="group" aria-label="Drafting aids">
+          <button
+            type="button"
+            aria-pressed={ortho}
+            title="Ortho: sides go only straight across or straight up (F8; hold Shift to flip it for a moment)"
+            disabled={props.view === "3d"}
+            onClick={() => setOrtho((o) => !o)}
+          >
+            Ortho
+          </button>
+          <label className="angle-step" title="Sides click to these angles when the pointer is close">
+            <span>Angles</span>
+            <select
+              aria-label="Angle steps"
+              value={angleStep}
+              disabled={props.view === "3d"}
+              onChange={(e) => setAngleStep(Number(e.target.value))}
+            >
+              {ANGLE_STEPS.map((a) => (
+                <option key={a} value={a}>
+                  {a ? `${a}°` : "Free"}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <span className="divider" aria-hidden="true" />
         <button type="button" onClick={fit} disabled={props.view === "3d"} title="Fit the drawing to the screen">
           Fit
         </button>
@@ -531,7 +600,10 @@ export function SketchEditor(props: {
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerLeave={() => setCursor(null)}
+          onPointerLeave={() => {
+            setCursor(null);
+            setHold({ snap: null, angle: null });
+          }}
           onDoubleClick={() => pending?.kind === "polygon" && closePolygon(pending.points)}
           onWheel={onWheel}
           onAuxClick={(e) => e.button === 1 && e.detail === 2 && fit()}
@@ -574,6 +646,10 @@ export function SketchEditor(props: {
                   at={toScreen(cursor ?? from(pending))}
                 />
               )}
+              {cursor && pending?.kind === "polygon" && pending.points.length > 0 && hold.angle !== null && (
+                <AngleGuide from={from(pending)} angle={hold.angle} size={size} toScreen={toScreen} ortho={ortho} />
+              )}
+              {cursor && hold.snap && <SnapMarker snap={hold.snap} toScreen={toScreen} />}
               {cursor && <circle className="cursor" cx={toScreen(cursor)[0]} cy={toScreen(cursor)[1]} r={4} />}
             </>
           )}
@@ -637,7 +713,7 @@ export function SketchEditor(props: {
           </span>
           <span data-testid="sketch-cursor">
             {cursor
-              ? `${across} ${mm(cursor[0])} · ${up} ${mm(cursor[1])}`
+              ? `${across} ${mm(cursor[0])} · ${up} ${mm(cursor[1])}${hold.snap ? ` · ${SNAP_LABELS[hold.snap.kind]}` : ""}`
               : `${s.profiles.length} shape${s.profiles.length === 1 ? "" : "s"} drawn`}
           </span>
         </div>
@@ -1058,33 +1134,135 @@ function ProfileFields({
     );
   return (
     <div className="corners">
-      {p.points.map((q, i) => (
-        <div className="hole-grid" key={i}>
-          <NumberField
-            label={`Corner ${i + 1} ${onPlate ? "x" : "across"}`}
-            value={q[0]}
-            onCommit={(x) =>
-              onChange({
-                ...p,
-                points: p.points.map((r, j) => (j === i ? [x, r[1]] : r)),
-              })
-            }
-            compact
-          />
-          <NumberField
-            label={`Corner ${i + 1} ${onPlate ? "y" : "up"}`}
-            value={q[1]}
-            onCommit={(y) =>
-              onChange({
-                ...p,
-                points: p.points.map((r, j) => (j === i ? [r[0], y] : r)),
-              })
-            }
-            compact
-          />
-        </div>
-      ))}
+      <SideFields points={p.points} onChange={(points) => onChange({ ...p, points })} />
+      <details className="more">
+        <summary>Corner positions</summary>
+        {p.points.map((q, i) => (
+          <div className="hole-grid" key={i}>
+            <NumberField
+              label={`Corner ${i + 1} ${onPlate ? "x" : "across"}`}
+              value={q[0]}
+              onCommit={(x) =>
+                onChange({
+                  ...p,
+                  points: p.points.map((r, j) => (j === i ? [x, r[1]] : r)),
+                })
+              }
+              compact
+            />
+            <NumberField
+              label={`Corner ${i + 1} ${onPlate ? "y" : "up"}`}
+              value={q[1]}
+              onCommit={(y) =>
+                onChange({
+                  ...p,
+                  points: p.points.map((r, j) => (j === i ? [r[0], y] : r)),
+                })
+              }
+              compact
+            />
+          </div>
+        ))}
+      </details>
     </div>
+  );
+}
+
+/**
+ * Each side's length and angle. Changing one moves the corners after it, keeping their sides as they are; the closing
+ * side follows. A size that can't work is explained, never quietly changed.
+ */
+function SideFields({ points, onChange }: { points: Point2[]; onChange: (points: Point2[]) => void }) {
+  const [problem, setProblem] = useState<{ side: number; message: string } | null>(null);
+  const n = points.length;
+  const closing = sideOf(points, n - 1);
+  const issue = (i: number) =>
+    problem?.side === i
+      ? { featureId: "", field: "", severity: "error" as const, message: problem.message }
+      : undefined;
+  return (
+    <div className="sides" role="group" aria-label="Sides">
+      {points.slice(0, -1).map((_, i) => {
+        const side = sideOf(points, i);
+        return (
+          <div className="hole-grid" key={i}>
+            <NumberField
+              label={`Side ${i + 1}`}
+              name={`Side ${i + 1} length`}
+              value={round(side.length)}
+              issue={issue(i)}
+              onCommit={(length) => {
+                if (length <= 0) return setProblem({ side: i, message: `Side ${i + 1} needs a length above 0 mm.` });
+                setProblem(null);
+                onChange(editSide(points, i, { length }));
+              }}
+            />
+            <NumberField
+              label="Angle"
+              name={`Side ${i + 1} angle`}
+              unit="°"
+              value={round(side.angle)}
+              onCommit={(angle) => {
+                setProblem(null);
+                onChange(editSide(points, i, { angle }));
+              }}
+              compact
+            />
+          </div>
+        );
+      })}
+      <p className="props-note" data-testid="closing-side">
+        Side {n} closes the outline: {mm(closing.length)} at {round(closing.angle)}°
+      </p>
+    </div>
+  );
+}
+
+/** The marker for an object snap: a square for an end, a triangle for a middle, a circle for a centre and so on. */
+function SnapMarker({ snap, toScreen }: { snap: Snap; toScreen: ToScreen }) {
+  const [x, y] = toScreen(snap.point);
+  const r = 6;
+  const shape =
+    snap.kind === "end" ? (
+      <rect x={x - r} y={y - r} width={2 * r} height={2 * r} />
+    ) : snap.kind === "middle" ? (
+      <path d={`M${x},${y - r}L${x + r},${y + r}L${x - r},${y + r}Z`} />
+    ) : snap.kind === "centre" ? (
+      <circle cx={x} cy={y} r={r} />
+    ) : snap.kind === "intersection" ? (
+      <path d={`M${x - r},${y - r}L${x + r},${y + r}M${x - r},${y + r}L${x + r},${y - r}`} />
+    ) : (
+      <path d={`M${x - r},${y + r}H${x + r}M${x},${y + r}V${y - r}`} />
+    );
+  return (
+    <g className="snap-marker" data-testid="snap" data-snap={snap.kind}>
+      {shape}
+      <text x={x + 10} y={y - 10}>
+        {SNAP_LABELS[snap.kind]}
+      </text>
+    </g>
+  );
+}
+
+/** A dashed line through the last corner at the angle the side is held to, labelled with the angle. */
+function AngleGuide(props: {
+  from: Point2;
+  angle: number;
+  ortho: boolean;
+  size: { w: number; h: number };
+  toScreen: ToScreen;
+}) {
+  const a = (props.angle * Math.PI) / 180;
+  const [x, y] = props.toScreen(props.from);
+  const far = props.size.w + props.size.h;
+  return (
+    <g className="angle-guide" data-testid="angle-guide" data-angle={props.angle}>
+      <line x1={x} y1={y} x2={x + far * Math.cos(a)} y2={y - far * Math.sin(a)} />
+      <text x={x + 40 * Math.cos(a) + 6} y={y - 40 * Math.sin(a) - 6}>
+        {props.ortho ? "Ortho " : ""}
+        {props.angle}°
+      </text>
+    </g>
   );
 }
 
@@ -1093,6 +1271,20 @@ function TypedBoxes(props: { pending: NonNullable<Pending>; typed: Typed; from: 
   const labels = TYPED_FIELDS[props.pending.kind];
   const live = liveValues(props.pending.kind, props.from, props.to);
   const [x, y] = [props.at[0] + 18, props.at[1] + 18];
+  if (props.typed.point !== undefined)
+    return (
+      <g className="typed-boxes" role="group" aria-label="Typed point" data-testid="typed-sizes">
+        <g className="typed-box active typed" transform={`translate(${x} ${y})`} data-testid="typed-point">
+          <rect width={170} height={24} rx={6} />
+          <text x={8} y={16} className="typed-label">
+            Point
+          </text>
+          <text x={162} y={16} textAnchor="end" className="typed-value">
+            {props.typed.point || "x,y  @dx,dy  @len<angle"}
+          </text>
+        </g>
+      </g>
+    );
   return (
     <g className="typed-boxes" role="group" aria-label="Typed sizes" data-testid="typed-sizes">
       {labels.map((label, i) => {

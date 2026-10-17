@@ -1012,6 +1012,9 @@ const SHORTCUTS: [string, string][] = [
   ["Sketch: Select / Rectangle / Circle / Outline", "V / R / C / L"],
   ["Sketch: type a size while drawing", "Type the number, Tab to the next box, Enter"],
   ["Sketch: close an outline", "Enter, or click its first corner"],
+  ["Sketch: type a corner as a point", "x,y from the origin · @dx,dy or @length<angle from the last corner"],
+  ["Sketch: ortho lock / angle steps", "F8 (hold Shift to flip it) / Angles on the sketch bar"],
+  ["Sketch: snaps (end, middle, centre, crossing, square to)", "On near the pointer; hold Alt to ignore them"],
   ["Sketch: slide the drawing (it never turns)", "Wheel-drag or right-drag; double-click the wheel to fit"],
 ];
 

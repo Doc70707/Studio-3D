@@ -2,6 +2,7 @@
 // small boxes at the pointer (Tab moves to the next box) and Enter finishes the shape with them. A box you haven't
 // typed in follows the pointer. Pure functions, so they are unit-tested without a screen.
 import type { Point2 } from "@studio3d/document";
+import { exact, isPointKey, parsePoint } from "./precision";
 
 export type DrawKind = "rectangle" | "circle" | "polygon";
 
@@ -17,9 +18,16 @@ export interface Typed {
   values: string[];
   /** Which box the next key goes to. */
   active: number;
+  /**
+   * A point typed AutoCAD style instead of the boxes (outlines only): `x,y`, `@dx,dy` or `@length<angle`. Typing "@",
+   * or a comma after a number, switches to it.
+   */
+  point?: string;
 }
 
 export const startTyping = (kind: DrawKind): Typed => ({ values: TYPED_FIELDS[kind].map(() => ""), active: 0 });
+/** Typing an outline's first corner as a point, before anything is clicked. */
+export const startPointEntry = (): Typed => ({ ...startTyping("polygon"), point: "" });
 
 /** A typed box's number, or null when it is empty or not a number yet (like "-" or "."). */
 export function typedNumber(text: string | undefined): number | null {
@@ -31,9 +39,16 @@ export function typedNumber(text: string | undefined): number | null {
  * Applies one key to the boxes. Returns the new boxes, or null when the key isn't for them (so it can do its usual
  * job). Digits, "." and "-" type; Backspace deletes (only while there is something to delete); Tab moves on.
  */
-export function typeKey(t: Typed, key: string, shift = false): Typed | null {
+export function typeKey(t: Typed, key: string, shift = false, points = false): Typed | null {
   const values = [...t.values];
   const cur = values[t.active] ?? "";
+  if (points && t.point !== undefined) {
+    if (isPointKey(key)) return { ...t, point: t.point + key };
+    if (key === "Backspace" && t.point) return { ...t, point: t.point.slice(0, -1) };
+    return key === "Tab" ? t : null;
+  }
+  if (points && (key === "@" || (key === "," && t.active === 0 && typedNumber(cur) !== null)))
+    return { values: values.map(() => ""), active: 0, point: key === "@" ? "@" : cur + "," };
   if (/^[0-9]$/.test(key) || (key === "." && !cur.includes("."))) {
     values[t.active] = cur + key;
     return { ...t, values };
@@ -53,7 +68,7 @@ export function typeKey(t: Typed, key: string, shift = false): Typed | null {
   return null;
 }
 
-export const anyTyped = (t: Typed | null) => !!t && t.values.some((v) => typedNumber(v) !== null);
+export const anyTyped = (t: Typed | null) => !!t && (!!t.point || t.values.some((v) => typedNumber(v) !== null));
 
 const round = (n: number) => Math.round(n * 100) / 100 + 0;
 
@@ -84,11 +99,13 @@ export function typedPoint(kind: DrawKind, from: Point2, pointer: Point2 | null,
     const r = Math.abs(d) / 2;
     return [round(from[0] + ux * r), round(from[1] + uy * r)];
   }
+  if (t?.point !== undefined) return parsePoint(t.point, from) ?? p;
   const len = v(0) ?? dist;
   const typedAngle = v(1);
   const angle = typedAngle !== null ? (typedAngle * Math.PI) / 180 : dist > 1e-9 ? Math.atan2(dy, dx) : 0;
   if (v(0) === null && typedAngle === null) return p;
-  return [round(from[0] + len * Math.cos(angle)), round(from[1] + len * Math.sin(angle))];
+  // Kept to 6 decimals, not 2, so a chain of typed sides adds up exactly.
+  return [exact(from[0] + len * Math.cos(angle)), exact(from[1] + len * Math.sin(angle))];
 }
 
 /** What each box shows while nothing is typed in it: the size the pointer gives right now. */

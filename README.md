@@ -73,6 +73,10 @@ What works today:
   Shift + wheel-drag to orbit, scroll to zoom in where the pointer is, and double-click the wheel to fit everything on
   screen. Left-drag also orbits and right-drag pans. On the sketch screen, wheel-drag and right-drag only slide the
   drawing; it never turns.
+- Precise outlines, AutoCAD style: type a corner as `x,y`, `@dx,dy` or `@length<angle`, or a length and angle in the
+  boxes at the pointer. F8 locks sides straight across or up, angle steps (15°, 30°, 45°, 90°) click sides to those
+  angles, and the pointer snaps to ends, middles, circle centres, crossings and square to a side (Alt ignores
+  snaps). A drawn outline lists its sides: change one side's length or angle and the sides after it follow.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

@@ -1516,13 +1516,10 @@ input:focus-visible {
   top: 84px;
   right: var(--gap);
   width: 280px;
+  max-height: calc(100% - 200px);
+  overflow-y: auto;
   padding: 12px;
   border-radius: var(--radius-lg);
-}
-
-.sketch-side .corners {
-  max-height: 340px;
-  overflow-y: auto;
 }
 
 .sketch-bottom {
@@ -1721,4 +1718,50 @@ input:focus-visible {
 .selection-bar button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Precise drafting: angle steps, object snap markers and the held-angle guide. */
+.sketch-top .angle-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sketch-top .angle-step select {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-edge);
+  background: var(--glass-strong);
+  font: inherit;
+  color: var(--text);
+}
+
+.sketch-canvas .snap-marker rect,
+.sketch-canvas .snap-marker path,
+.sketch-canvas .snap-marker circle {
+  fill: none;
+  stroke: var(--warning);
+  stroke-width: 2;
+}
+
+.sketch-canvas .snap-marker text,
+.sketch-canvas .angle-guide text {
+  fill: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sketch-canvas .angle-guide line {
+  stroke: var(--warning);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  opacity: 0.8;
+}
+
+.sketch-side .sides {
+  display: grid;
+  gap: 6px;
 }
