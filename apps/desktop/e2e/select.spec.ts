@@ -58,8 +58,8 @@ test("click a piece to select it, nudge it with the keys, drag its arrow, then r
   await page.screenshot({ path: `${OUT}select-move.png` });
   await page.mouse.up();
   await expect(bar(page)).not.toContainText("Moving");
-  const x = Number(await field(page, "Left / right").inputValue());
-  expect(x).toBeGreaterThan(3);
+  // The move lands in the design a moment after the arrow is let go, so wait for it rather than read it once.
+  await expect.poll(async () => Number(await field(page, "Left / right").inputValue())).toBeGreaterThan(3);
   await expect(field(page, "Front / back")).toHaveValue("0"); // only along the arrow
   await current(page);
   await page.keyboard.press("0"); // the 3D view, with the arrows on the selected piece
