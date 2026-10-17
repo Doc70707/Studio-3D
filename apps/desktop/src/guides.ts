@@ -1,5 +1,5 @@
 // Measurements for the selected shape or hole in the 3D view, so it's clear where it sits on the part.
-import { holeDiameter, isEdgeStep, shapeSize, type Feature } from "@studio3d/document";
+import { holeDiameter, isCopyStep, isEdgeStep, shapeSize, type Feature } from "@studio3d/document";
 import type { Dimension, Vec3 } from "@studio3d/viewport";
 
 const fmt = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
@@ -27,7 +27,7 @@ export function featureDimensions(f: Feature, part: { min: Vec3; max: Vec3 }): D
     if (!near(f.y, py0)) dim([f.x, py0, top], [f.x, f.y, top], [0, 0, 0.01], fmt(f.y - py0));
     return out;
   }
-  if (f.type === "sketch" || f.type === "hollow" || isEdgeStep(f)) return out;
+  if (f.type === "sketch" || f.type === "hollow" || isEdgeStep(f) || isCopyStep(f)) return out;
 
   const [w, d, h] = shapeSize(f);
   const x0 = f.x - w / 2;

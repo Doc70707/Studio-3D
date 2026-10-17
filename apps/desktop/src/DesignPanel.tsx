@@ -13,7 +13,14 @@ import {
   newHole,
   newHollow,
   newEdgeStep,
+  newMirror,
+  newPattern,
+  isCopyStep,
+  isShape,
+  isCopyable,
   isEdgeStep,
+  type MirrorFeature,
+  type PatternFeature,
   EDGE_SETS,
   type EdgeFeature,
   newShape,
@@ -97,6 +104,8 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
   const sketches = doc.features.filter((f): f is SketchFeature => f.type === "sketch");
   const hollows = doc.features.filter((f): f is HollowFeature => f.type === "hollow");
   const edgeSteps = doc.features.filter(isEdgeStep);
+  const copySteps = doc.features.filter(isCopyStep);
+  const source = copySource(doc, picked);
   const [selected, setSelected] = useState<string | null>(shapes[0]?.id ?? null);
   const open = shapes.some((s) => s.id === selected) ? selected : (shapes[0]?.id ?? null);
   const [holeFocus, setHoleFocus] = useState<string | null>(null);
@@ -110,7 +119,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
     if (f?.type === "hole") setHoleFocus(picked);
     else if (f) {
       setHoleFocus(null);
-      if (f.type !== "sketch" && f.type !== "hollow" && !isEdgeStep(f)) setSelected(picked);
+      if (isShape(f)) setSelected(picked);
     }
     requestAnimationFrame(() =>
       scroller.current
@@ -293,6 +302,52 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               issues={issues.filter((i) => i.featureId === e.id)}
               onChange={(patch) => onChange(e.id, patch)}
               onRemove={() => onRemove(e.id)}
+            />
+          ))}
+        </section>
+
+        <section className="copies" aria-label="Copies">
+          <div className="section-head">
+            <h3>Copies</h3>
+            <div className="add-row compact">
+              <button
+                type="button"
+                className="add"
+                onClick={() => source && onAdd(newPattern(doc, source.id, placeNew(measurements)))}
+                disabled={!source}
+                title={source ? `Repeat ${source.name} in a grid or round a circle` : "Add a shape, hole or sketch first"}
+              >
+                <Icon name="pattern" />
+                Pattern
+              </button>
+              <button
+                type="button"
+                className="add"
+                onClick={() => source && onAdd(newMirror(doc, source.id, placeNew(measurements).x))}
+                disabled={!source}
+                title={source ? `Mirror ${source.name} to the other side` : "Add a shape, hole or sketch first"}
+              >
+                <Icon name="mirror" />
+                Mirror
+              </button>
+            </div>
+          </div>
+          {copySteps.length === 0 && (
+            <p className="help">
+              Repeat a shape, hole or sketch in a row, a grid or round a circle (bolt holes, feet, ribs), or mirror it
+              to the other side. Select the piece first; copies follow it when you change it.
+            </p>
+          )}
+          {copySteps.map((c) => (
+            <CopyCard
+              key={c.id}
+              step={c}
+              doc={doc}
+              picked={c.id === picked}
+              onPick={() => onSelect(c.id)}
+              issues={issues.filter((i) => i.featureId === c.id)}
+              onChange={(patch) => onChange(c.id, patch)}
+              onRemove={() => onRemove(c.id)}
             />
           ))}
         </section>
@@ -926,6 +981,147 @@ function EdgeCard(props: {
             {edgesIssue?.message ?? set?.help}
           </p>
         </div>
+        {general.map((i) => (
+          <p key={i.message} className={`issue ${i.severity}`} role="alert">
+            {i.message}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** What a new pattern or mirror copies: the selected piece if it can be copied, else the last thing that can. */
+export function copySource(doc: ProjectDocument, selected: string | null) {
+  const copyable = doc.features.filter(isCopyable);
+  return copyable.find((f) => f.id === selected) ?? copyable[copyable.length - 1] ?? null;
+}
+
+/** A pattern or mirror: what it copies, and where the copies go. */
+function CopyCard(props: {
+  step: PatternFeature | MirrorFeature;
+  doc: ProjectDocument;
+  picked: boolean;
+  onPick: () => void;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  onRemove: () => void;
+}) {
+  const { step: c, issues, onChange } = props;
+  const at = props.doc.features.findIndex((f) => f.id === c.id);
+  const choices = props.doc.features.slice(0, at).filter(isCopyable);
+  const src = props.doc.features.find((f) => f.id === c.source);
+  const issue = (field: string) => issues.find((i) => i.field === field);
+  const sourceIssue = issue("source");
+  const general = issues.filter((i) => i.field === null || i.field === undefined);
+  const num = (key: string, label: string, value: number, help?: string, unit?: string) => (
+    <NumberField
+      label={label}
+      name={`${c.name} ${label.toLowerCase()}`}
+      help={help}
+      value={value}
+      unit={unit}
+      issue={issue(key)}
+      onCommit={(v) => onChange({ [key]: v })}
+    />
+  );
+  const summary =
+    c.type === "mirror"
+      ? `${src?.name ?? "?"} mirrored`
+      : c.kind === "grid"
+        ? `${src?.name ?? "?"} × ${c.count * c.rows}`
+        : `${src?.name ?? "?"} × ${c.count} round a circle`;
+  return (
+    <div
+      className={`shape-card open${props.picked ? " picked" : ""}${hasErrors(issues) ? " has-error" : ""}`}
+      data-testid="copy-step"
+      data-feature-id={c.id}
+      onPointerDown={props.onPick}
+    >
+      <div className="shape-head">
+        <span className="shape-toggle static">
+          <span className="mode-dot add" aria-hidden="true" />
+          <span className="shape-name">{c.name}</span>
+          <span className="shape-summary">{summary}</span>
+        </span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Remove ${c.name}`}
+          title="Remove the copies (the original stays)"
+          onClick={props.onRemove}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+      <div className="shape-body">
+        <div className="field">
+          <label htmlFor={`${c.id}-source`}>Copies</label>
+          <div className="input-row select-row">
+            <select
+              id={`${c.id}-source`}
+              value={c.source}
+              aria-invalid={sourceIssue ? true : undefined}
+              onChange={(e) => onChange({ source: e.target.value })}
+            >
+              {!src && <option value={c.source}>(removed)</option>}
+              {choices.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {sourceIssue && (
+            <p className={`issue ${sourceIssue.severity}`} role="alert">
+              {sourceIssue.message}
+            </p>
+          )}
+        </div>
+        {c.type === "pattern" ? (
+          <>
+            <div className="segmented-small" role="group" aria-label={`${c.name} layout`}>
+              <button type="button" aria-pressed={c.kind === "grid"} onClick={() => onChange({ kind: "grid" })}>
+                Row or grid
+              </button>
+              <button type="button" aria-pressed={c.kind === "circle"} onClick={() => onChange({ kind: "circle" })}>
+                Round a circle
+              </button>
+            </div>
+            {c.kind === "grid" ? (
+              <div className="hole-grid">
+                {num("count", "Across", c.count, "How many left to right, the original included.", "")}
+                {num("spacing", "Spacing", c.spacing, "Centre to centre. Minus goes left.")}
+                {num("rows", "Rows", c.rows, "How many rows, front to back.", "")}
+                {num("rowSpacing", "Row spacing", c.rowSpacing, "Minus goes to the front.")}
+              </div>
+            ) : (
+              <div className="hole-grid">
+                {num("count", "Count", c.count, "How many, the original included.", "")}
+                {num("angle", "Angle", c.angle, "360 spreads them all the way round.", "°")}
+                {num("cx", "Centre left / right", c.cx, "Where the circle's middle is.")}
+                {num("cy", "Centre front / back", c.cy)}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="segmented-small" role="group" aria-label={`${c.name} direction`}>
+              <button type="button" aria-pressed={c.axis === "x"} onClick={() => onChange({ axis: "x" })}>
+                Left ↔ right
+              </button>
+              <button type="button" aria-pressed={c.axis === "y"} onClick={() => onChange({ axis: "y" })}>
+                Front ↔ back
+              </button>
+            </div>
+            {num(
+              "at",
+              "Mirror line",
+              c.at,
+              c.axis === "x" ? "Left / right position of the mirror line." : "Front / back position of the mirror line.",
+            )}
+          </>
+        )}
         {general.map((i) => (
           <p key={i.message} className={`issue ${i.severity}`} role="alert">
             {i.message}

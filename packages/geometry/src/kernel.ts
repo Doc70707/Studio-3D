@@ -21,7 +21,10 @@ import {
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
 import {
   EDGE_SETS,
+  isCopyStep,
+  isCopyable,
   isEdgeStep,
+  patternMoves,
   hasErrors,
   holeEdgeIssues,
   threadOf,
@@ -40,6 +43,8 @@ import {
   type HoleFeature,
   type HollowFeature,
   type EdgeFeature,
+  type MirrorFeature,
+  type PatternFeature,
   type Issue,
   type ProjectDocument,
   type ShapeFeature,
@@ -316,6 +321,18 @@ function partSpan(part: Part | null): number {
   return Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
 }
 
+/** The solid a hole cuts: from 1 mm above the part's top down to its depth (or 1 mm below the part, if through). */
+function holeTool(h: HoleFeature, min: number[], max: number[]): Shape3D {
+  const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
+  const bottom = h.depth === 0 ? min[2]! - extra : max[2]! - h.depth;
+  const thread = threadOf(h);
+  // A threaded tool is made in 5 mm steps of length (any extra pokes out of the top, cutting nothing), so a thread
+  // already built is reused while the part's height or the hole's depth changes a little.
+  return thread
+    ? makeThread(thread, Math.ceil((max[2]! + extra - bottom) / 5) * 5).translate([h.x, h.y, bottom])
+    : makeCylinder(h.diameter / 2, max[2]! + extra - bottom, [h.x, h.y, bottom], [0, 0, 1]);
+}
+
 /**
  * Drills one hole straight down from the top of the part and checks the result.
  * The cut must remove some material but never more than the hole's own cylinder.
@@ -328,14 +345,7 @@ function drill(part: Part, h: HoleFeature, issues: Issue[], keep?: Piece[]): Par
   if (hasErrors(edge)) throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
   issues.push(...edge);
 
-  const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
-  const bottom = h.depth === 0 ? min[2] - extra : max[2] - h.depth;
-  const thread = threadOf(h);
-  // A threaded tool is made in 5 mm steps of length (any extra pokes out of the top, cutting nothing), so a thread
-  // already built is reused while the part's height or the hole's depth changes a little.
-  const tool = thread
-    ? makeThread(thread, Math.ceil((max[2] + extra - bottom) / 5) * 5).translate([h.x, h.y, bottom])
-    : makeCylinder(h.diameter / 2, max[2] + extra - bottom, [h.x, h.y, bottom], [0, 0, 1]);
+  const tool = holeTool(h, min, max);
   let result: Shape3D;
   try {
     result = part.shape.cut(tool);
@@ -484,6 +494,70 @@ export function edgeStep(part: Part, f: EdgeFeature): Part {
   return { shape: result, volume, pieces };
 }
 
+/** The solid an earlier step adds or cuts, made again where it stood, with the range its volume must fall in. */
+function sourceTool(src: ShapeFeature | HoleFeature | SketchFeature, part: Part): Tool & { mode: "add" | "cut" } {
+  if (src.type === "hole") {
+    const [min, max] = part.shape.boundingBox.bounds;
+    const shape = holeTool(src, min, max);
+    return { shape, least: 0, most: measureVolume(shape) * (1 + 1e-6), mode: "cut" };
+  }
+  if (src.type === "sketch") return { ...makeSketchTool(src, partSpan(part)), mode: src.mode };
+  const shape = makeShape(src);
+  const v = shapeVolume(src);
+  const tol = tolerance(src);
+  return { shape, least: v * (1 - tol), most: v * (1 + tol), mode: src.mode };
+}
+
+/**
+ * Adds or cuts copies of an earlier step: moved in a grid, turned round an upright line, or mirrored. Each copy is
+ * checked like the original would be (an added copy adds no more than its own volume; a cut takes no more).
+ */
+export function copyStep(
+  part: Part,
+  f: PatternFeature | MirrorFeature,
+  doc: ProjectDocument,
+  issues: Issue[],
+  keep?: Piece[],
+): Part {
+  const src = doc.features.find((x) => x.id === f.source);
+  if (!src || !isCopyable(src))
+    throw new ShapeCheckFailed("Choose an earlier shape, hole or sketch to copy.", f.id, "source");
+  const tool = sourceTool(src, part);
+  const copies: Shape3D[] = [];
+  try {
+    if (f.type === "mirror")
+      copies.push(
+        f.axis === "x"
+          ? tool.shape.clone().mirror("YZ", [f.at, 0, 0])
+          : tool.shape.clone().mirror("XZ", [0, f.at, 0]),
+      );
+    else
+      for (const m of patternMoves(f))
+        copies.push(
+          m.turn
+            ? tool.shape.clone().rotate(m.turn, [f.cx, f.cy, 0], [0, 0, 1])
+            : tool.shape.clone().translate([m.by[0], m.by[1], 0]),
+        );
+  } finally {
+    tool.shape.delete();
+  }
+  let current = part;
+  try {
+    while (copies.length) {
+      const copy = copies.shift()!;
+      const step = { id: f.id, name: f.name, mode: tool.mode };
+      const next = applyTool(current, { ...tool, shape: copy }, step, issues, keep);
+      if (current !== part) current.shape.delete();
+      current = next;
+    }
+  } catch (e) {
+    copies.forEach((c) => c.delete());
+    if (current !== part) current.shape.delete();
+    throw e;
+  }
+  return current;
+}
+
 const cantEdge = (f: EdgeFeature, set: string) =>
   `${f.name} couldn't ${f.type === "fillet" ? "round" : "bevel"} the ${set} by ${fmt(f.size)}, so your last good ` +
   "version was kept. It is probably bigger than a face next to one of those edges: try a smaller size.";
@@ -537,6 +611,7 @@ export function buildDocument(doc: ProjectDocument, keepPieces = false): BuildRe
     try {
       let next: Part;
       if (f.type === "hole") next = drill(part!, f, issues, keep);
+      else if (isCopyStep(f)) next = copyStep(part!, f, doc, issues, keep);
       else if (f.type === "hollow" || isEdgeStep(f)) {
         next = f.type === "hollow" ? hollow(part!, f) : edgeStep(part!, f);
         keep?.push({ id: f.id, shape: next.shape.clone(), modifier: true });

@@ -5,6 +5,8 @@ import {
   canUndo,
   emptyPreserved,
   holesOf,
+  isCopyStep,
+  isShape,
   moveFeature as moved,
   newDocument,
   parseProject,
@@ -22,7 +24,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.14.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.15.0" };
 
 /** How long after the last edit the unsaved work is backed up. */
 export const BACKUP_DELAY_MS = 2000;
@@ -79,12 +81,12 @@ export function useProject() {
 
   /**
    * Adds a new shape before the holes and any hollow (so it is drilled and hollowed with the rest of the part),
-   * or a hole, sketch or hollow at the end.
+   * or any other step (hole, sketch, hollow, fillet, pattern...) at the end.
    */
   const addFeature = useCallback(
     (feature: Feature) =>
       edit((d) => {
-        if (feature.type === "hole" || feature.type === "sketch" || feature.type === "hollow")
+        if (!isShape(feature))
           return { ...d, features: [...d.features, feature] };
         const firstHole = d.features.findIndex((f) => f.type === "hole" || f.type === "hollow");
         const at = firstHole === -1 ? d.features.length : firstHole;
@@ -97,7 +99,12 @@ export function useProject() {
   );
 
   const removeFeature = useCallback(
-    (id: string) => edit((d) => ({ ...d, features: d.features.filter((f) => f.id !== id) }), null),
+    // Patterns and mirrors of the removed step go with it (one undo brings them all back).
+    (id: string) =>
+      edit(
+        (d) => ({ ...d, features: d.features.filter((f) => f.id !== id && !(isCopyStep(f) && f.source === id)) }),
+        null,
+      ),
     [edit],
   );
 

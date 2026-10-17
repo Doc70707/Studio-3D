@@ -153,8 +153,45 @@ export interface EdgeFeature {
   edges: EdgeSet;
 }
 
+/**
+ * Repeats an earlier shape, hole or sketch: in a grid (`count` across × `rows` front to back, `spacing` and
+ * `rowSpacing` apart), or round a circle (`count` copies spread over `angle` degrees about the upright line through
+ * `cx`, `cy`). The counts include the original, which stays where it is.
+ */
+export interface PatternFeature {
+  id: string;
+  type: "pattern";
+  name: string;
+  source: string;
+  kind: "grid" | "circle";
+  count: number;
+  spacing: number;
+  rows: number;
+  rowSpacing: number;
+  angle: number;
+  cx: number;
+  cy: number;
+}
+
+/** Adds a mirror image of an earlier shape, hole or sketch, across the upright plane x = `at` or y = `at`. */
+export interface MirrorFeature {
+  id: string;
+  type: "mirror";
+  name: string;
+  source: string;
+  axis: "x" | "y";
+  at: number;
+}
+
 /** A document is a list of steps applied in order: shapes are added or cut, holes are drilled, sketches are pushed out or cut in. */
-export type Feature = ShapeFeature | HoleFeature | SketchFeature | HollowFeature | EdgeFeature;
+export type Feature =
+  | ShapeFeature
+  | HoleFeature
+  | SketchFeature
+  | HollowFeature
+  | EdgeFeature
+  | PatternFeature
+  | MirrorFeature;
 
 export interface ProjectDocument {
   units: Units;
@@ -235,6 +272,10 @@ export const isShape = (f: Feature): f is ShapeFeature => f.type in SHAPES;
 export const isSketch = (f: Feature): f is SketchFeature => f.type === "sketch";
 export const isHollow = (f: Feature): f is HollowFeature => f.type === "hollow";
 export const isEdgeStep = (f: Feature): f is EdgeFeature => f.type === "fillet" || f.type === "chamfer";
+export const isCopyStep = (f: Feature): f is PatternFeature | MirrorFeature => f.type === "pattern" || f.type === "mirror";
+/** Steps a pattern or mirror can copy: the ones that add or cut material where they stand. */
+export const isCopyable = (f: Feature): f is ShapeFeature | HoleFeature | SketchFeature =>
+  isShape(f) || f.type === "hole" || f.type === "sketch";
 /** Steps that add or cut solid material (shapes and sketches). */
 export const isSolidStep = (f: Feature): f is ShapeFeature | SketchFeature => isShape(f) || isSketch(f);
 export const shapesOf = (doc: ProjectDocument): ShapeFeature[] => doc.features.filter(isShape);
@@ -311,11 +352,56 @@ export function newEdgeStep(doc: ProjectDocument, type: EdgeFeature["type"]): Ed
     : { id: newId(), type, name: nextName(doc, "Chamfer"), size: 0.6, edges: "bottom" };
 }
 
+/**
+ * A new pattern of an earlier step: 3 in a row, 20 mm apart (or round the part's middle, 6 copies, for a hole or a
+ * round shape that sits off-centre).
+ */
+export function newPattern(
+  doc: ProjectDocument,
+  source: string,
+  centre: { x: number; y: number } = { x: 0, y: 0 },
+): PatternFeature {
+  return {
+    id: newId(),
+    type: "pattern",
+    name: nextName(doc, "Pattern"),
+    source,
+    kind: "grid",
+    count: 3,
+    spacing: 20,
+    rows: 1,
+    rowSpacing: 20,
+    angle: 360,
+    cx: centre.x,
+    cy: centre.y,
+  };
+}
+
+/** A new mirror of an earlier step, across the left/right middle of the part. */
+export function newMirror(doc: ProjectDocument, source: string, at = 0): MirrorFeature {
+  return { id: newId(), type: "mirror", name: nextName(doc, "Mirror"), source, axis: "x", at };
+}
+
+/** Where each copy a pattern makes goes, as moves from the original (not including the original itself). */
+export function patternMoves(p: PatternFeature): { by: [number, number]; turn: number }[] {
+  const out: { by: [number, number]; turn: number }[] = [];
+  if (p.kind === "grid") {
+    for (let r = 0; r < p.rows; r++)
+      for (let c = 0; c < p.count; c++) if (r || c) out.push({ by: [c * p.spacing, r * p.rowSpacing], turn: 0 });
+    return out;
+  }
+  // A full turn spreads the copies evenly; a part turn puts the last one at the end of the arc.
+  const full = Math.abs(Math.abs(p.angle) - 360) < 1e-9;
+  const step = p.angle / (full ? p.count : Math.max(p.count - 1, 1));
+  for (let i = 1; i < p.count; i++) out.push({ by: [0, 0], turn: i * step });
+  return out;
+}
+
 export type Axis = "x" | "y" | "z";
 
 /** Which ways a step can be moved: holes always go down from the top, so they only slide across it. */
 export function movableAxes(f: Feature): Axis[] {
-  if (f.type === "hollow" || isEdgeStep(f)) return [];
+  if (f.type === "hollow" || isEdgeStep(f) || isCopyStep(f)) return [];
   if (f.type === "hole") return ["x", "y"];
   return ["x", "y", "z"];
 }
@@ -330,6 +416,8 @@ export function moveFeature<F extends Feature>(f: F, by: [number, number, number
     case "hollow":
     case "fillet":
     case "chamfer":
+    case "pattern":
+    case "mirror":
       return f;
     case "hole":
       return { ...f, x: r(f.x + by[0]), y: r(f.y + by[1]) };
@@ -578,6 +666,8 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
       issues.push(...validateHollow(f));
     } else if (isEdgeStep(f)) {
       issues.push(...validateEdgeStep(f));
+    } else if (isCopyStep(f)) {
+      issues.push(...validateCopyStep(f, doc));
     } else {
       if (holesStarted)
         issues.push({
@@ -611,6 +701,40 @@ export function validateEdgeStep(e: EdgeFeature): Issue[] {
   if (e.size < 0.1) return add("size", `${what} needs to be at least ${fmt(0.1)}.`);
   if (e.size > LIMITS.maxSize) return add("size", `${what} can be at most ${fmt(LIMITS.maxSize)}.`);
   if (!EDGE_SETS.some((x) => x.edges === e.edges)) return add("edges", "Choose which edges to change.");
+  return [];
+}
+
+export const PATTERN_LIMITS = { maxCopies: 100 };
+
+/** Plain-language checks for a pattern or mirror: what it copies, and sensible numbers. */
+export function validateCopyStep(f: PatternFeature | MirrorFeature, doc: ProjectDocument): Issue[] {
+  const add = (field: string, message: string): Issue[] => [{ severity: "error", featureId: f.id, field, message }];
+  const at = doc.features.findIndex((x) => x.id === f.id);
+  const source = doc.features.findIndex((x) => x.id === f.source);
+  const src = doc.features[source];
+  if (!src || (at >= 0 && source > at))
+    return add("source", "Choose an earlier shape, hole or sketch to copy.");
+  if (!isCopyable(src)) return add("source", `${src.name} can't be copied. Choose a shape, hole or sketch.`);
+  const num = (k: string, v: number) => (Number.isFinite(v) ? null : add(k, "This needs to be a number."));
+  if (f.type === "mirror") return num("at", f.at) ?? [];
+  for (const k of ["count", "rows", "spacing", "rowSpacing", "angle", "cx", "cy"] as const) {
+    const bad = num(k, f[k]);
+    if (bad) return bad;
+  }
+  if (!Number.isInteger(f.count) || f.count < 2)
+    return add("count", "A pattern needs a whole number, at least 2 (the original and a copy).");
+  if (f.kind === "grid") {
+    if (!Number.isInteger(f.rows) || f.rows < 1) return add("rows", "Rows needs to be a whole number, 1 or more.");
+    if (f.count * f.rows > PATTERN_LIMITS.maxCopies)
+      return add("count", `A pattern can make at most ${PATTERN_LIMITS.maxCopies} in all.`);
+    if (f.spacing === 0)
+      return add("spacing", "Copies need some space between them, or they'd sit on top of each other.");
+    if (f.rows > 1 && f.rowSpacing === 0) return add("rowSpacing", "Rows need some space between them.");
+    return [];
+  }
+  if (f.count > PATTERN_LIMITS.maxCopies)
+    return add("count", `A pattern can make at most ${PATTERN_LIMITS.maxCopies}.`);
+  if (f.angle === 0 || Math.abs(f.angle) > 360) return add("angle", "The angle needs to be between 0 and 360 degrees.");
   return [];
 }
 

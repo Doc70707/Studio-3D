@@ -67,6 +67,8 @@ const NUMBERS: Record<Feature["type"], readonly string[]> = {
   hollow: ["wall"],
   fillet: ["size"],
   chamfer: ["size"],
+  pattern: ["count", "spacing", "rows", "rowSpacing", "angle", "cx", "cy"],
+  mirror: ["at"],
 };
 const TYPES = new Set(Object.keys(NUMBERS));
 const knownKeys = (type: Feature["type"]) =>
@@ -74,7 +76,9 @@ const knownKeys = (type: Feature["type"]) =>
     "id",
     "type",
     "name",
-    ...(type === "hole" || type === "hollow" || type === "fillet" || type === "chamfer" ? [] : ["mode"]),
+    ...(["hole", "hollow", "fillet", "chamfer", "pattern", "mirror"].includes(type) ? [] : ["mode"]),
+    ...(type === "pattern" ? ["source", "kind"] : []),
+    ...(type === "mirror" ? ["source", "axis"] : []),
     ...(type === "hollow" ? ["open"] : []),
     ...(type === "fillet" || type === "chamfer" ? ["edges"] : []),
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit"] : []),
@@ -92,6 +96,8 @@ const DEFAULT_NAMES: Record<Feature["type"], string> = {
   hollow: "Hollow",
   fillet: "Fillet",
   chamfer: "Chamfer",
+  pattern: "Pattern",
+  mirror: "Mirror",
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -253,7 +259,21 @@ export function parseProject(text: string): ParseResult {
         error: `This project file is damaged: ${where} doesn't say which edges to change.`,
       };
     }
-    if (!["hole", "hollow", "fillet", "chamfer"].includes(type) && f.mode !== "add" && f.mode !== "cut") {
+    if (
+      (type === "pattern" || type === "mirror") &&
+      (typeof f.source !== "string" ||
+        (type === "pattern" ? f.kind !== "grid" && f.kind !== "circle" : f.axis !== "x" && f.axis !== "y"))
+    ) {
+      return {
+        ok: false,
+        error: `This project file is damaged: ${where} doesn't say what it copies, or how.`,
+      };
+    }
+    if (
+      !["hole", "hollow", "fillet", "chamfer", "pattern", "mirror"].includes(type) &&
+      f.mode !== "add" &&
+      f.mode !== "cut"
+    ) {
       return {
         ok: false,
         error: `This project file is damaged: ${where} doesn't say whether it adds or cuts.`,

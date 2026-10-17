@@ -21,6 +21,8 @@ import {
   newHole,
   newEdgeStep,
   newHollow,
+  newMirror,
+  newPattern,
   newShape,
   newSketch,
   validateDocument,
@@ -30,7 +32,7 @@ import {
   type ProjectDocument,
   type SketchFeature,
 } from "@studio3d/document";
-import { DesignPanel, SHAPE_ORDER, placeNew } from "./DesignPanel";
+import { DesignPanel, SHAPE_ORDER, copySource, placeNew } from "./DesignPanel";
 import { MenuBar, type Menu } from "./MenuBar";
 import { SketchEditor, type SketchDraft } from "./SketchEditor";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
@@ -544,6 +546,8 @@ export function App() {
   };
   const where = placeNew(built?.measurements ?? null);
   const hasHollow = doc.features.some(isHollow);
+  /** What Modify > Pattern / Mirror copies: the selected piece, or the last one that can be copied. */
+  const copyFrom = copySource(doc, selection?.id ?? null);
   const menus: Menu[] = [
     {
       label: "File",
@@ -640,6 +644,19 @@ export function App() {
           onSelect: () => addAndSelect(newEdgeStep(doc, "chamfer")),
           disabled: !built,
           reason: "Add a shape first",
+        },
+        "separator",
+        {
+          label: copyFrom ? `Pattern ${copyFrom.name}` : "Pattern",
+          onSelect: () => copyFrom && addAndSelect(newPattern(doc, copyFrom.id, where)),
+          disabled: !copyFrom,
+          reason: "Add a shape, hole or sketch first",
+        },
+        {
+          label: copyFrom ? `Mirror ${copyFrom.name}` : "Mirror",
+          onSelect: () => copyFrom && addAndSelect(newMirror(doc, copyFrom.id, where.x)),
+          disabled: !copyFrom,
+          reason: "Add a shape, hole or sketch first",
         },
       ],
     },

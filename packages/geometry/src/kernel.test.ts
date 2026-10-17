@@ -36,6 +36,8 @@ import {
   type ThreadSize,
   newHollow,
   newEdgeStep,
+  newPattern,
+  newMirror,
   type EdgeFeature,
   type OpenSide,
   PLATE_PLANE,
@@ -953,6 +955,17 @@ describe("which step made each face (for clicking a piece of the part)", () => {
     expect(r.at([0, 0, 30])).toBe("block");
   });
 
+  it("the bosses a pattern adds belong to the pattern", () => {
+    const block = { ...box({ wall: 0, height: 10 }), id: "block" };
+    const boss = { ...shape("cylinder", { diameter: 10, height: 5, x: -20, z: 10 }), id: "boss" } as ShapeFeature;
+    const row = { ...newPattern({ units: "mm", features: [] }, "boss"), id: "row", count: 3, spacing: 20 };
+    const r = owned({ units: "mm", features: [block, boss, row] });
+    expect(r.at([-20, 0, 15])).toBe("boss");
+    expect(r.at([0, 0, 15])).toBe("row");
+    expect(r.at([20, 0, 15])).toBe("row");
+    expect(r.at([10, 15, 10])).toBe("block");
+  });
+
   it("a threaded rod's faces belong to it, quickly enough to do after every change", () => {
     const block = { ...box({ wall: 0, height: 10 }), id: "block" };
     const rod = {
@@ -1014,6 +1027,65 @@ describe("fillets and chamfers", () => {
     expect(fails([block(), edges("fillet", { size: 20, edges: "all" })])).toContain("try a smaller size");
     const ball = shape("sphere", { diameter: 20 }) as ShapeFeature;
     expect(fails([ball, edges("fillet", { size: 1, edges: "vertical" })])).toContain("no upright edges to round");
+  });
+});
+
+describe("patterns and mirrors", () => {
+  const plate = () => shape("box", { width: 60, depth: 40, height: 10, wall: 0, id: "plate" });
+  const grid = (source: string, over = {}) => ({ ...newPattern({ units: "mm", features: [] }, source), ...over });
+  const doc = (...features: Feature[]): ProjectDocument => ({ units: "mm", features });
+  const fails = (d: ProjectDocument) => {
+    const r = buildDocument(d);
+    expect(r.ok).toBe(false);
+    return r.ok ? "" : r.issues[0]!.message;
+  };
+
+  it("a 3 × 2 grid of through holes cuts six exact holes", () => {
+    const h = hole({ id: "h", x: -20, y: -10, diameter: 5 });
+    const r = designed(doc(plate(), h, grid("h", { count: 3, spacing: 20, rows: 2, rowSpacing: 20 })));
+    expect(rel(r.measurements.volume, 24000 - 6 * cyl(5, 10))).toBeLessThan(1e-6);
+  });
+
+  it("holes round a circle: six evenly spaced on a disc", () => {
+    const disc = shape("cylinder", { diameter: 50, height: 5, id: "disc" });
+    const h = hole({ id: "h", x: 15, y: 0, diameter: 5 });
+    const r = designed(doc(disc, h, grid("h", { kind: "circle", count: 6, angle: 360, cx: 0, cy: 0 })));
+    expect(rel(r.measurements.volume, cyl(50, 5) - 6 * cyl(5, 5))).toBeLessThan(1e-6);
+  });
+
+  it("a row of bosses on top adds three of them", () => {
+    const boss = shape("cylinder", { diameter: 10, height: 5, x: -20, y: 0, z: 10, id: "boss" });
+    const r = designed(doc(plate(), boss, grid("boss", { count: 3, spacing: 20 })));
+    expect(rel(r.measurements.volume, 24000 + 3 * cyl(10, 5))).toBeLessThan(1e-6);
+    expect(r.measurements.size).toEqual([60, 40, 15]);
+  });
+
+  it("boxes turned round a circle stand at each quarter, rotated with it", () => {
+    const disc = shape("cylinder", { diameter: 30, height: 5, id: "disc" });
+    const arm = shape("box", { width: 20, depth: 4, height: 5, x: 20, y: 0, z: 0, wall: 0, id: "arm" });
+    const r = designed(doc(disc, arm, grid("arm", { kind: "circle", count: 4, angle: 360, cx: 0, cy: 0 })));
+    r.measurements.size.forEach((v, i) => expect(v).toBeCloseTo([60, 60, 5][i]!, 6));
+    // Each arm overlaps the disc the same way, so the four together add four times what one adds.
+    const one = designed(doc(disc, arm)).measurements.volume - cyl(30, 5);
+    expect(rel(r.measurements.volume, cyl(30, 5) + 4 * one)).toBeLessThan(1e-6);
+  });
+
+  it("a mirror copies a boss to the other side of the part", () => {
+    const boss = shape("box", { width: 10, depth: 10, height: 5, x: 20, y: 5, z: 10, wall: 0, id: "boss" });
+    const m = { ...newMirror({ units: "mm", features: [] }, "boss"), axis: "x" as const, at: 0 };
+    const r = designed(doc(plate(), boss, m));
+    expect(rel(r.measurements.volume, 24000 + 2 * 500)).toBeLessThan(1e-9);
+    expect(r.measurements.min[0]).toBeCloseTo(-30, 9);
+    const across = { ...m, axis: "y" as const, at: 0 };
+    const r2 = designed(doc(plate(), boss, across));
+    expect(rel(r2.measurements.volume, 24000 + 2 * 500)).toBeLessThan(1e-9);
+  });
+
+  it("a pattern that copies a missing or later step, or has too few, is explained", () => {
+    expect(fails(doc(plate(), grid("gone")))).toContain("Choose an earlier shape, hole or sketch");
+    const h = hole({ id: "h" });
+    expect(fails(doc(plate(), h, grid("h", { count: 1 })))).toContain("at least 2");
+    expect(fails(doc(plate(), grid("h"), h))).toContain("Choose an earlier");
   });
 });
 

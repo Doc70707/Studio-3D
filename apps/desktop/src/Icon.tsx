@@ -21,6 +21,8 @@ const PATHS = {
   face: "M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8",
   fillet: "M4 20V12a8 8 0 0 1 8-8h8",
   chamfer: "M4 20v-9l7-7h9",
+  pattern: "M4 4h5v5H4zM15 4h5v5h-5zM4 15h5v5H4zM15 15h5v5h-5z",
+  mirror: "M12 3v18M9 6L4 18h5zM15 6l5 12h-5z",
 } as const;
 
 export function Icon({ name }: { name: keyof typeof PATHS }) {
