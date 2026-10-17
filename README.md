@@ -39,6 +39,10 @@ What works today:
   back, left or right) or closed with an empty space inside. The outside size is checked to stay the same and the
   material to go down. Walls too thick for the part, a side that isn't flat, and shapes the geometry engine can't
   hollow (like a cone's sharp tip) are explained, and your last good version is kept.
+- Fillets and chamfers: round or bevel the part's edges by an exact size: every edge, the upright edges, the top
+  edges or the bottom edges (a small bottom chamfer stops the first layer squashing out). The edges are chosen by
+  rule, so they stay right when the part changes. Rounded boxes, corners and rings are checked against the exact
+  volume, and a size too big for the part is explained while your last good version is kept.
 - Threads: give a cylinder or a hole a real ISO metric thread (M3 to M20, coarse pitch). A cylinder that adds becomes a
   threaded rod; a hole, or a cylinder that cuts, becomes a threaded hole a bolt screws into. A fit clearance (0.3 mm by
   default) leaves room so printed threads turn, and a test screws a printed-size bolt into its hole to check they

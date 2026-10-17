@@ -35,6 +35,8 @@ import {
   type CylinderFeature,
   type ThreadSize,
   newHollow,
+  newEdgeStep,
+  type EdgeFeature,
   type OpenSide,
   PLATE_PLANE,
   offsetProfile,
@@ -871,7 +873,7 @@ describe("which step made each face (for clicking a piece of the part)", () => {
     if (!r.ok) throw new Error(r.issues.map((i) => i.message).join("; "));
     const mesh = tessellate(r.shape);
     const t = performance.now();
-    const owners = faceOwners(mesh, r.pieces!, doc);
+    const owners = faceOwners(mesh, r.pieces!);
     const ms = performance.now() - t;
     r.pieces!.forEach((p) => p.shape.delete());
     expect(owners).toHaveLength(faceCount(mesh));
@@ -941,6 +943,16 @@ describe("which step made each face (for clicking a piece of the part)", () => {
     expect(r.at([0, 0, 0])).toBe("block"); // underneath
   });
 
+  it("rounded corners belong to the fillet; the flat faces stay the block's", () => {
+    const block = { ...box({ wall: 0 }), id: "block" };
+    const round = { ...newEdgeStep({ units: "mm", features: [] }, "fillet"), id: "round", size: 5, edges: "vertical" as const };
+    const r = owned({ units: "mm", features: [block, round] });
+    const d = 4.99 * Math.SQRT1_2; // just inside the curve, where the display's flat triangles are
+    expect(r.at([25 + d, 15 + d, 15])).toBe("round");
+    expect(r.at([0, -20, 15])).toBe("block");
+    expect(r.at([0, 0, 30])).toBe("block");
+  });
+
   it("a threaded rod's faces belong to it, quickly enough to do after every change", () => {
     const block = { ...box({ wall: 0, height: 10 }), id: "block" };
     const rod = {
@@ -954,6 +966,54 @@ describe("which step made each face (for clicking a piece of the part)", () => {
     expect(r.at([0, 15, 10])).toBe("block");
     expect(r.at([0, 0, 25])).toBe("rod");
     expect(r.ms).toBeLessThan(1500);
+  });
+});
+
+describe("fillets and chamfers", () => {
+  const block = (): ShapeFeature =>
+    ({ ...newShape({ units: "mm", features: [] }, "box"), width: 60, depth: 40, height: 30 }) as ShapeFeature;
+  const edges = (type: EdgeFeature["type"], over: Partial<EdgeFeature>): EdgeFeature => ({
+    ...newEdgeStep({ units: "mm", features: [] }, type),
+    ...over,
+  });
+  const fails = (features: Feature[]) => {
+    const r = buildDocument({ units: "mm", features });
+    expect(r.ok).toBe(false);
+    return r.ok ? "" : r.issues[0]!.message;
+  };
+
+  it("rounding every edge of a block gives exactly a rounded box", () => {
+    const r = designed({ units: "mm", features: [block(), edges("fillet", { size: 2, edges: "all" })] });
+    const [a, b, c, k] = [56, 36, 26, 2];
+    const rounded = a * b * c + 2 * k * (a * b + b * c + a * c) + Math.PI * k * k * (a + b + c) + (4 / 3) * Math.PI * k ** 3;
+    expect(r.measurements.size).toEqual([60, 40, 30]);
+    expect(rel(r.measurements.volume, rounded)).toBeLessThan(1e-6);
+  });
+
+  it("rounding the upright edges takes a quarter-circle corner off each one", () => {
+    const r = designed({ units: "mm", features: [block(), edges("fillet", { size: 5, edges: "vertical" })] });
+    expect(rel(r.measurements.volume, 72000 - 4 * (1 - Math.PI / 4) * 25 * 30)).toBeLessThan(1e-6);
+  });
+
+  it("a chamfer round the bottom takes a mitred 1 mm bevel, and the part exports watertight", async () => {
+    const r = designed({ units: "mm", features: [block(), edges("chamfer", { size: 1, edges: "bottom" })] });
+    // The bevel's cross-section (0.5 mm²) swept along the loop through its centre, 1/3 mm in from each side.
+    expect(rel(r.measurements.volume, 72000 - 0.5 * 2 * (60 - 2 / 3 + 40 - 2 / 3))).toBeLessThan(1e-6);
+    r.measurements.size.forEach((v, i) => expect(v).toBeCloseTo([60, 40, 30][i]!, 9));
+    const report = checkBinaryStl(await exportStl(r.shape));
+    expect(report.watertight).toBe(true);
+  });
+
+  it("a chamfer on a cylinder's top edge takes a ring off, by Pappus' rule", () => {
+    const rod = shape("cylinder", { diameter: 20, height: 10 }) as ShapeFeature;
+    const r = designed({ units: "mm", features: [rod, edges("chamfer", { size: 1, edges: "top" })] });
+    expect(rel(r.measurements.volume, cyl(20, 10) - 2 * Math.PI * (10 - 1 / 3) * 0.5)).toBeLessThan(1e-6);
+  });
+
+  it("too big a size, or edges the part doesn't have, are explained and the last good part is kept", () => {
+    expect(fails([block(), edges("fillet", { size: 20, edges: "all" })])).toContain("try a smaller size");
+    const ball = shape("sphere", { diameter: 20 }) as ShapeFeature;
+    expect(fails([ball, edges("fillet", { size: 1, edges: "vertical" })])).toContain("no upright edges to round");
   });
 });
 

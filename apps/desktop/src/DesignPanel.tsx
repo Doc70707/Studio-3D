@@ -12,6 +12,10 @@ import {
   hasErrors,
   newHole,
   newHollow,
+  newEdgeStep,
+  isEdgeStep,
+  EDGE_SETS,
+  type EdgeFeature,
   newShape,
   shapesOf,
   singleBox,
@@ -92,6 +96,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
   const shapes = shapesOf(doc);
   const sketches = doc.features.filter((f): f is SketchFeature => f.type === "sketch");
   const hollows = doc.features.filter((f): f is HollowFeature => f.type === "hollow");
+  const edgeSteps = doc.features.filter(isEdgeStep);
   const [selected, setSelected] = useState<string | null>(shapes[0]?.id ?? null);
   const open = shapes.some((s) => s.id === selected) ? selected : (shapes[0]?.id ?? null);
   const [holeFocus, setHoleFocus] = useState<string | null>(null);
@@ -105,7 +110,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
     if (f?.type === "hole") setHoleFocus(picked);
     else if (f) {
       setHoleFocus(null);
-      if (f.type !== "sketch" && f.type !== "hollow") setSelected(picked);
+      if (f.type !== "sketch" && f.type !== "hollow" && !isEdgeStep(f)) setSelected(picked);
     }
     requestAnimationFrame(() =>
       scroller.current
@@ -243,6 +248,51 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               issues={issues.filter((i) => i.featureId === h.id)}
               onChange={(patch) => onChange(h.id, patch)}
               onRemove={() => onRemove(h.id)}
+            />
+          ))}
+        </section>
+
+        <section className="edges" aria-label="Edges">
+          <div className="section-head">
+            <h3>Edges</h3>
+            <div className="add-row compact">
+              <button
+                type="button"
+                className="add"
+                onClick={() => onAdd(newEdgeStep(doc, "fillet"))}
+                disabled={!measurements}
+                title="Round edges of the part"
+              >
+                <Icon name="fillet" />
+                Fillet
+              </button>
+              <button
+                type="button"
+                className="add"
+                onClick={() => onAdd(newEdgeStep(doc, "chamfer"))}
+                disabled={!measurements}
+                title="Bevel edges of the part"
+              >
+                <Icon name="chamfer" />
+                Chamfer
+              </button>
+            </div>
+          </div>
+          {edgeSteps.length === 0 && (
+            <p className="help">
+              Round (fillet) or bevel (chamfer) edges. Rounded corners are stronger and nicer to hold; a small chamfer
+              on the bottom edges stops the first layer squashing out.
+            </p>
+          )}
+          {edgeSteps.map((e) => (
+            <EdgeCard
+              key={e.id}
+              step={e}
+              picked={e.id === picked}
+              onPick={() => onSelect(e.id)}
+              issues={issues.filter((i) => i.featureId === e.id)}
+              onChange={(patch) => onChange(e.id, patch)}
+              onRemove={() => onRemove(e.id)}
             />
           ))}
         </section>
@@ -805,5 +855,83 @@ function Facts({ box, measurements }: { box: BoxFeature | null; measurements: Me
       <dt>Material volume</dt>
       <dd data-testid="volume">{(measurements.volume / 1000).toFixed(2)} cm³</dd>
     </dl>
+  );
+}
+
+/** A fillet or chamfer: its size, and which edges it goes on. */
+function EdgeCard(props: {
+  step: EdgeFeature;
+  picked: boolean;
+  onPick: () => void;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  onRemove: () => void;
+}) {
+  const { step: e, issues, onChange } = props;
+  const fillet = e.type === "fillet";
+  const set = EDGE_SETS.find((x) => x.edges === e.edges);
+  const edgesIssue = issues.find((i) => i.field === "edges");
+  const general = issues.filter((i) => i.field !== "edges" && i.field !== "size");
+  return (
+    <div
+      className={`shape-card open${props.picked ? " picked" : ""}${hasErrors(issues) ? " has-error" : ""}`}
+      data-testid="edge-step"
+      data-feature-id={e.id}
+      onPointerDown={props.onPick}
+    >
+      <div className="shape-head">
+        <span className="shape-toggle static">
+          <span className="mode-dot cut" aria-hidden="true" />
+          <span className="shape-name">{e.name}</span>
+          <span className="shape-summary">
+            {mm(e.size)} mm · {set?.label.toLowerCase() ?? "edges"}
+          </span>
+        </span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Remove ${e.name}`}
+          title={fillet ? "Make these edges sharp again" : "Remove the bevel"}
+          onClick={props.onRemove}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+      <div className="shape-body">
+        <NumberField
+          label={fillet ? "Radius" : "Size"}
+          name={`${e.name} size`}
+          help={fillet ? "How round the edges are." : "How far the bevel cuts back along each face."}
+          value={e.size}
+          issue={issues.find((i) => i.field === "size")}
+          onCommit={(size) => onChange({ size })}
+        />
+        <div className="field">
+          <label htmlFor={`${e.id}-edges`}>Edges</label>
+          <div className="input-row select-row">
+            <select
+              id={`${e.id}-edges`}
+              value={e.edges}
+              aria-invalid={edgesIssue ? true : undefined}
+              onChange={(ev) => onChange({ edges: ev.target.value })}
+            >
+              {EDGE_SETS.map((x) => (
+                <option key={x.edges} value={x.edges}>
+                  {x.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className={edgesIssue ? `issue ${edgesIssue.severity}` : "help"} role={edgesIssue ? "alert" : undefined}>
+            {edgesIssue?.message ?? set?.help}
+          </p>
+        </div>
+        {general.map((i) => (
+          <p key={i.message} className={`issue ${i.severity}`} role="alert">
+            {i.message}
+          </p>
+        ))}
+      </div>
+    </div>
   );
 }

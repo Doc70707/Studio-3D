@@ -131,8 +131,30 @@ export interface HollowFeature {
   open: OpenSide;
 }
 
+/** Which edges of the part a fillet or chamfer goes on. Rules, not picked edges, so they survive any change. */
+export type EdgeSet = "all" | "vertical" | "top" | "bottom";
+
+export const EDGE_SETS: { edges: EdgeSet; label: string; help: string }[] = [
+  { edges: "all", label: "All edges", help: "Every edge of the part" },
+  { edges: "vertical", label: "Upright edges", help: "Straight edges that point straight up, like a box's corners" },
+  { edges: "top", label: "Top edges", help: "Edges around the very top of the part" },
+  { edges: "bottom", label: "Bottom edges", help: "Edges on the plate; a small chamfer here stops elephant's foot" },
+];
+
+/**
+ * Rounds (fillet) or bevels (chamfer) edges of the part built so far. `size` is the radius of a fillet, or how far
+ * a chamfer cuts back along each face.
+ */
+export interface EdgeFeature {
+  id: string;
+  type: "fillet" | "chamfer";
+  name: string;
+  size: number;
+  edges: EdgeSet;
+}
+
 /** A document is a list of steps applied in order: shapes are added or cut, holes are drilled, sketches are pushed out or cut in. */
-export type Feature = ShapeFeature | HoleFeature | SketchFeature | HollowFeature;
+export type Feature = ShapeFeature | HoleFeature | SketchFeature | HollowFeature | EdgeFeature;
 
 export interface ProjectDocument {
   units: Units;
@@ -209,10 +231,10 @@ export const SHAPES: Record<ShapeType, { label: string; make: () => Omit<ShapeFe
   },
 };
 
-export const isShape = (f: Feature): f is ShapeFeature =>
-  f.type !== "hole" && f.type !== "sketch" && f.type !== "hollow";
+export const isShape = (f: Feature): f is ShapeFeature => f.type in SHAPES;
 export const isSketch = (f: Feature): f is SketchFeature => f.type === "sketch";
 export const isHollow = (f: Feature): f is HollowFeature => f.type === "hollow";
+export const isEdgeStep = (f: Feature): f is EdgeFeature => f.type === "fillet" || f.type === "chamfer";
 /** Steps that add or cut solid material (shapes and sketches). */
 export const isSolidStep = (f: Feature): f is ShapeFeature | SketchFeature => isShape(f) || isSketch(f);
 export const shapesOf = (doc: ProjectDocument): ShapeFeature[] => doc.features.filter(isShape);
@@ -282,11 +304,18 @@ export function newHollow(doc: ProjectDocument): HollowFeature {
   return { id: newId(), type: "hollow", name: nextName(doc, "Hollow"), wall: 2, open: "top" };
 }
 
+/** A new fillet (1 mm, every edge) or chamfer (0.6 mm on the bottom edges, which stops elephant's foot). */
+export function newEdgeStep(doc: ProjectDocument, type: EdgeFeature["type"]): EdgeFeature {
+  return type === "fillet"
+    ? { id: newId(), type, name: nextName(doc, "Fillet"), size: 1, edges: "all" }
+    : { id: newId(), type, name: nextName(doc, "Chamfer"), size: 0.6, edges: "bottom" };
+}
+
 export type Axis = "x" | "y" | "z";
 
 /** Which ways a step can be moved: holes always go down from the top, so they only slide across it. */
 export function movableAxes(f: Feature): Axis[] {
-  if (f.type === "hollow") return [];
+  if (f.type === "hollow" || isEdgeStep(f)) return [];
   if (f.type === "hole") return ["x", "y"];
   return ["x", "y", "z"];
 }
@@ -299,6 +328,8 @@ export function moveFeature<F extends Feature>(f: F, by: [number, number, number
   const r = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
   switch (f.type) {
     case "hollow":
+    case "fillet":
+    case "chamfer":
       return f;
     case "hole":
       return { ...f, x: r(f.x + by[0]), y: r(f.y + by[1]) };
@@ -522,7 +553,9 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
       {
         severity: "error",
         field: null,
-        message: "A part needs a shape to start from. Add a shape or draw on the plate before holes and hollows.",
+        message:
+          "A part needs a shape to start from. Add a shape or draw on the plate before holes, hollows, fillets " +
+          "and chamfers.",
       },
     ];
   }
@@ -543,6 +576,8 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
       issues.push(...validateSketch(f));
     } else if (f.type === "hollow") {
       issues.push(...validateHollow(f));
+    } else if (isEdgeStep(f)) {
+      issues.push(...validateEdgeStep(f));
     } else {
       if (holesStarted)
         issues.push({
@@ -565,6 +600,17 @@ export function validateHollow(h: HollowFeature): Issue[] {
     return add("wall", `Walls need to be at least ${fmt(LIMITS.minPrintableWall)} thick to print.`);
   if (h.wall > LIMITS.maxSize) return add("wall", `Walls can be at most ${fmt(LIMITS.maxSize)} thick.`);
   if (!OPEN_SIDES.some((o) => o.side === h.open)) return add("open", "Choose which side to leave open.");
+  return [];
+}
+
+/** Plain-language checks for a fillet or chamfer that don't need the part. */
+export function validateEdgeStep(e: EdgeFeature): Issue[] {
+  const add = (field: string, message: string): Issue[] => [{ severity: "error", featureId: e.id, field, message }];
+  const what = e.type === "fillet" ? "A fillet's radius" : "A chamfer's size";
+  if (!Number.isFinite(e.size)) return add("size", `${what} needs to be a number.`);
+  if (e.size < 0.1) return add("size", `${what} needs to be at least ${fmt(0.1)}.`);
+  if (e.size > LIMITS.maxSize) return add("size", `${what} can be at most ${fmt(LIMITS.maxSize)}.`);
+  if (!EDGE_SETS.some((x) => x.edges === e.edges)) return add("edges", "Choose which edges to change.");
   return [];
 }
 

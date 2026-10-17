@@ -15,6 +15,8 @@ import {
   type ShapeFeature,
   newHollow,
   type HollowFeature,
+  newEdgeStep,
+  type EdgeFeature,
   newHole,
   holeDiameter,
   shapeSize,
@@ -274,6 +276,30 @@ describe("hollow", () => {
     const r = parseProject(text);
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toContain("which side is open");
+  });
+});
+
+describe("fillets and chamfers", () => {
+  const withEdges = (type: EdgeFeature["type"], over: Partial<EdgeFeature> = {}) => {
+    const doc = newDocument();
+    return { ...doc, features: [...doc.features, { ...newEdgeStep(doc, type), ...over }] };
+  };
+
+  it("start sensibly for printing, and are checked", () => {
+    expect(withEdges("fillet").features[1]).toMatchObject({ name: "Fillet 1", size: 1, edges: "all" });
+    expect(withEdges("chamfer").features[1]).toMatchObject({ name: "Chamfer 1", size: 0.6, edges: "bottom" });
+    expect(validateDocument(withEdges("fillet"))).toEqual([]);
+    expect(validateDocument(withEdges("fillet", { size: 0 }))[0]!.message).toContain("radius needs to be at least");
+    expect(validateDocument(withEdges("chamfer", { size: NaN }))[0]!.field).toBe("size");
+    expect(movableAxes(withEdges("fillet").features[1]!)).toEqual([]);
+  });
+
+  it("are saved and opened again unchanged; unknown edge choices are refused as damaged", () => {
+    const doc = withEdges("chamfer", { size: 0.8, edges: "vertical" });
+    const r = parseProject(serializeProject(doc, app));
+    expect(r.ok && r.document).toEqual(doc);
+    const bad = parseProject(serializeProject(doc, app).replace('"edges": "vertical"', '"edges": "some"'));
+    expect(!bad.ok && bad.error).toContain("which edges");
   });
 });
 

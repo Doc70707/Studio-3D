@@ -15,10 +15,13 @@ import {
   measureVolume,
   Plane,
   type Drawing,
+  type Edge,
   type Shape3D,
 } from "replicad";
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
 import {
+  EDGE_SETS,
+  isEdgeStep,
   hasErrors,
   holeEdgeIssues,
   threadOf,
@@ -36,6 +39,7 @@ import {
   type SketchFeature,
   type HoleFeature,
   type HollowFeature,
+  type EdgeFeature,
   type Issue,
   type ProjectDocument,
   type ShapeFeature,
@@ -59,6 +63,8 @@ export type BuildResult =
 export interface Piece {
   id: string;
   shape: Shape3D;
+  /** A hollow, fillet or chamfer: the whole part after that step, which explains the faces the step made. */
+  modifier?: boolean;
 }
 
 /** What the finished box must measure. Used to catch the kernel silently returning the wrong shape. */
@@ -429,6 +435,59 @@ export function hollow(part: Part, h: HollowFeature): Part {
   return { shape: result, volume, pieces: result.solids.length };
 }
 
+/** Whether an edge belongs to a fillet's or chamfer's set, judged from where it lies on the part. */
+function edgeChooser(set: EdgeFeature["edges"], partMin: number[], partMax: number[]): (e: Edge) => boolean {
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  return (e) => {
+    if (set === "all") return true;
+    const [lo, hi] = e.boundingBox.bounds;
+    if (set === "top") return near(lo[2]!, partMax[2]!) && near(hi[2]!, partMax[2]!);
+    if (set === "bottom") return near(lo[2]!, partMin[2]!) && near(hi[2]!, partMin[2]!);
+    // Upright: a straight edge with no sideways extent.
+    return e.geomType === "LINE" && near(lo[0]!, hi[0]!) && near(lo[1]!, hi[1]!) && hi[2]! - lo[2]! > 1e-6;
+  };
+}
+
+/**
+ * Rounds (fillet) or bevels (chamfer) the chosen edges. The result must be one solid per piece as before, no bigger
+ * than the part, and its volume may change by at most what a cut of that size along every chosen edge could take
+ * or add (a generous bound: the exact amounts are checked in the tests).
+ */
+export function edgeStep(part: Part, f: EdgeFeature): Part {
+  const [min, max] = part.shape.boundingBox.bounds;
+  const chosen = edgeChooser(f.edges, min, max);
+  const edges = part.shape.edges;
+  const picked = edges.filter(chosen);
+  const length = picked.reduce((a, e) => a + e.length, 0);
+  edges.forEach((e) => e.delete());
+  const what = f.type === "fillet" ? "round" : "bevel";
+  const set = EDGE_SETS.find((x) => x.edges === f.edges)!.label.toLowerCase();
+  if (!picked.length)
+    throw new ShapeCheckFailed(`The part has no ${set} to ${what}. Choose other edges.`, f.id, "edges");
+
+  let result: Shape3D;
+  try {
+    const size = (e: Edge) => (chosen(e) ? f.size : null);
+    result = f.type === "fillet" ? part.shape.fillet(size) : part.shape.chamfer(size);
+  } catch {
+    throw new ShapeCheckFailed(cantEdge(f, set), f.id, "size");
+  }
+  const volume = measureVolume(result);
+  const pieces = result.solids.length;
+  const [rmin, rmax] = result.boundingBox.bounds;
+  const inside = [0, 1, 2].every((i) => rmin[i]! >= min[i]! - 1e-4 && rmax[i]! <= max[i]! + 1e-4);
+  const most = 4 * length * f.size * f.size + 1e-6 * part.volume;
+  if (!(volume > 0) || pieces !== part.pieces || !inside || Math.abs(volume - part.volume) > most) {
+    result.delete();
+    throw new ShapeCheckFailed(cantEdge(f, set), f.id, "size");
+  }
+  return { shape: result, volume, pieces };
+}
+
+const cantEdge = (f: EdgeFeature, set: string) =>
+  `${f.name} couldn't ${f.type === "fillet" ? "round" : "bevel"} the ${set} by ${fmt(f.size)}, so your last good ` +
+  "version was kept. It is probably bigger than a face next to one of those edges: try a smaller size.";
+
 /** Why a hollow failed, in words that point at what to change. */
 const cantHollow = (h: HollowFeature) =>
   `${h.name} couldn't be made with ${fmt(h.wall)} walls, so your last good version was kept. ` +
@@ -478,7 +537,10 @@ export function buildDocument(doc: ProjectDocument, keepPieces = false): BuildRe
     try {
       let next: Part;
       if (f.type === "hole") next = drill(part!, f, issues, keep);
-      else if (f.type === "hollow") next = hollow(part!, f);
+      else if (f.type === "hollow" || isEdgeStep(f)) {
+        next = f.type === "hollow" ? hollow(part!, f) : edgeStep(part!, f);
+        keep?.push({ id: f.id, shape: next.shape.clone(), modifier: true });
+      }
       else if (f.type === "sketch") {
         const tool = makeSketchTool(f, partSpan(part));
         if (part) next = applyTool(part, tool, f, issues, keep);
@@ -520,17 +582,19 @@ const ON_SURFACE = 1e-3;
  * A face belongs to the last step whose solid has the face's surface on its own outside: each corner of the face's
  * biggest triangle lies exactly on that solid's surface (corners are on the exact surface, unlike the middle of a
  * triangle on a curve), and so does the triangle's middle, within the display's 0.05 mm accuracy.
- * Faces no step's solid explains are the inside walls a hollow made, so they belong to the hollow.
+ * Faces no shape or sketch explains were made by a hollow (its inside walls), a fillet or a chamfer: they belong to
+ * the first of those after which the face exists.
  */
-export function faceOwners(mesh: MeshData, pieces: Piece[], doc: ProjectDocument): string[] {
-  const hollowId = doc.features.find((f) => f.type === "hollow")?.id ?? "";
+export function faceOwners(mesh: MeshData, pieces: Piece[]): string[] {
   const surfaces = pieces.map((p) => {
     const faces = p.shape.faces;
     const shell = makeCompound(faces);
     faces.forEach((f) => f.delete());
     const [lo, hi] = p.shape.boundingBox.bounds;
-    return { id: p.id, shell, lo, hi, query: new DistanceQuery(shell) };
+    return { id: p.id, modifier: !!p.modifier, shell, lo, hi, query: new DistanceQuery(shell) };
   });
+  const steps = surfaces.filter((s) => !s.modifier);
+  const modifiers = surfaces.filter((s) => s.modifier);
   const owners: string[] = [];
   try {
     const n = mesh.faces.length / 2;
@@ -551,17 +615,15 @@ export function faceOwners(mesh: MeshData, pieces: Piece[], doc: ProjectDocument
       }
       const pts = [corner(best), corner(best + 1), corner(best + 2)];
       const mid = [0, 1, 2].map((k) => (pts[0]![k]! + pts[1]![k]! + pts[2]![k]!) / 3) as [number, number, number];
-      let owner = hollowId;
-      for (let p = surfaces.length - 1; p >= 0; p--) {
-        const s = surfaces[p]!;
+      const on = (s: (typeof surfaces)[number]) => {
         const inside = (q: number[]) => q.every((v, k) => v >= s.lo[k]! - 0.1 && v <= s.hi[k]! + 0.1);
-        if (!inside(mid)) continue;
-        if (distanceTo(s.query, mid) > MESH.tolerance + ON_SURFACE) continue;
-        if (pts.every((q) => distanceTo(s.query, q) <= ON_SURFACE)) {
-          owner = s.id;
-          break;
-        }
-      }
+        if (!inside(mid)) return false;
+        if (distanceTo(s.query, mid) > MESH.tolerance + ON_SURFACE) return false;
+        return pts.every((q) => distanceTo(s.query, q) <= ON_SURFACE);
+      };
+      // The last shape or sketch whose own surface has the face; failing that, the first hollow, fillet or chamfer
+      // after which the face exists (its inside walls, rounded edges or bevels).
+      const owner = [...steps].reverse().find(on)?.id ?? modifiers.find(on)?.id ?? "";
       owners.push(owner);
     }
   } finally {

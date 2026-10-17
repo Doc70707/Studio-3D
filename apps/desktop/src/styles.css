@@ -693,6 +693,7 @@ input:focus-visible {
 /* Holes */
 .holes,
 .hollows,
+.edges,
 .sketches {
   margin-top: 22px;
   padding-top: 18px;
@@ -704,6 +705,10 @@ input:focus-visible {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
+}
+
+.section-head .add-row.compact {
+  margin-top: 0;
 }
 
 .section-head h3 {

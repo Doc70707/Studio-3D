@@ -19,6 +19,7 @@ import {
   isHollow,
   movableAxes,
   newHole,
+  newEdgeStep,
   newHollow,
   newShape,
   newSketch,
@@ -627,6 +628,19 @@ export function App() {
           disabled: hasHollow,
           reason: "The part is already hollowed; change its walls in the panel",
         },
+        "separator",
+        {
+          label: "Fillet (round edges)",
+          onSelect: () => addAndSelect(newEdgeStep(doc, "fillet")),
+          disabled: !built,
+          reason: "Add a shape first",
+        },
+        {
+          label: "Chamfer (bevel edges)",
+          onSelect: () => addAndSelect(newEdgeStep(doc, "chamfer")),
+          disabled: !built,
+          reason: "Add a shape first",
+        },
       ],
     },
     {
@@ -887,8 +901,8 @@ export function App() {
         <span className="hint">
           <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
           <span className="hint-text">
-            Click a piece to select it · Drag or Shift+wheel-drag to orbit · Wheel-drag to pan · Scroll to zoom ·
-            Double-click wheel to fit · Keys 0–3 change view · M sizes
+            Click to select · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom · Help › Keyboard and
+            mouse lists the rest
           </span>
         </span>
       </footer>

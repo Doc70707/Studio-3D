@@ -1,7 +1,7 @@
 // The .s3d project file: versioned JSON.
 // Rules: never silently drop data we don't understand, never guess at a newer format,
 // and explain every rejection in plain language.
-import { OPEN_SIDES, SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
+import { EDGE_SETS, OPEN_SIDES, SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
 import { isThreadSize } from "./threads";
 
 export const FILE_FORMAT = "studio3d-project";
@@ -65,6 +65,8 @@ const NUMBERS: Record<Feature["type"], readonly string[]> = {
   hole: ["x", "y", "diameter", "depth"],
   sketch: ["depth"],
   hollow: ["wall"],
+  fillet: ["size"],
+  chamfer: ["size"],
 };
 const TYPES = new Set(Object.keys(NUMBERS));
 const knownKeys = (type: Feature["type"]) =>
@@ -72,8 +74,9 @@ const knownKeys = (type: Feature["type"]) =>
     "id",
     "type",
     "name",
-    ...(type === "hole" || type === "hollow" ? [] : ["mode"]),
+    ...(type === "hole" || type === "hollow" || type === "fillet" || type === "chamfer" ? [] : ["mode"]),
     ...(type === "hollow" ? ["open"] : []),
+    ...(type === "fillet" || type === "chamfer" ? ["edges"] : []),
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles"] : []),
     ...NUMBERS[type],
@@ -87,6 +90,8 @@ const DEFAULT_NAMES: Record<Feature["type"], string> = {
   hole: "Hole",
   sketch: "Sketch",
   hollow: "Hollow",
+  fillet: "Fillet",
+  chamfer: "Chamfer",
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -242,7 +247,13 @@ export function parseProject(text: string): ParseResult {
         error: `This project file is damaged: ${where} doesn't say which side is open.`,
       };
     }
-    if (type !== "hole" && type !== "hollow" && f.mode !== "add" && f.mode !== "cut") {
+    if ((type === "fillet" || type === "chamfer") && !EDGE_SETS.some((x) => x.edges === f.edges)) {
+      return {
+        ok: false,
+        error: `This project file is damaged: ${where} doesn't say which edges to change.`,
+      };
+    }
+    if (!["hole", "hollow", "fillet", "chamfer"].includes(type) && f.mode !== "add" && f.mode !== "cut") {
       return {
         ok: false,
         error: `This project file is damaged: ${where} doesn't say whether it adds or cuts.`,
