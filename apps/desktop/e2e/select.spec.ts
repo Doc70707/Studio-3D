@@ -93,13 +93,31 @@ test("sketch on a clicked face straight from the selection", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Done" })).toBeVisible();
 });
 
-test("the last shape can't be removed", async ({ page }) => {
-  await card(page, "Cylinder 1").getByRole("button", { name: "Remove Cylinder 1" }).click();
-  await current(page);
+test("every shape can be removed, even the first one, leaving an empty plate", async ({ page }) => {
   const m = await middle(page);
   await page.mouse.click(m.x, m.y);
-  await expect(bar(page)).toContainText("Box");
-  await expect(bar(page).getByRole("button", { name: "Remove" })).toBeDisabled();
+  await expect(bar(page)).toContainText("Cylinder 1");
   await page.keyboard.press("Delete");
+  await current(page);
+  await expect(card(page, "Cylinder 1")).toHaveCount(0);
+  // The box was the shape the part started from; it can go too.
+  await page.mouse.click(m.x, m.y);
+  await expect(bar(page)).toContainText("Box");
+  await expect(bar(page).getByRole("button", { name: "Remove" })).toBeEnabled();
+  await bar(page).getByRole("button", { name: "Remove" }).click();
+  await expect(host(page)).toHaveAttribute("data-geometry", "empty");
+  await expect(page.getByTestId("shape")).toHaveCount(0);
+  await expect(page.getByTestId("empty-plate")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Export/ })).toBeDisabled();
+  // A new part can be started from the empty plate, and undo brings the old one back.
+  await page.getByRole("button", { name: "Add cylinder" }).click();
+  await current(page);
   await expect(page.getByTestId("shape")).toHaveCount(1);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(host(page)).toHaveAttribute("data-geometry", "empty");
+  await page.getByRole("button", { name: "Undo" }).click();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await current(page);
+  await expect(card(page, "Box")).toHaveCount(1);
+  await expect(card(page, "Cylinder 1")).toHaveCount(1);
 });

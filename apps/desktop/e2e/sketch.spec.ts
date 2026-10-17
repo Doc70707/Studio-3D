@@ -115,6 +115,58 @@ test("circles are drawn by centre and edge, and the exact size can be typed", as
   await expect(volume(page)).toHaveText(cm3(72000 - cyl(6, 30)));
 });
 
+test("sizes can be typed while drawing, like AutoCAD's input boxes at the pointer", async ({ page }) => {
+  await sketchOnTop(page);
+  const boxes = page.getByTestId("typed-sizes");
+  // Circle: click the centre, type the diameter, Enter.
+  await page.getByRole("button", { name: "Circle tool" }).click();
+  await clickAt(page, 15, 20);
+  await page.mouse.move(...(await at(page, 19, 20)));
+  await expect(page.getByTestId("typed-diameter")).toContainText("8 mm"); // follows the pointer until typed
+  await page.keyboard.type("12.5");
+  await expect(page.getByTestId("typed-diameter")).toContainText("12.5 mm");
+  await page.keyboard.press("Enter");
+  await expect(boxes).toHaveCount(0);
+  await expect(field(page, "Circle diameter")).toHaveValue("12.5");
+
+  // Rectangle: first corner, width, Tab, height, Enter. It goes towards the pointer.
+  await page.getByRole("button", { name: "Rectangle tool" }).click();
+  await clickAt(page, 30, 5);
+  await page.mouse.move(...(await at(page, 40, 15)));
+  await page.keyboard.type("22");
+  await page.keyboard.press("Tab");
+  await expect(page.getByTestId("typed-height")).toHaveAttribute("data-active", "true");
+  await page.keyboard.type("14");
+  await page.screenshot({ path: `${OUT}sketch-typed-sizes.png` });
+  await page.keyboard.press("Enter");
+  await expect(field(page, "Rectangle width")).toHaveValue("22");
+  await expect(field(page, "Rectangle height")).toHaveValue("14");
+  await expect(field(page, "Rectangle left edge")).toHaveValue("30");
+  await expect(field(page, "Rectangle bottom edge")).toHaveValue("5");
+
+  await expect(page.getByTestId("sketch-profile")).toHaveCount(2);
+  // Outline: a length and an angle for each side; Enter with nothing typed closes it.
+  await page.getByRole("button", { name: "Outline tool" }).click();
+  await clickAt(page, 5, 30);
+  for (const [length, angle] of [
+    ["10", "0"],
+    ["5", "90"],
+  ]) {
+    await page.keyboard.type(length!);
+    await page.keyboard.press("Tab");
+    await page.keyboard.type(angle!);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("sketch-profile")).toHaveCount(3);
+
+  await page.getByRole("button", { name: "Cut in" }).click();
+  await field(page, "Sketch depth").fill("2");
+  await page.getByRole("button", { name: "Done" }).click();
+  await current(page);
+  await expect(volume(page)).toHaveText(cm3(72000 - (cyl(12.5, 2) + 22 * 14 * 2 + ((10 * 5) / 2) * 2)));
+});
+
 test("a sketch can be edited again, and Cancel leaves the design alone", async ({ page }) => {
   await sketchOnTop(page);
   await page.getByRole("button", { name: "Rectangle tool" }).click();

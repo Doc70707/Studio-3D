@@ -516,12 +516,13 @@ export function holeEdgeIssues(
 export function validateDocument(doc: ProjectDocument): Issue[] {
   const issues: Issue[] = [];
   const first = doc.features[0];
-  if (!first || !isSolidStep(first)) {
+  if (!first) return []; // an empty plate is a valid start: nothing to build yet
+  if (!isSolidStep(first)) {
     return [
       {
         severity: "error",
         field: null,
-        message: "A part needs at least one shape to start from.",
+        message: "A part needs a shape to start from. Add a shape or draw on the plate before holes and hollows.",
       },
     ];
   }

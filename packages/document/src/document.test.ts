@@ -138,9 +138,17 @@ describe("holes in project files", () => {
     expect(r.ok && r.document.features.map((f) => f.type)).toEqual(["box", "hole", "hole"]);
   });
 
+  it("opens a design whose shapes were all removed, and one with only a hole left, so nothing saved is refused", () => {
+    // Removing every shape is allowed; what's left is explained by the checks, not refused as damaged.
+    const empty = parseProject(withFeatures([]));
+    expect(empty.ok && empty.document.features).toEqual([]);
+    expect(empty.ok && validateDocument(empty.document)).toEqual([]);
+    const onlyHole = parseProject(withFeatures([hole]));
+    expect(onlyHole.ok).toBe(true);
+    if (onlyHole.ok) expect(validateDocument(onlyHole.document)[0]?.message).toMatch(/needs a shape to start from/);
+  });
+
   it.each([
-    ["a hole before the box", () => [hole]],
-    ["no shapes at all", () => []],
     [
       "a shape that neither adds nor cuts",
       () => {

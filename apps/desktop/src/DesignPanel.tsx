@@ -10,7 +10,6 @@ import {
   SIZE_FIELDS,
   PROFILE_LABELS,
   hasErrors,
-  isSolidStep,
   newHole,
   newHollow,
   newShape,
@@ -93,7 +92,6 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
   const shapes = shapesOf(doc);
   const sketches = doc.features.filter((f): f is SketchFeature => f.type === "sketch");
   const hollows = doc.features.filter((f): f is HollowFeature => f.type === "hollow");
-  const solidCount = doc.features.filter(isSolidStep).length;
   const [selected, setSelected] = useState<string | null>(shapes[0]?.id ?? null);
   const open = shapes.some((s) => s.id === selected) ? selected : (shapes[0]?.id ?? null);
   const [holeFocus, setHoleFocus] = useState<string | null>(null);
@@ -141,13 +139,17 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
         <h2>Part</h2>
         <p className="lead">Build your part from shapes. Each one adds material or cuts it away.</p>
 
+        {doc.features.length === 0 && (
+          <p className="help" data-testid="empty-plate">
+            The plate is empty. Add a shape below, or draw an outline on the plate, to start a new part.
+          </p>
+        )}
         <section aria-label="Shapes">
           {shapes.map((s) => (
             <ShapeCard
               key={s.id}
               shape={s}
               first={doc.features[0]?.id === s.id}
-              only={solidCount === 1}
               open={s.id === open}
               picked={s.id === picked}
               issues={issues.filter((x) => x.featureId === s.id)}
@@ -215,7 +217,6 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               picked={sk.id === picked}
               onPick={() => onSelect(sk.id)}
               first={doc.features[0]?.id === sk.id}
-              only={solidCount === 1}
               issues={issues.filter((i) => i.featureId === sk.id)}
               onChange={(patch) => onChange(sk.id, patch)}
               onEdit={() => sketching.onEditSketch(sk.id)}
@@ -315,7 +316,6 @@ function summary(s: ShapeFeature): string {
 function ShapeCard(props: {
   shape: ShapeFeature;
   first: boolean;
-  only: boolean;
   open: boolean;
   picked: boolean;
   issues: Issue[];
@@ -347,9 +347,8 @@ function ShapeCard(props: {
           type="button"
           className="icon-button"
           aria-label={`Remove ${s.name}`}
-          title={props.only ? "A part needs at least one shape" : "Remove this shape"}
+          title="Remove this shape"
           onClick={props.onRemove}
-          disabled={props.only}
         >
           <Icon name="trash" />
         </button>
@@ -527,7 +526,6 @@ function SketchCard(props: {
   picked: boolean;
   onPick: () => void;
   first: boolean;
-  only: boolean;
   issues: Issue[];
   onChange: (patch: Patch) => void;
   onEdit: () => void;
@@ -569,9 +567,8 @@ function SketchCard(props: {
           type="button"
           className="icon-button"
           aria-label={`Remove ${sk.name}`}
-          title={props.only ? "A part needs at least one shape" : "Remove this sketch"}
+          title="Remove this sketch"
           onClick={props.onRemove}
-          disabled={props.only}
         >
           <Icon name="trash" />
         </button>

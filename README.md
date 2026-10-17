@@ -28,7 +28,9 @@ What works today:
 - Holes: add round holes that go straight down from the top, all the way through or to a set depth. Each cut is
   checked against the hand calculation, holes that run off an edge are explained, and a hole that cuts nothing gets a warning.
 - Sketches: click any flat face of the part (or draw on the plate) and draw rectangles, circles or any outline on it,
-  with sizes and distances from the face's edges shown as you draw and exact numbers to type. Then push the drawing
+  with sizes and distances from the face's edges shown as you draw and exact numbers to type. Like AutoCAD's dynamic
+  input, you can type sizes while drawing: after the first click, type a circle's diameter, a rectangle's width
+  (Tab) and height, or an outline side's length (Tab) and angle, and press Enter. Then push the drawing
   out of the face (a boss, a bracket) or cut it in (a pocket, a slot, a through hole). Outlines that cross themselves
   are refused with an explanation, and every push or cut is checked against its area times its depth.
 - Offsets: make a copy of any sketched shape grown or shrunk by an exact distance on every side. A shape drawn inside
@@ -44,14 +46,17 @@ What works today:
 - Select and move: click any piece of the part (a shape, hole, sketch or hollow) to select it. It lights up, its
   settings open in the panel, and the clicked face is named, with a button to sketch on it. Drag the coloured arrows to
   move it (whole millimetres, or tenths with Shift), nudge it with the arrow keys and Page Up / Page Down, or remove it
-  with Delete. Every face of the finished part is traced back to the step that made it, by checking it lies exactly on
+  with Delete. Any shape can be removed, including the one the part started from; with everything removed the plate
+  is empty and you can start a new part. Every face of the finished part is traced back to the step that made it, by checking it lies exactly on
   that step's own solid.
 - Measurements in the 3D view: the part's width, depth and height are labelled, and the shape or hole you're editing
   shows its size and its distance from the part's edges. The status bar shows exactly where the pointer is on the part.
   The Sizes button (or M) turns the labels off and on.
 - Undo and redo (Ctrl+Z, Ctrl+Y) for every change. Typing a number counts as one step.
 - Export STL for your slicer. Tests check every exported mesh is watertight with exact dimensions, independently with trimesh.
-- 3D view of a 256 × 256 mm build plate with orbit, pan, zoom and standard views (keys 0–3).
+- 3D view of a 256 × 256 mm build plate with standard views (keys 0–3). Mouse controls work like Civil 3D and
+  AutoCAD: hold the wheel and drag to pan, Shift + wheel-drag to orbit, scroll to zoom in where the pointer is, and
+  double-click the wheel to fit everything on screen. Left-drag also orbits and right-drag pans.
 - A clean frosted-glass interface: the 3D view fills the window and the controls float over it. Text contrast is
   checked by a test, and the app respects Windows' reduced motion, reduced transparency and high contrast settings.
 

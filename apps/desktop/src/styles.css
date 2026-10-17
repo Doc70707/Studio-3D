@@ -1199,6 +1199,30 @@ input:focus-visible {
   stroke-dasharray: none;
 }
 
+.sketch-canvas .typed-box rect {
+  fill: var(--glass-strong);
+  stroke: var(--glass-edge);
+}
+
+.sketch-canvas .typed-box.active rect {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.sketch-canvas .typed-box text {
+  font-size: 12px;
+  fill: var(--muted);
+}
+
+.sketch-canvas .typed-box .typed-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.sketch-canvas .typed-box.typed .typed-value {
+  fill: var(--text);
+  font-weight: 600;
+}
+
 .sketch-canvas .cursor {
   fill: none;
   stroke: var(--warning);

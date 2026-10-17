@@ -21,6 +21,7 @@ import {
   type Profile,
   type SketchFeature,
 } from "@studio3d/document";
+import { anyTyped, liveValues, startTyping, typedPoint, typeKey, TYPED_FIELDS, type Typed } from "./dynamicInput";
 import { Icon } from "./Icon";
 import { NumberField } from "./NumberField";
 
@@ -51,19 +52,21 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
     tool: "rectangle",
     label: "Rectangle",
     key: "r",
-    hint: "Drag from one corner to the other, or click both corners.",
+    hint: "Drag from one corner to the other, or click both corners. After the first click, type the width, Tab, the height, then Enter.",
   },
   {
     tool: "circle",
     label: "Circle",
     key: "c",
-    hint: "Click the centre, then click how far out the edge goes.",
+    hint: "Click the centre, then click how far out the edge goes, or type the diameter and press Enter.",
   },
   {
     tool: "polygon",
     label: "Outline",
     key: "l",
-    hint: "Click each corner. Click the first corner again (or press Enter, or double-click) to close the shape.",
+    hint:
+      "Click each corner, or type a length (Tab for the angle) and press Enter. " +
+      "Click the first corner again, press Enter, or double-click to close the shape.",
   },
 ];
 
@@ -95,6 +98,11 @@ export function SketchEditor(props: {
   const [offsetError, setOffsetError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
   const [cursor, setCursor] = useState<Point2 | null>(null);
+  /** Sizes typed while drawing; they start empty for every new shape and every new outline corner. */
+  // Kept with the shape (or corner) they were typed for, so a new one starts with empty boxes straight away.
+  const [typedFor, setTypedFor] = useState<{ pending: Pending; typed: Typed } | null>(null);
+  const typed = !pending ? null : typedFor?.pending === pending ? typedFor.typed : startTyping(pending.kind);
+  const setTyped = (t: Typed) => setTypedFor({ pending, typed: t });
   const drag = useRef<{
     start: Point2;
     original: Profile;
@@ -231,6 +239,24 @@ export function SketchEditor(props: {
     setPending(null);
   };
 
+  /** Where the shape being drawn gets its next point from: the corner, centre or last outline corner. */
+  const from = (p: NonNullable<Pending>): Point2 => (p.kind === "polygon" ? p.points[p.points.length - 1]! : p.start);
+  /** The pointer's point, with any typed sizes taking over. */
+  const aim = (p: NonNullable<Pending>, pointer: Point2 | null) => typedPoint(p.kind, from(p), pointer, typed);
+
+  const addCorner = (points: Point2[], p: Point2) => {
+    if (points.length >= 3 && same(p, points[0]!)) return closePolygon(points);
+    if (!same(p, points[points.length - 1]!)) setPending({ kind: "polygon", points: [...points, p] });
+  };
+
+  /** Enter with typed sizes: finish the shape (or the outline's corner) with them. */
+  const commitTyped = () => {
+    if (!pending) return;
+    const p = aim(pending, cursor);
+    if (pending.kind === "polygon") addCorner(pending.points, p);
+    else if (finishShape(pending.kind, pending.start, p)) setPending(null);
+  };
+
   const hit = (q: Point2): number | null => {
     const tolerance = 6 / k;
     for (let i = s.profiles.length - 1; i >= 0; i--) {
@@ -271,15 +297,12 @@ export function SketchEditor(props: {
       return;
     }
     if (tool === "polygon") {
-      if (pending?.kind === "polygon") {
-        if (pending.points.length >= 3 && same(p, pending.points[0]!)) return closePolygon(pending.points);
-        if (!same(p, pending.points[pending.points.length - 1]!))
-          setPending({ kind: "polygon", points: [...pending.points, p] });
-      } else setPending({ kind: "polygon", points: [p] });
+      if (pending?.kind === "polygon") addCorner(pending.points, aim(pending, p));
+      else setPending({ kind: "polygon", points: [p] });
       return;
     }
     if (pending && pending.kind === tool) {
-      if (finishShape(tool, pending.start, p)) setPending(null);
+      if (finishShape(tool, pending.start, aim(pending, p))) setPending(null);
       return;
     }
     setPending({ kind: tool, start: p, pressed: true });
@@ -320,7 +343,7 @@ export function SketchEditor(props: {
     drag.current = null;
     if (pending && pending.kind !== "polygon" && pending.pressed) {
       const p = snap(e);
-      if (!same(p, pending.start) && finishShape(pending.kind, pending.start, p)) setPending(null);
+      if (!same(p, pending.start) && finishShape(pending.kind, pending.start, aim(pending, p))) setPending(null);
       else setPending({ ...pending, pressed: false });
     }
   };
@@ -369,12 +392,29 @@ export function SketchEditor(props: {
         return;
       }
       if (typing || mod || e.altKey) return;
+      // Typing a size while drawing: the keys go into the boxes at the pointer.
+      if (pending && typed) {
+        const next = typeKey(typed, e.key, e.shiftKey);
+        if (next) {
+          e.preventDefault();
+          setTyped(next);
+          return;
+        }
+        if (e.key === "Enter" && anyTyped(typed)) {
+          e.preventDefault();
+          return commitTyped();
+        }
+        if (e.key === "Escape" && typed.values.some((v) => v)) return setTyped(startTyping(pending.kind));
+      }
       if (e.key === "Escape") {
         if (pending) setPending(null);
         else if (selected !== null) setSelected(null);
         return;
       }
-      if (e.key === "Enter" && pending?.kind === "polygon") return closePolygon(pending.points);
+      if (e.key === "Enter" && pending?.kind === "polygon") {
+        e.preventDefault();
+        return closePolygon(pending.points);
+      }
       if (e.key === "Backspace" || e.key === "Delete") {
         if (pending?.kind === "polygon") {
           const points = pending.points.slice(0, -1);
@@ -508,7 +548,20 @@ export function SketchEditor(props: {
                   toScreen={toScreen}
                 />
               ))}
-              <PendingShape pending={pending} cursor={cursor} toScreen={toScreen} />
+              <PendingShape
+                pending={pending}
+                cursor={pending && (cursor || anyTyped(typed)) ? aim(pending, cursor) : cursor}
+                toScreen={toScreen}
+              />
+              {pending && typed && (
+                <TypedBoxes
+                  pending={pending}
+                  typed={typed}
+                  from={from(pending)}
+                  to={aim(pending, cursor)}
+                  at={toScreen(cursor ?? from(pending))}
+                />
+              )}
               {cursor && <circle className="cursor" cx={toScreen(cursor)[0]} cy={toScreen(cursor)[1]} r={4} />}
             </>
           )}
@@ -991,5 +1044,38 @@ function ProfileFields({
         </div>
       ))}
     </div>
+  );
+}
+
+/** The boxes at the pointer that show (and take) typed sizes while drawing, like AutoCAD's dynamic input. */
+function TypedBoxes(props: { pending: NonNullable<Pending>; typed: Typed; from: Point2; to: Point2; at: Point2 }) {
+  const labels = TYPED_FIELDS[props.pending.kind];
+  const live = liveValues(props.pending.kind, props.from, props.to);
+  const [x, y] = [props.at[0] + 18, props.at[1] + 18];
+  return (
+    <g className="typed-boxes" role="group" aria-label="Typed sizes" data-testid="typed-sizes">
+      {labels.map((label, i) => {
+        const value = props.typed.values[i] ?? "";
+        const active = i === props.typed.active;
+        const unit = label === "Angle" ? "°" : " mm";
+        return (
+          <g
+            key={label}
+            className={`typed-box${active ? " active" : ""}${value ? " typed" : ""}`}
+            transform={`translate(${x} ${y + i * 28})`}
+            data-testid={`typed-${label.toLowerCase()}`}
+            data-active={active}
+          >
+            <rect width={122} height={24} rx={6} />
+            <text x={8} y={16} className="typed-label">
+              {label}
+            </text>
+            <text x={114} y={16} textAnchor="end" className="typed-value">
+              {(value || live[i] || "") + unit}
+            </text>
+          </g>
+        );
+      })}
+    </g>
   );
 }

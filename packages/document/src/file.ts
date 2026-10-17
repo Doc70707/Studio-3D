@@ -211,12 +211,6 @@ export function parseProject(text: string): ParseResult {
       };
     }
     const type = f.type as Feature["type"];
-    if (i === 0 && (type === "hole" || type === "hollow")) {
-      return {
-        ok: false,
-        error: `This project file is damaged: it has to start with a shape, not a ${type}.`,
-      };
-    }
     if (typeof f.id !== "string" || !f.id || seen.has(f.id)) {
       return {
         ok: false,
@@ -275,11 +269,6 @@ export function parseProject(text: string): ParseResult {
     }
     features.push(feature);
   }
-  if (!features.length)
-    return {
-      ok: false,
-      error: "This project file is damaged: it has no shapes in it.",
-    };
   if (Object.keys(preserved.file).length || Object.keys(preserved.document).length) {
     warnings.push("This project has data from a newer version. It'll be kept when you save, but isn't used.");
   }

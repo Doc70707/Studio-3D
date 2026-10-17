@@ -15,7 +15,6 @@ import {
 import {
   PLATE_PLANE,
   hasErrors,
-  isSolidStep,
   movableAxes,
   newSketch,
   validateDocument,
@@ -143,9 +142,20 @@ export function App() {
   // Rebuild real geometry whenever the document changes and its values are valid.
   const inputIssues = validateDocument(shownDoc);
   const inputOk = !hasErrors(inputIssues);
+  const empty = shownDoc.features.length === 0;
   useEffect(() => {
     const client = geometryRef.current;
     if (!inputOk) setBuilding(false);
+    if (empty) {
+      // Every shape was removed: an empty plate, with nothing to build or export.
+      setBuilding(false);
+      setKernelIssues([]);
+      setBuilt(null);
+      meshRef.current = null;
+      viewportRef.current?.setModel(null);
+      viewportRef.current?.setPartBounds(null);
+      return;
+    }
     if (!client || engine !== "ready" || !inputOk) return;
     setBuilding(true);
     const timer = setTimeout(() => {
@@ -167,12 +177,13 @@ export function App() {
       );
     }, 80);
     return () => clearTimeout(timer);
-  }, [shownDoc, engine, inputOk]);
+  }, [shownDoc, engine, inputOk, empty]);
 
   const issues = inputOk ? dedupe([...inputIssues, ...kernelIssues]) : inputIssues;
   // Up to date only when the model on screen was built from exactly this document (not just "nothing is building yet").
   const shownCurrent = inputOk && !building && !hasErrors(kernelIssues) && built?.doc === shownDoc;
   const upToDate = shownCurrent && shownDoc === doc;
+  const exportable = upToDate && !empty;
 
   // Sketching: pick a face, draw, then add the sketch to the design.
   const startPicking = useCallback(() => {
@@ -526,7 +537,9 @@ export function App() {
         data-camera-view={camera?.view ?? ""}
         data-camera-position={camera ? camera.position.join(",") : ""}
         data-camera-target={camera ? camera.target.join(",") : ""}
-        data-geometry={engine === "ready" ? (shownCurrent ? "current" : building ? "building" : "stale") : engine}
+        data-geometry={
+          engine === "ready" ? (empty ? "empty" : shownCurrent ? "current" : building ? "building" : "stale") : engine
+        }
       >
         {webglError && (
           <div className="notice glass" role="alert">
@@ -702,8 +715,14 @@ export function App() {
           type="button"
           className="primary"
           onClick={() => void exportStl()}
-          disabled={busy || !upToDate}
-          title={upToDate ? "Export a mesh for your slicer" : "Fix the highlighted values to export"}
+          disabled={busy || !exportable}
+          title={
+            exportable
+              ? "Export a mesh for your slicer"
+              : empty
+                ? "Add a shape to export"
+                : "Fix the highlighted values to export"
+          }
         >
           <Icon name="export" />
           Export STL
@@ -753,7 +772,9 @@ export function App() {
             ? "Starting geometry engine…"
             : engine === "failed"
               ? "Geometry engine unavailable"
-              : building
+              : empty
+                ? "Empty plate: add a shape to start"
+                : building
                 ? "Updating model…"
                 : upToDate
                   ? "Model up to date"
@@ -762,8 +783,8 @@ export function App() {
         <span className="hint">
           <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
           <span className="hint-text">
-            Click a piece to select it · Drag to orbit · Right-drag to pan · Scroll to zoom · Keys 0–3 change view · M
-            sizes
+            Click a piece to select it · Drag or Shift+wheel-drag to orbit · Wheel-drag to pan · Scroll to zoom ·
+            Double-click wheel to fit · Keys 0–3 change view · M sizes
           </span>
         </span>
       </footer>
@@ -790,11 +811,9 @@ function dedupe(issues: Issue[]): Issue[] {
   });
 }
 
-/** A part needs at least one shape or sketch, so the last one can't be removed. */
+/** Any step can be removed, the original shape and the last one included (that leaves an empty plate). */
 function canRemove(doc: ProjectDocument, id: string): boolean {
-  const f = doc.features.find((x) => x.id === id);
-  if (!f) return false;
-  return !isSolidStep(f) || doc.features.filter(isSolidStep).length > 1;
+  return doc.features.some((x) => x.id === id);
 }
 
 /** The middle of the box around some points (x, y, z triples). */
@@ -848,7 +867,7 @@ function SelectionBar(props: {
         type="button"
         onClick={props.onRemove}
         disabled={!props.canRemove}
-        title={props.canRemove ? "Remove it (Delete key)" : "A part needs at least one shape"}
+        title="Remove it (Delete key)"
       >
         <Icon name="trash" />
         Remove

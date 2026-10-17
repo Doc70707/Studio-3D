@@ -101,3 +101,53 @@ test("right-drag pans the view", async ({ page }) => {
   // The target moved, so the camera's distance from the origin changes.
   expect(Math.abs(distance(after) - distance(before))).toBeGreaterThan(0.001);
 });
+
+/** Drags across the middle of the view with a mouse button, optionally holding Shift. */
+async function dragWith(page: Page, button: "middle" | "right", shift = false) {
+  const box = (await page.getByTestId("viewport-canvas").boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  if (shift) await page.keyboard.down("Shift");
+  await page.mouse.down({ button });
+  await page.mouse.move(x + 150, y + 40, { steps: 10 });
+  await page.mouse.up({ button });
+  if (shift) await page.keyboard.up("Shift");
+}
+
+test("wheel-drag pans like Civil 3D: the view slides without turning", async ({ page }) => {
+  await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
+  const [pos, target, radius] = [await cameraPos(page), await cameraTarget(page), await orbitRadius(page)];
+  await dragWith(page, "middle");
+  const [pos2, target2] = [await cameraPos(page), await cameraTarget(page)];
+  expect(target2).not.toEqual(target);
+  // Camera and target move together, so the direction of view and the distance stay the same.
+  pos.forEach((v, i) => expect(pos2[i]! - v).toBeCloseTo(target2[i]! - target[i]!, 1));
+  expect(await orbitRadius(page)).toBeCloseTo(radius, 1);
+});
+
+test("Shift + wheel-drag orbits around the same point", async ({ page }) => {
+  await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
+  const [pos, target, radius] = [await cameraPos(page), await cameraTarget(page), await orbitRadius(page)];
+  await dragWith(page, "middle", true);
+  await expect(host(page)).toHaveAttribute("data-camera-view", "custom");
+  expect(await cameraPos(page)).not.toEqual(pos);
+  (await cameraTarget(page)).forEach((v, i) => expect(v).toBeCloseTo(target[i]!, 3));
+  expect(await orbitRadius(page)).toBeCloseTo(radius, 0);
+});
+
+test("double-clicking the wheel fits everything back on screen", async ({ page }) => {
+  await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
+  const radius = await orbitRadius(page);
+  const box = (await page.getByTestId("viewport-canvas").boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(box.x + box.width / 3, box.y + box.height / 3);
+  await page.mouse.wheel(0, -1500);
+  await expect.poll(() => orbitRadius(page)).toBeLessThan(radius * 0.6);
+  await dragWith(page, "middle");
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.up({ button: "middle" });
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.up({ button: "middle" });
+  await expect.poll(() => orbitRadius(page)).toBeGreaterThan(radius * 0.8);
+});

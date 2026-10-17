@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { boundsRadius, placeCamera, type Bounds, type StandardView } from "./views";
+import { boundsCenter, boundsRadius, fitDistance, placeCamera, type Bounds, type StandardView } from "./views";
 import { dimensionLines, labelPoint, type Dimension } from "./dimensions";
 
 export interface ViewportOptions {
@@ -136,6 +136,20 @@ export class Viewport {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
     this.controls.screenSpacePanning = true;
+    // Mouse like AutoCAD and Civil 3D: hold the wheel to pan, Shift + wheel to orbit, scroll to zoom at the pointer.
+    // Left-drag still orbits and right-drag still pans. (OrbitControls orbits when Shift is held with a pan button.)
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+    this.controls.zoomToCursor = true;
+    // Pressing the wheel would otherwise start the browser's auto-scroll; a double-click of the wheel fits the part.
+    let lastWheelClick = 0;
+    canvas.addEventListener("pointerdown", (e) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      if (e.timeStamp - lastWheelClick < 400) {
+        lastWheelClick = 0;
+        this.zoomExtents();
+      } else lastWheelClick = e.timeStamp;
+    });
     this.controls.addEventListener("change", () => {
       this.view = "custom";
       this.requestRender();
@@ -452,6 +466,22 @@ export class Viewport {
         this.labels.push({ el, at: new THREE.Vector3(...labelPoint(d)) });
       }
     }
+    this.requestRender();
+  }
+
+  /** Fits the whole part (or the plate, when there is none) in view, looking from the same direction as now. */
+  zoomExtents(): void {
+    if (this.view !== "custom") return this.setView(this.view);
+    if (this.partBounds) this.framed = roomAround(this.partBounds);
+    const bounds = this.framed ?? this.plateBounds;
+    const target = boundsCenter(bounds);
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    const d = fitDistance(boundsRadius(bounds), this.fit.fov, this.fit.aspect);
+    this.controls.target.set(...target);
+    this.camera.position.set(target[0] + dir.x * d, target[1] + dir.y * d, target[2] + dir.z * d);
+    this.camera.lookAt(this.controls.target);
+    this.controls.update();
+    this.view = "custom";
     this.requestRender();
   }
 
