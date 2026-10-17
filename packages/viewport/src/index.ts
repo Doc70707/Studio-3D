@@ -7,6 +7,7 @@ export {
   type DisplayMesh,
   type SafeArea,
   type ViewportOptions,
+  type ReferencePicture,
 } from "./Viewport";
 export {
   STANDARD_VIEWS,

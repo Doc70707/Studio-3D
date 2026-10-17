@@ -20,11 +20,12 @@ import {
   type Feature,
   type Preserved,
   type ProjectDocument,
+  type ReferenceImage,
   type RecoveryResult,
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.21.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.22.0" };
 
 /** How long after the last edit the unsaved work is backed up. */
 export const BACKUP_DELAY_MS = 2000;
@@ -32,7 +33,12 @@ export const BACKUP_DELAY_MS = 2000;
 /** Unsaved work found from a session that ended without saving, waiting for the user to restore or discard it. */
 export type RecoveryOffer = Extract<RecoveryResult, { ok: true }>;
 
-const fingerprint = (doc: ProjectDocument) => JSON.stringify(doc);
+/**
+ * What the document holds, to tell when it has changed. A reference picture's image never changes once added, so
+ * it is left out: stringifying megabytes of picture on every keystroke would slow typing down.
+ */
+const fingerprint = (doc: ProjectDocument) =>
+  JSON.stringify(doc.references ? { ...doc, references: doc.references.map(({ src: _, ...r }) => r) } : doc);
 
 export type Notice = { kind: "info" | "error"; text: string } | null;
 
@@ -105,6 +111,30 @@ export function useProject() {
         (d) => ({ ...d, features: d.features.filter((f) => f.id !== id && !(isCopyStep(f) && f.source === id)) }),
         null,
       ),
+    [edit],
+  );
+
+  /** Reference pictures: added, changed and removed like steps, with undo, but never built. */
+  const addReference = useCallback(
+    (r: ReferenceImage) => edit((d) => ({ ...d, references: [...(d.references ?? []), r] }), null),
+    [edit],
+  );
+  /** Typing in a field merges into one undo step; `separate` makes the change its own step (a calibration). */
+  const updateReference = useCallback(
+    (id: string, patch: Partial<ReferenceImage>, separate = false) =>
+      edit(
+        (d) => ({ ...d, references: (d.references ?? []).map((r) => (r.id === id ? { ...r, ...patch } : r)) }),
+        separate ? null : `${id}.${Object.keys(patch).join()}`,
+      ),
+    [edit],
+  );
+  const removeReference = useCallback(
+    (id: string) =>
+      edit((d) => {
+        const references = (d.references ?? []).filter((r) => r.id !== id);
+        const { references: _, ...rest } = d;
+        return references.length ? { ...rest, references } : rest;
+      }, null),
     [edit],
   );
 
@@ -333,6 +363,9 @@ export function useProject() {
       addFeature,
       removeFeature,
       moveFeature,
+      addReference,
+      updateReference,
+      removeReference,
       undo,
       redo,
       canUndo: undoable,
@@ -359,6 +392,9 @@ export function useProject() {
       addFeature,
       removeFeature,
       moveFeature,
+      addReference,
+      updateReference,
+      removeReference,
       undo,
       redo,
       undoable,

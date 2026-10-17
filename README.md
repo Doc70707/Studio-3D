@@ -86,6 +86,11 @@ What works today:
   socket head cap screw or a 90° countersink for a flat head screw, pre-sized for the screw and editable. A threaded
   hole can be threaded part way down, and can be simplified to its tap drill instead of modelling the thread. Every
   size comes from a published table; the sources are listed in `packages/document/src/threads.ts`.
+- Reference pictures (Create > Reference picture…): put a photo or drawing in the scene to model over, lying on
+  the plate or standing facing the front or right. Calibrate it by clicking two points a known distance apart and
+  typing that distance (or type its real width), then move, turn or fade it. A sketch facing the same way shows the
+  picture underneath at its real size, to trace over. Pictures are saved in the project but never built or exported:
+  a test checks the STL is byte for byte the same with one.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

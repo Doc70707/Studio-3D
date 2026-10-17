@@ -43,8 +43,12 @@ import {
   type HoleFace,
   type Issue,
   type ProjectDocument,
+  newReference,
+  referenceCorners,
+  validateReference,
   type SketchFeature,
 } from "@studio3d/document";
+import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { DesignPanel, SHAPE_ORDER, copySource, placeNew } from "./DesignPanel";
 import { MenuBar, type Menu } from "./MenuBar";
 import { allows, interactionMode } from "./interaction";
@@ -122,6 +126,8 @@ export function App() {
   const hovered = useRef<string | null>(null);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
+  /** The reference picture being calibrated, if any. */
+  const [calibrating, setCalibrating] = useState<string | null>(null);
 
   // Viewport
   useEffect(() => {
@@ -181,7 +187,15 @@ export function App() {
   }, [setNotice]);
 
   // While a sketch is being drawn, the 3D view previews the design with it included.
-  const shownDoc = useMemo(() => (draft ? withDraft(doc, draft.feature, draft.isNew) : doc), [doc, draft]);
+  // Only the steps are built: reference pictures are left out, so moving or fading one doesn't rebuild the part.
+  const modelDoc = useMemo<ProjectDocument>(
+    () => ({ units: doc.units, features: doc.features }),
+    [doc.units, doc.features],
+  );
+  const shownDoc = useMemo(
+    () => (draft ? withDraft(modelDoc, draft.feature, draft.isNew) : modelDoc),
+    [modelDoc, draft],
+  );
 
   // Rebuild real geometry whenever the document changes and its values are valid.
   const inputIssues = validateDocument(shownDoc);
@@ -226,7 +240,7 @@ export function App() {
   const issues = inputOk ? dedupe([...inputIssues, ...kernelIssues]) : inputIssues;
   // Up to date only when the model on screen was built from exactly this document (not just "nothing is building yet").
   const shownCurrent = inputOk && !building && !hasErrors(kernelIssues) && built?.doc === shownDoc;
-  const upToDate = shownCurrent && shownDoc === doc;
+  const upToDate = shownCurrent && shownDoc === modelDoc;
   const exportable = upToDate && !empty;
 
   // Sketching: pick a face, draw, then add the sketch to the design.
@@ -358,9 +372,10 @@ export function App() {
 
   // The selected piece: tinted, with move arrows in its middle. Redrawn with each new model.
   const selected = selection ? doc.features.find((f) => f.id === selection.id) : undefined;
+  const selectedPicture = selection ? doc.references?.find((r) => r.id === selection.id) : undefined;
   useEffect(() => {
-    if (selection && !selected) setSelection(null); // removed, or undone away
-  }, [selection, selected]);
+    if (selection && !selected && !selectedPicture) setSelection(null); // removed, or undone away
+  }, [selection, selected, selectedPicture]);
   useEffect(() => {
     const vp = viewportRef.current;
     const mesh = meshRef.current;
@@ -458,6 +473,36 @@ export function App() {
   }, [draft, project]);
 
   // In the sketch's 3D view, show the outlines on the face and look at them from an angle.
+  // Reference pictures that are switched on and have sensible settings are shown in the 3D view.
+  const shownPictures = useMemo(
+    () => (doc.references ?? []).filter((r) => r.visible && !hasErrors(validateReference(r))),
+    [doc.references],
+  );
+  useEffect(() => {
+    viewportRef.current?.setReferences(
+      shownPictures.map((r) => ({
+        id: r.id,
+        src: r.src,
+        corners: referenceCorners(r),
+        opacity: r.opacity,
+        onTop: r.onTop,
+      })),
+    );
+  }, [shownPictures, engine]);
+  const addPicture = useCallback(async () => {
+    const file = await choosePicture();
+    if (!file) return;
+    try {
+      const { src, pixels, name } = await readPicture(file);
+      const picture = newReference(src, pixels, name);
+      project.addReference(picture);
+      setSelection({ id: picture.id, face: null });
+      setCalibrating(picture.id);
+    } catch (e) {
+      setNotice({ kind: "error", text: e instanceof Error ? e.message : String(e) });
+    }
+  }, [project, setNotice]);
+
   useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
@@ -611,6 +656,7 @@ export function App() {
       ? "All changes saved"
       : "Not saved yet";
   const offer = project.recoveryOffer;
+  const calibratingPicture = doc.references?.find((r) => r.id === calibrating);
 
   // The menu bar: every command in one place, with its shortcut. Items are greyed out (with the reason) when they
   // can't run right now, never hidden, so the menus always look the same.
@@ -711,6 +757,8 @@ export function App() {
         },
         { label: "Sketch on the plate", onSelect: sketchOnPlate },
         { label: "Revolve (spin an outline)", onSelect: startRevolve },
+        "separator" as const,
+        { label: "Reference picture…", onSelect: () => void addPicture() },
       ],
     },
     {
@@ -772,6 +820,7 @@ export function App() {
         data-camera-zoom={camera?.zoom ?? ""}
         data-camera-position={camera ? camera.position.join(",") : ""}
         data-camera-target={camera ? camera.target.join(",") : ""}
+        data-references={shownPictures.length}
         data-geometry={
           engine === "ready" ? (empty ? "empty" : shownCurrent ? "current" : building ? "building" : "stale") : engine
         }
@@ -986,6 +1035,9 @@ export function App() {
         onFocus={setFocusId}
         selected={selection?.id ?? null}
         onSelect={(id) => setSelection((s) => (id === null ? null : s?.id === id ? s : { id, face: null }))}
+        onChangeReference={(id, patch) => project.updateReference(id, patch)}
+        onRemoveReference={project.removeReference}
+        onCalibrate={setCalibrating}
       />
 
       {draft && (
@@ -998,6 +1050,7 @@ export function App() {
           onChange={(feature) => setDraft((d) => (d ? { ...d, feature } : d))}
           onDone={finishSketch}
           onCancel={() => setDraft(null)}
+          references={doc.references}
         />
       )}
 
@@ -1014,21 +1067,31 @@ export function App() {
               : empty
                 ? "Empty plate: add a shape to start"
                 : building
-                ? "Updating model…"
-                : upToDate
-                  ? "Model up to date"
-                  : "Showing your last good design"}
+                  ? "Updating model…"
+                  : upToDate
+                    ? "Model up to date"
+                    : "Showing your last good design"}
         </span>
         <span className="hint">
           <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
           <span className="hint-text">
-            Click to select · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom · Help › Keyboard and
-            mouse lists the rest
+            Click to select · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom · Help › Keyboard and mouse
+            lists the rest
           </span>
         </span>
       </footer>
 
       {dialog && <HelpDialog kind={dialog} onClose={() => setDialog(null)} />}
+      {calibratingPicture && (
+        <CalibrateDialog
+          reference={calibratingPicture}
+          onClose={() => setCalibrating(null)}
+          onApply={(scale) => {
+            project.updateReference(calibratingPicture.id, { scale, calibrated: true }, true);
+            setCalibrating(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1172,12 +1235,7 @@ function SelectionBar(props: {
           Sketch on this face
         </button>
       )}
-      <button
-        type="button"
-        onClick={props.onRemove}
-        disabled={!props.canRemove}
-        title="Remove it (Delete key)"
-      >
+      <button type="button" onClick={props.onRemove} disabled={!props.canRemove} title="Remove it (Delete key)">
         <Icon name="trash" />
         Remove
       </button>

@@ -3,6 +3,7 @@
 // and explain every rejection in plain language.
 import { EDGE_SETS, OPEN_SIDES, SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
 import { CLEARANCE_SERIES, isScrewSize, isThreadSize } from "./threads";
+import { referenceProblem, type ReferenceImage } from "./reference";
 
 export const FILE_FORMAT = "studio3d-project";
 export const FILE_FORMAT_VERSION = 2;
@@ -48,13 +49,14 @@ export function serializeProject(doc: ProjectDocument, app: AppInfo, preserved: 
         ...preserved.features[f.id],
         ...f,
       })),
+      ...(doc.references?.length && { references: doc.references }),
     },
   };
   return JSON.stringify(file, null, 2) + "\n";
 }
 
 const KNOWN_FILE_KEYS = new Set(["format", "formatVersion", "app", "document"]);
-const KNOWN_DOC_KEYS = new Set(["units", "features"]);
+const KNOWN_DOC_KEYS = new Set(["units", "features", "references"]);
 /** The numbers each kind of step stores. */
 const NUMBERS: Record<Feature["type"], readonly string[]> = {
   box: ["x", "y", "z", ...SIZE_FIELDS.box],
@@ -371,5 +373,38 @@ export function parseProject(text: string): ParseResult {
     warnings.push("This project has data from a newer version. It'll be kept when you save, but isn't used.");
   }
 
-  return { ok: true, document: { units: "mm", features }, preserved, warnings };
+  const references: ReferenceImage[] = [];
+  if (docRaw.references !== undefined) {
+    if (!Array.isArray(docRaw.references))
+      return { ok: false, error: "This project file is damaged: its reference images can't be read." };
+    for (const [i, r] of docRaw.references.entries()) {
+      const problem = referenceProblem(r);
+      if (problem) return { ok: false, error: `This project file is damaged: reference image ${i + 1} ${problem}.` };
+      const { id, name, src, pixels, scale, calibrated, plane, x, y, offset, rotation, opacity, visible, onTop } =
+        r as ReferenceImage;
+      references.push({
+        id,
+        name: typeof name === "string" && name ? name : `Picture ${i + 1}`,
+        src,
+        pixels,
+        scale,
+        calibrated,
+        plane,
+        x,
+        y,
+        offset,
+        rotation,
+        opacity,
+        visible,
+        onTop,
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    document: { units: "mm", features, ...(references.length && { references }) },
+    preserved,
+    warnings,
+  };
 }

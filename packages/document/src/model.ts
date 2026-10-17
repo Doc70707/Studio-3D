@@ -13,6 +13,7 @@ import {
   length3,
 } from "./sketch";
 import { currentFace, faceEdgeIssues, type HoleFace } from "./holeFace";
+import type { ReferenceImage } from "./reference";
 import {
   CLEARANCE,
   CLEARANCE_SERIES,
@@ -240,6 +241,8 @@ export type Feature =
 export interface ProjectDocument {
   units: Units;
   features: Feature[];
+  /** Pictures to model over, at their real size. Shown in the views, never built or exported. */
+  references?: ReferenceImage[];
 }
 
 export const LIMITS = {

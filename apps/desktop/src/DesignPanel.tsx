@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
+import { ReferenceProps } from "./ReferencePanel";
 import {
   DEFAULT_FIT,
   FIELD_LABELS,
@@ -21,6 +22,10 @@ import {
   type HoleHead,
   type ScrewSize,
   type ThreadStandard,
+  REFERENCE_PLANES,
+  referenceSize,
+  validateReference,
+  type ReferenceImage,
   SHAPES,
   SIZE_FIELDS,
   PROFILE_LABELS,
@@ -103,6 +108,10 @@ interface Props {
   /** The step picked in the 3D view (or in the list); its properties are shown. */
   selected: string | null;
   onSelect: (id: string | null) => void;
+  /** Reference pictures: changed, removed and calibrated from their rows and properties. */
+  onChangeReference: (id: string, patch: Partial<ReferenceImage>) => void;
+  onRemoveReference: (id: string) => void;
+  onCalibrate: (id: string) => void;
 }
 
 /** The test id each kind of step's row carries (kept from the card layout, which tests and tools look for). */
@@ -126,14 +135,22 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
     onFocus,
     selected: picked,
     onSelect,
+    onChangeReference,
+    onRemoveReference,
+    onCalibrate,
     ...sketching
   },
   ref,
 ) {
   const features = doc.features;
-  // The step whose properties are shown: the one picked, else the last one looked at, else the first.
+  const references = doc.references ?? [];
+  // The step whose properties are shown: the one picked, else the last one looked at, else the first. A reference
+  // picture picked from its row shows its settings instead.
   const [last, setLast] = useState<string | null>(null);
-  const current = features.find((f) => f.id === picked) ?? features.find((f) => f.id === last) ?? features[0] ?? null;
+  const picture = references.find((r) => r.id === (picked ?? last)) ?? null;
+  const current = picture
+    ? null
+    : (features.find((f) => f.id === picked) ?? features.find((f) => f.id === last) ?? features[0] ?? null);
   useEffect(() => {
     if (picked) setLast(picked);
   }, [picked]);
@@ -268,6 +285,66 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
             ))}
           </ol>
         )}
+        {references.length > 0 && (
+          <>
+            <h2 className="panel-title">Reference pictures</h2>
+            <ol className="steps" aria-label="Reference pictures">
+              {references.map((r) => (
+                <li
+                  key={r.id}
+                  className={["step", r.id === picture?.id && "current", r.id === picked && "picked"]
+                    .filter(Boolean)
+                    .join(" ")}
+                  data-testid="reference"
+                  data-feature-id={r.id}
+                >
+                  <button
+                    type="button"
+                    className="step-main"
+                    aria-current={r.id === picture?.id || undefined}
+                    onClick={() => {
+                      setLast(r.id);
+                      onSelect(r.id);
+                    }}
+                  >
+                    <span className="step-icon" aria-hidden="true">
+                      <Icon name="picture" />
+                    </span>
+                    <span className="step-name">{r.name}</span>
+                    <span className="step-summary">
+                      {REFERENCE_PLANES.find((p) => p.plane === r.plane)!.label} ·{" "}
+                      {referenceSize(r)
+                        .map((v) => mm(v))
+                        .join(" × ")}{" "}
+                      mm{r.calibrated ? "" : " · not calibrated"}
+                    </span>
+                  </button>
+                  <span className="step-row-actions">
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`${r.visible ? "Hide" : "Show"} ${r.name}`}
+                      aria-pressed={!r.visible}
+                      title={r.visible ? "Hide" : "Show"}
+                      onClick={() => onChangeReference(r.id, { visible: !r.visible })}
+                    >
+                      <Icon name={r.visible ? "eye" : "eyeOff"} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Remove ${r.name}`}
+                      title="Remove"
+                      onClick={() => onRemoveReference(r.id)}
+                    >
+                      <Icon name="trash" />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
         {general.map((i) => (
           <p key={i.message} className={`issue ${i.severity}`} role="alert">
             {i.message}
@@ -298,6 +375,21 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               issues={issuesOf(current.id)}
               onChange={(patch) => onChange(current.id, patch)}
               onPickHoleFace={sketching.onPickHoleFace}
+            />
+          </section>
+        )}
+        {picture && (
+          <section className="props" data-testid="properties" aria-label={`${picture.name} properties`}>
+            <h3 className="props-title">
+              <Icon name="picture" />
+              {picture.name}
+            </h3>
+            <ReferenceProps
+              key={picture.id}
+              reference={picture}
+              issues={validateReference(picture)}
+              onChange={(patch) => onChangeReference(picture.id, patch)}
+              onCalibrate={() => onCalibrate(picture.id)}
             />
           </section>
         )}

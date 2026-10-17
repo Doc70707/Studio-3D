@@ -20,6 +20,10 @@ import {
   type Point2,
   type Profile,
   type SketchFeature,
+  referenceOnPlane,
+  validateReference,
+  type ReferenceImage,
+  type SketchPlane,
 } from "@studio3d/document";
 import {
   anyTyped,
@@ -108,6 +112,8 @@ export function SketchEditor(props: {
   onChange: (feature: SketchFeature) => void;
   onDone: () => void;
   onCancel: () => void;
+  /** Reference pictures; those facing the same way as the drawing are shown under it, to trace over. */
+  references?: ReferenceImage[];
 }) {
   const { draft, onChange } = props;
   const s = draft.feature;
@@ -612,6 +618,9 @@ export function SketchEditor(props: {
           {cam && (
             <>
               <Grid cam={cam} size={size} />
+              {(props.references ?? []).map((r) => (
+                <Underlay key={r.id} reference={r} plane={s.plane} k={cam.k} toScreen={toScreen} />
+              ))}
               {spun ? (
                 <SpinLine toScreen={toScreen} size={size} />
               ) : onPlate ? (
@@ -1310,5 +1319,34 @@ function TypedBoxes(props: { pending: NonNullable<Pending>; typed: Typed; from: 
         );
       })}
     </g>
+  );
+}
+
+/** A reference picture under the drawing, at its real size and place, when it faces the same way as the drawing. */
+function Underlay(props: {
+  reference: ReferenceImage;
+  plane: SketchPlane;
+  k: number;
+  toScreen: (p: Point2) => Point2;
+}) {
+  const r = props.reference;
+  if (!r.visible || hasErrors(validateReference(r))) return null;
+  const at = referenceOnPlane(r, props.plane);
+  if (!at) return null;
+  const [cx, cy] = props.toScreen(at.centre);
+  const [w, h] = [at.size[0] * props.k, at.size[1] * props.k];
+  return (
+    <image
+      className="reference-underlay"
+      data-testid="reference-underlay"
+      href={r.src}
+      x={-w / 2}
+      y={-h / 2}
+      width={w}
+      height={h}
+      opacity={r.opacity}
+      preserveAspectRatio="none"
+      transform={`translate(${cx} ${cy}) rotate(${-at.rotation})`}
+    />
   );
 }

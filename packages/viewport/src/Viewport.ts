@@ -59,6 +59,16 @@ const AXIS_COLORS: Record<Axis, number> = { x: 0xf0605a, y: 0x5fd068, z: 0x5b9cf
 /** How long the move arrows look on screen, in pixels. */
 const GIZMO_PIXELS = 90;
 
+/** A reference picture to show: where its corners are and how see-through it is. */
+export interface ReferencePicture {
+  id: string;
+  /** The picture (a data: URL). */
+  src: string;
+  corners: [number, number, number][];
+  opacity: number;
+  onTop: boolean;
+}
+
 /** True when this browser/webview can create a WebGL2 context. */
 export function isWebGLAvailable(): boolean {
   try {
@@ -105,6 +115,9 @@ export class Viewport {
   } | null = null;
   private moveListeners = new Set<(e: MoveEvent) => void>();
   private sketchLines: THREE.LineSegments | null = null;
+  private references: THREE.Group | null = null;
+  /** Pictures already loaded, by id, so changing a picture's place or see-through doesn't load it again. */
+  private textures = new Map<string, { src: string; texture: THREE.Texture }>();
   private readonly raycaster = new THREE.Raycaster();
   private dimensionGroup: THREE.Group | null = null;
   private labels: { el: HTMLElement; at: THREE.Vector3 }[] = [];
@@ -477,6 +490,62 @@ export class Viewport {
     this.requestRender();
   }
 
+  /**
+   * Shows reference pictures: each a flat picture with the given corners (bottom-left, bottom-right, top-right,
+   * top-left). They are only shown, never picked or measured. `onTop` draws one over the part instead of behind it.
+   */
+  setReferences(pictures: ReferencePicture[]): void {
+    if (this.references) {
+      this.scene.remove(this.references);
+      disposeObject(this.references);
+      this.references = null;
+    }
+    const keep = new Set(pictures.map((p) => p.id));
+    for (const [id, t] of this.textures)
+      if (!keep.has(id)) {
+        t.texture.dispose();
+        this.textures.delete(id);
+      }
+    if (!pictures.length) return this.requestRender();
+    const group = new THREE.Group();
+    group.name = "references";
+    for (const p of pictures) {
+      let cached = this.textures.get(p.id);
+      if (!cached || cached.src !== p.src) {
+        cached?.texture.dispose();
+        const texture = new THREE.TextureLoader().load(p.src, () => this.requestRender());
+        texture.colorSpace = THREE.SRGBColorSpace;
+        cached = { src: p.src, texture };
+        this.textures.set(p.id, cached);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(p.corners.flat()), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+      g.setIndex([0, 1, 2, 0, 2, 3]);
+      const mesh = new THREE.Mesh(
+        g,
+        new THREE.MeshBasicMaterial({
+          map: cached.texture,
+          transparent: true,
+          opacity: p.opacity,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          depthTest: !p.onTop,
+          // Lying on the plate, it is drawn just above the plate's own surface.
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -4,
+        }),
+      );
+      mesh.name = `reference:${p.id}`;
+      mesh.renderOrder = p.onTop ? 4 : 1;
+      group.add(mesh);
+    }
+    this.references = group;
+    this.scene.add(group);
+    this.requestRender();
+  }
+
   /** The point on the model under a point of the window, or null. */
   pickPoint(clientX: number, clientY: number): [number, number, number] | null {
     if (!this.surface) return null;
@@ -622,6 +691,7 @@ export class Viewport {
   }
 
   dispose(): void {
+    this.textures.forEach((t) => t.texture.dispose());
     this.resizeObserver.disconnect();
     this.controls.dispose();
     disposeObject(this.scene);
