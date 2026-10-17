@@ -311,13 +311,11 @@ function StepRow(props: {
   onRemove: () => void;
 }) {
   const f = props.step;
-  const cls = `step${props.current ? " current" : ""}${props.picked ? " picked" : ""}${props.problem ? " has-error" : ""}`;
+  const cls = ["step", props.current && "current", props.picked && "picked", props.problem && "has-error"]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <li
-      className={cls}
-      data-testid={ROW_TEST_ID(f)}
-      data-feature-id={f.id}
-    >
+    <li className={cls} data-testid={ROW_TEST_ID(f)} data-feature-id={f.id}>
       <button type="button" className="step-main" aria-current={props.current || undefined} onClick={props.onPick}>
         <span className={`step-icon ${"mode" in f && f.mode === "cut" ? "cut" : ""}`} aria-hidden="true">
           <Icon name={iconOf(f)} />

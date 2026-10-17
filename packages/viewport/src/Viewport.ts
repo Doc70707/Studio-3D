@@ -1,6 +1,16 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { boundsCenter, boundsRadius, fitDistance, placeCamera, type Bounds, type StandardView } from "./views";
+import {
+  boundsCenter,
+  boundsRadius,
+  fitDistance,
+  orthoHalfHeight,
+  perspectiveDistance,
+  placeCamera,
+  type Bounds,
+  type Projection,
+  type StandardView,
+} from "./views";
 import { dimensionLines, labelPoint, type Dimension } from "./dimensions";
 
 export interface ViewportOptions {
@@ -27,8 +37,11 @@ export interface SafeArea {
 
 export interface CameraState {
   view: StandardView | "custom";
+  projection: Projection;
   position: [number, number, number];
   target: [number, number, number];
+  /** The orthographic camera's zoom (scrolling changes this instead of moving the camera); 1 in perspective. */
+  zoom: number;
 }
 
 const FOV = 45;
@@ -63,7 +76,10 @@ export function isWebGLAvailable(): boolean {
 export class Viewport {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
+  private readonly perspectiveCamera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
+  private readonly orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 40000);
+  /** The camera in use: perspective or orthographic. Both sit in the same place and look at the same point. */
+  private camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspectiveCamera;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private plateBounds: Bounds;
@@ -119,6 +135,7 @@ export class Viewport {
     container.appendChild(this.labelLayer);
 
     this.camera.up.set(0, 0, 1);
+    this.orthoCamera.up.set(0, 0, 1);
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
     const sun = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -166,9 +183,59 @@ export class Viewport {
     this.camera.position.set(...p.position);
     this.controls.target.set(...p.target);
     this.camera.lookAt(this.controls.target);
+    this.frameOrtho();
     this.controls.update();
     this.view = view;
     this.requestRender();
+  }
+
+  get projection(): Projection {
+    return this.camera === this.orthoCamera ? "orthographic" : "perspective";
+  }
+
+  /**
+   * Switches between perspective and a true orthographic projection (parallel lines stay parallel). The camera keeps
+   * its place, direction and target, and the part stays the same size on screen.
+   */
+  setProjection(projection: Projection): void {
+    if (projection === this.projection) return;
+    const from = this.camera;
+    const target = this.controls.target;
+    const to = projection === "orthographic" ? this.orthoCamera : this.perspectiveCamera;
+    to.up.copy(from.up);
+    if (from instanceof THREE.OrthographicCamera) {
+      // Move back to the distance at which perspective shows what the zoomed orthographic view shows.
+      const d = perspectiveDistance(from.top, from.zoom, this.fullFov());
+      const dir = from.position.clone().sub(target).normalize();
+      to.position.copy(target).addScaledVector(dir, d);
+    } else to.position.copy(from.position);
+    to.lookAt(target);
+    this.camera = to;
+    this.controls.object = to;
+    this.frameOrtho();
+    this.resize();
+    const view = this.view; // the camera hasn't turned, so a standard view stays that view
+    this.controls.update();
+    this.view = view;
+    this.requestRender();
+  }
+
+  /**
+   * Sizes the orthographic camera to show, at the target, what perspective shows from the camera's distance, with
+   * zoom back at 1. Called whenever the camera is placed (standard views, fit, looking at a face).
+   */
+  private frameOrtho(): void {
+    if (this.camera !== this.orthoCamera) return;
+    const half = orthoHalfHeight(this.camera.position.distanceTo(this.controls.target), this.fullFov());
+    this.orthoCamera.zoom = 1;
+    this.orthoCamera.top = half;
+    this.orthoCamera.bottom = -half;
+    this.applyAspect();
+  }
+
+  /** The vertical field of view of the whole (virtual) frame, which includes the parts panels cover. */
+  private fullFov(): number {
+    return FOV;
   }
 
   /** Shows a model, replacing the previous one. Pass null to clear. */
@@ -477,6 +544,7 @@ export class Viewport {
     this.controls.target.set(...target);
     this.camera.position.set(target[0] + dir.x * d, target[1] + dir.y * d, target[2] + dir.z * d);
     this.camera.lookAt(this.controls.target);
+    this.frameOrtho();
     this.controls.update();
     this.view = "custom";
     this.requestRender();
@@ -499,6 +567,7 @@ export class Viewport {
     );
     this.controls.target.set(...target);
     this.camera.lookAt(this.controls.target);
+    this.frameOrtho();
     this.controls.update();
     this.view = "custom";
     this.requestRender();
@@ -540,8 +609,10 @@ export class Viewport {
     const t = this.controls.target;
     return {
       view: this.view,
+      projection: this.projection,
       position: [r(x), r(y), r(z)],
       target: [r(t.x), r(t.y), r(t.z)],
+      zoom: r(this.camera.zoom),
     };
   }
 
@@ -573,10 +644,12 @@ export class Viewport {
     const dy = top - bottom;
     const fullW = w + Math.abs(dx);
     const fullH = h + Math.abs(dy);
-    this.camera.aspect = fullW / fullH;
-    if (dx === 0 && dy === 0) this.camera.clearViewOffset();
-    else this.camera.setViewOffset(fullW, fullH, dx < 0 ? -dx : 0, dy < 0 ? -dy : 0, w, h);
-    this.camera.updateProjectionMatrix();
+    this.frameAspect = fullW / fullH;
+    for (const camera of [this.perspectiveCamera, this.orthoCamera]) {
+      if (dx === 0 && dy === 0) camera.clearViewOffset();
+      else camera.setViewOffset(fullW, fullH, dx < 0 ? -dx : 0, dy < 0 ? -dy : 0, w, h);
+    }
+    this.applyAspect();
     const half = (FOV * Math.PI) / 360;
     this.fit = {
       fov: (2 * Math.atan(Math.tan(half) * (visH / fullH)) * 180) / Math.PI,
@@ -585,14 +658,31 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** Width over height of the whole (virtual) frame, for both cameras. */
+  private frameAspect = 1;
+
+  private applyAspect(): void {
+    this.perspectiveCamera.aspect = this.frameAspect;
+    this.perspectiveCamera.updateProjectionMatrix();
+    const half = this.orthoCamera.top;
+    this.orthoCamera.left = -half * this.frameAspect;
+    this.orthoCamera.right = half * this.frameAspect;
+    this.orthoCamera.updateProjectionMatrix();
+  }
+
   /** Keeps the move arrows the same size on screen however far away they are. */
   private sizeGizmo(): void {
     if (!this.gizmo) return;
     const h = this.container.clientHeight || 1;
     const view = this.camera.view?.enabled ? this.camera.view : null;
     const shown = view ? view.height / view.fullHeight : 1; // the part of the camera's frame on screen
-    const distance = this.camera.position.distanceTo(this.gizmo.position);
-    const worldHeight = 2 * distance * Math.tan((this.camera.fov * Math.PI) / 360) * shown;
+    const worldHeight =
+      this.camera instanceof THREE.OrthographicCamera
+        ? ((this.camera.top - this.camera.bottom) / this.camera.zoom) * shown
+        : 2 *
+          this.camera.position.distanceTo(this.gizmo.position) *
+          Math.tan((this.camera.fov * Math.PI) / 360) *
+          shown;
     this.gizmo.scale.setScalar((GIZMO_PIXELS * worldHeight) / h);
   }
 

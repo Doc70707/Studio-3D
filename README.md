@@ -67,9 +67,12 @@ What works today:
   The Sizes button (or M) turns the labels off and on.
 - Undo and redo (Ctrl+Z, Ctrl+Y) for every change. Typing a number counts as one step.
 - Export STL for your slicer. Tests check every exported mesh is watertight with exact dimensions, independently with trimesh.
-- 3D view of a 256 × 256 mm build plate with standard views (keys 0–3). Mouse controls work like Civil 3D and
-  AutoCAD: hold the wheel and drag to pan, Shift + wheel-drag to orbit, scroll to zoom in where the pointer is, and
-  double-click the wheel to fit everything on screen. Left-drag also orbits and right-drag pans.
+- 3D view of a 256 × 256 mm build plate with all six standard views and iso (keys 0–3, Shift+1–3 for bottom, back
+  and left). Ortho (key 5) switches to a true orthographic view, where parallel edges stay parallel, and keeps the
+  part the same size on screen. Mouse controls work like Civil 3D and AutoCAD: hold the wheel and drag to pan,
+  Shift + wheel-drag to orbit, scroll to zoom in where the pointer is, and double-click the wheel to fit everything on
+  screen. Left-drag also orbits and right-drag pans. On the sketch screen, wheel-drag and right-drag only slide the
+  drawing; it never turns.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

@@ -102,7 +102,10 @@ export function SketchEditor(props: {
   const [cursor, setCursor] = useState<Point2 | null>(null);
   /** Sizes typed while drawing; they start empty for every new shape and every new outline corner. */
   // Kept with the shape (or corner) they were typed for, so a new one starts with empty boxes straight away.
-  const [typedFor, setTypedFor] = useState<{ pending: Pending; typed: Typed } | null>(null);
+  const [typedFor, setTypedFor] = useState<{
+    pending: Pending;
+    typed: Typed;
+  } | null>(null);
   const typed = !pending ? null : typedFor?.pending === pending ? typedFor.typed : startTyping(pending.kind);
   const setTyped = (t: Typed) => setTypedFor({ pending, typed: t });
   const drag = useRef<{
@@ -280,7 +283,9 @@ export function SketchEditor(props: {
 
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
+    // Middle- or right-drag (with or without Shift) only slides the drawing: the sketch stays square-on and never turns.
     if (e.button === 1 || e.button === 2) {
+      if (e.button === 1) e.preventDefault(); // no browser auto-scroll
       if (cam) pan.current = { x: e.clientX, y: e.clientY, cx: cam.cx, cy: cam.cy };
       return;
     }
@@ -529,6 +534,7 @@ export function SketchEditor(props: {
           onPointerLeave={() => setCursor(null)}
           onDoubleClick={() => pending?.kind === "polygon" && closePolygon(pending.points)}
           onWheel={onWheel}
+          onAuxClick={(e) => e.button === 1 && e.detail === 2 && fit()}
           onContextMenu={(e) => e.preventDefault()}
         >
           {cam && (

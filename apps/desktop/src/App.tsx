@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Viewport, isWebGLAvailable, partDimensions, type CameraState, type StandardView } from "@studio3d/viewport";
+import {
+  Viewport,
+  isWebGLAvailable,
+  partDimensions,
+  type CameraState,
+  type Projection,
+  type StandardView,
+} from "@studio3d/viewport";
 import {
   GeometryClient,
   createGeometryWorker,
@@ -43,12 +50,19 @@ import { Icon } from "./Icon";
 import { platform } from "./platform";
 import { APP_INFO, useProject, whenSaved } from "./useProject";
 
-const VIEW_BUTTONS: { view: StandardView; label: string; key: string }[] = [
-  { view: "iso", label: "3D", key: "0" },
-  { view: "top", label: "Top", key: "1" },
-  { view: "front", label: "Front", key: "2" },
-  { view: "right", label: "Right", key: "3" },
+/** Views on the view bar and in the View menu. Shift with a number key looks from the opposite side. */
+const VIEW_BUTTONS: { view: StandardView; label: string; key: string; shift?: boolean; bar?: boolean }[] = [
+  { view: "iso", label: "3D", key: "0", bar: true },
+  { view: "top", label: "Top", key: "1", bar: true },
+  { view: "front", label: "Front", key: "2", bar: true },
+  { view: "right", label: "Right", key: "3", bar: true },
+  { view: "bottom", label: "Bottom", key: "1", shift: true },
+  { view: "back", label: "Back", key: "2", shift: true },
+  { view: "left", label: "Left", key: "3", shift: true },
 ];
+const viewShortcut = (b: (typeof VIEW_BUTTONS)[number]) => (b.shift ? `Shift+${b.key}` : b.key);
+/** Switches between perspective and orthographic (parallel) projection. */
+const PROJECTION_KEY = "5";
 
 type Engine = "starting" | "ready" | "failed";
 /** The last model the engine built, and the exact document it was built from. */
@@ -65,6 +79,11 @@ export function App() {
   const viewportRef = useRef<Viewport | null>(null);
   const geometryRef = useRef<GeometryClient | null>(null);
   const [camera, setCamera] = useState<CameraState | null>(null);
+  const projection: Projection = camera?.projection ?? "perspective";
+  const toggleProjection = useCallback(() => {
+    const vp = viewportRef.current;
+    vp?.setProjection(vp.projection === "orthographic" ? "perspective" : "orthographic");
+  }, []);
   const [webglError, setWebglError] = useState(false);
   const [engine, setEngine] = useState<Engine>("starting");
   const [engineError, setEngineError] = useState<string | null>(null);
@@ -485,6 +504,17 @@ export function App() {
         e.target instanceof HTMLSelectElement ||
         e.target instanceof HTMLTextAreaElement;
       if (mod || e.altKey || typing) return;
+      // Number keys by their place on the keyboard, so Shift+1 is still "1" whatever the layout prints on it.
+      const digit = /^Digit(\d)$/.exec(e.code)?.[1];
+      const b = VIEW_BUTTONS.find((v) => v.key === digit && !!v.shift === e.shiftKey);
+      if (b) {
+        viewportRef.current?.setView(b.view);
+        return;
+      }
+      if (digit === PROJECTION_KEY && !e.shiftKey) {
+        toggleProjection();
+        return;
+      }
       if (selection && selected && allows(mode, "edit-keys")) {
         if (e.key === "Escape") {
           setSelection(null);
@@ -517,12 +547,10 @@ export function App() {
         setShowSizes((v) => !v);
         return;
       }
-      const b = VIEW_BUTTONS.find((v) => v.key === e.key);
-      if (b) viewportRef.current?.setView(b.view);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [project, mode, stopPicking, selection, selected, doc]);
+  }, [project, mode, stopPicking, selection, selected, doc, toggleProjection]);
 
   // Window title and close guard
   // The title is only set once the geometry engine has loaded, so it also tells (and CI checks) that the kernel started.
@@ -603,12 +631,20 @@ export function App() {
       items: [
         ...VIEW_BUTTONS.map((b) => ({
           label: b.view === "iso" ? "3D view" : `${b.label} view`,
-          shortcut: b.key,
+          shortcut: viewShortcut(b),
           onSelect: () => viewportRef.current?.setView(b.view),
           disabled: webglError,
           reason: noView,
         })),
         "separator" as const,
+        {
+          label: "Orthographic (no perspective)",
+          shortcut: PROJECTION_KEY,
+          checked: projection === "orthographic",
+          onSelect: toggleProjection,
+          disabled: webglError,
+          reason: noView,
+        },
         {
           label: "Fit all",
           shortcut: "Wheel double-click",
@@ -694,6 +730,8 @@ export function App() {
         onPointerMove={onHostPointerMove}
         onPointerUp={onHostPointerUp}
         data-camera-view={camera?.view ?? ""}
+        data-camera-projection={camera?.projection ?? ""}
+        data-camera-zoom={camera?.zoom ?? ""}
         data-camera-position={camera ? camera.position.join(",") : ""}
         data-camera-target={camera ? camera.target.join(",") : ""}
         data-geometry={
@@ -837,18 +875,29 @@ export function App() {
         </div>
 
         <nav className="glass bar segmented" aria-label="Camera views">
-          {VIEW_BUTTONS.map((b) => (
+          {VIEW_BUTTONS.filter((b) => b.bar).map((b) => (
             <button
               key={b.view}
               type="button"
               aria-pressed={camera?.view === b.view}
-              title={`${b.label} view (key ${b.key})`}
+              title={`${b.label} view (key ${b.key}; Shift+${b.key} looks from the other side)`}
               onClick={() => viewportRef.current?.setView(b.view)}
               disabled={webglError}
             >
               {b.label}
             </button>
           ))}
+          <span className="divider" aria-hidden="true" />
+          <button
+            type="button"
+            aria-pressed={projection === "orthographic"}
+            aria-label="Orthographic"
+            title={`Orthographic: no perspective, parallel edges stay parallel (key ${PROJECTION_KEY})`}
+            onClick={toggleProjection}
+            disabled={webglError}
+          >
+            Ortho
+          </button>
           <span className="divider" aria-hidden="true" />
           <button
             type="button"
@@ -951,6 +1000,8 @@ const SHORTCUTS: [string, string][] = [
   ["Zoom", "Scroll (zooms where the pointer is)"],
   ["Fit everything on screen", "Double-click the wheel"],
   ["3D / Top / Front / Right view", "0 / 1 / 2 / 3"],
+  ["Bottom / Back / Left view", "Shift+1 / Shift+2 / Shift+3"],
+  ["Orthographic on or off", "5"],
   ["Show or hide sizes", "M"],
   ["Select a piece", "Click it"],
   ["Move the selected piece", "Drag its arrows, or arrow keys (Shift = 10 mm), Page Up / Page Down"],
@@ -961,6 +1012,7 @@ const SHORTCUTS: [string, string][] = [
   ["Sketch: Select / Rectangle / Circle / Outline", "V / R / C / L"],
   ["Sketch: type a size while drawing", "Type the number, Tab to the next box, Enter"],
   ["Sketch: close an outline", "Enter, or click its first corner"],
+  ["Sketch: slide the drawing (it never turns)", "Wheel-drag or right-drag; double-click the wheel to fit"],
 ];
 
 /** Help > Keyboard and mouse, and Help > About. */
