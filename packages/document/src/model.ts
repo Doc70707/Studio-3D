@@ -12,6 +12,7 @@ import {
   dot,
   length3,
 } from "./sketch";
+import { currentFace, faceEdgeIssues, type HoleFace } from "./holeFace";
 import {
   MAX_FIT,
   THREADS,
@@ -87,8 +88,9 @@ export type ShapeFeature = BoxFeature | CylinderFeature | TubeFeature | ConeFeat
 export type ShapeType = ShapeFeature["type"];
 
 /**
- * A round hole drilled straight down from the top of the part.
- * x and y are the hole's centre, measured from the centre of the build plate. depth = 0 means all the way through.
+ * A round hole. Without a face it is drilled straight down from the top of the part, and x and y are its centre
+ * measured from the centre of the build plate. On a face it is drilled square into that face, and x and y are its
+ * distances from the face's edges (see HoleFace). depth = 0 means all the way through.
  */
 export interface HoleFeature extends Threadable {
   id: string;
@@ -98,6 +100,7 @@ export interface HoleFeature extends Threadable {
   y: number;
   diameter: number;
   depth: number;
+  face?: HoleFace;
 }
 
 /**
@@ -427,7 +430,7 @@ export type Axis = "x" | "y" | "z";
 /** Which ways a step can be moved: holes always go down from the top, so they only slide across it. */
 export function movableAxes(f: Feature): Axis[] {
   if (f.type === "hollow" || isEdgeStep(f) || isCopyStep(f)) return [];
-  if (f.type === "hole") return ["x", "y"];
+  if (f.type === "hole") return f.face ? [] : ["x", "y"]; // a hole on a face is placed by its distances from the edges
   return ["x", "y", "z"];
 }
 
@@ -592,10 +595,10 @@ export function validateHole(h: HoleFeature): Issue[] {
     issues.push({ severity: "error", featureId: h.id, field, message });
   const labels = {
     diameter: "Diameter",
-    x: "Left / right",
-    y: "Front / back",
+    x: h.face ? "Across" : "Left / right",
+    y: h.face ? "Up" : "Front / back",
     depth: "Depth",
-  } as const;
+  };
   for (const k of ["diameter", "x", "y", "depth"] as const) {
     if (!Number.isFinite(h[k])) add(k, `${labels[k]} needs to be a number.`);
   }
@@ -685,6 +688,8 @@ export function validateDocument(doc: ProjectDocument): Issue[] {
     if (f.type === "hole") {
       holesStarted = true;
       issues.push(...validateHole(f));
+      if (f.face && !hasErrors(validateHole(f)))
+        issues.push(...faceEdgeIssues(f, currentFace(doc, f.face), holeDiameter(f) / 2));
     } else if (f.type === "sketch") {
       issues.push(...validateSketch(f));
     } else if (f.type === "hollow") {

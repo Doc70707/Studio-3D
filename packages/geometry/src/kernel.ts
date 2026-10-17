@@ -27,6 +27,12 @@ import {
   patternMoves,
   hasErrors,
   holeEdgeIssues,
+  currentFace,
+  holeAxis,
+  cross,
+  dot,
+  normalize,
+  type Vec3,
   threadOf,
   threadVolume,
   shapeSize,
@@ -349,11 +355,54 @@ function partSpan(part: Part | null): number {
   return Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
 }
 
-/** The solid a hole cuts: from 1 mm above the part's top down to its depth (or 1 mm below the part, if through). */
-function holeTool(h: HoleFeature, min: number[], max: number[]): Shape3D {
+/** How far the part's bounding box reaches from `point` in `direction`: the deepest a hole can go there. */
+function reachInto(point: Vec3, direction: Vec3, min: number[], max: number[]): number {
+  let most = 0;
+  for (const x of [min[0]!, max[0]!])
+    for (const y of [min[1]!, max[1]!])
+      for (const z of [min[2]!, max[2]!])
+        most = Math.max(most, dot([x - point[0], y - point[1], z - point[2]], direction));
+  return most;
+}
+
+/** Turns a solid made along +Z so that +Z points along `n`, turning about the origin. */
+function pointAlong(shape: Shape3D, n: Vec3): Shape3D {
+  if (n[2] > 1 - 1e-9) return shape;
+  if (n[2] < -1 + 1e-9) return shape.rotate(180, [0, 0, 0], [1, 0, 0]);
+  return shape.rotate((Math.acos(n[2]) * 180) / Math.PI, [0, 0, 0], normalize(cross([0, 0, 1], n)));
+}
+
+/** Where a hole on a face drills, and how deep it can go: its own depth, or right through the part. */
+function faceHole(h: HoleFeature & { face: NonNullable<HoleFeature["face"]> }, doc: ProjectDocument, part: Part) {
+  const [min, max] = part.shape.boundingBox.bounds;
+  const face = currentFace(doc, h.face);
+  const { point, direction } = holeAxis(face, h.x, h.y);
+  return { face, point, direction, reach: reachInto(point, direction, min, max) };
+}
+
+/** The solid a hole cuts. */
+function holeTool(h: HoleFeature, doc: ProjectDocument, part: Part): Shape3D {
   const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
-  const bottom = h.depth === 0 ? min[2]! - extra : max[2]! - h.depth;
   const thread = threadOf(h);
+  const [min, max] = part.shape.boundingBox.bounds;
+  if (h.face) {
+    // Square into the face: from the bottom of the hole (or past the far side of the part) out to 1 mm above the face.
+    const { point, direction, reach } = faceHole({ ...h, face: h.face }, doc, part);
+    const deep = h.depth === 0 ? reach + extra : h.depth;
+    const length = deep + extra;
+    const end = add3(point, scale(direction, deep));
+    const out = scale(direction, -1);
+    return thread
+      ? pointAlong(makeThread(thread, Math.ceil(length / 5) * 5), out).translate(end)
+      : makeCylinder(h.diameter / 2, length, end, out);
+  }
+  return topHoleTool(h, min, max, thread);
+}
+
+/** The solid a hole from the top cuts: from 1 mm above the part's top down to its depth (or 1 mm below the part). */
+function topHoleTool(h: HoleFeature, min: number[], max: number[], thread: ReturnType<typeof threadOf>): Shape3D {
+  const extra = 1;
+  const bottom = h.depth === 0 ? min[2]! - extra : max[2]! - h.depth;
   // A threaded tool is made in 5 mm steps of length (any extra pokes out of the top, cutting nothing), so a thread
   // already built is reused while the part's height or the hole's depth changes a little.
   return thread
@@ -365,15 +414,27 @@ function holeTool(h: HoleFeature, min: number[], max: number[]): Shape3D {
  * Drills one hole straight down from the top of the part and checks the result.
  * The cut must remove some material but never more than the hole's own cylinder.
  */
-function drill(part: Part, h: HoleFeature, issues: Issue[], keep?: Piece[]): Part {
+function drill(part: Part, h: HoleFeature, doc: ProjectDocument, issues: Issue[], keep?: Piece[]): Part {
   const bb = part.shape.boundingBox;
   const [min, max] = bb.bounds;
-  const height = max[2] - min[2];
-  const edge = holeEdgeIssues(h, min, max, height);
-  if (hasErrors(edge)) throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
-  issues.push(...edge);
+  let height = max[2] - min[2];
+  if (h.face) {
+    // The face's own edges were checked with the document; here the depth is checked against the part.
+    const { reach } = faceHole({ ...h, face: h.face }, doc, part);
+    if (h.depth > reach + 1e-9)
+      throw new ShapeCheckFailed(
+        `The part is only ${fmt(reach)} deep under ${h.name}. Use ${fmt(reach)} or less, or 0 to go all the way through.`,
+        h.id,
+        "depth",
+      );
+    height = reach;
+  } else {
+    const edge = holeEdgeIssues(h, min, max, height);
+    if (hasErrors(edge)) throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
+    issues.push(...edge);
+  }
 
-  const tool = holeTool(h, min, max);
+  const tool = holeTool(h, doc, part);
   let result: Shape3D;
   try {
     result = part.shape.cut(tool);
@@ -523,10 +584,13 @@ export function edgeStep(part: Part, f: EdgeFeature): Part {
 }
 
 /** The solid an earlier step adds or cuts, made again where it stood, with the range its volume must fall in. */
-function sourceTool(src: ShapeFeature | HoleFeature | SketchFeature, part: Part): Tool & { mode: "add" | "cut" } {
+function sourceTool(
+  src: ShapeFeature | HoleFeature | SketchFeature,
+  part: Part,
+  doc: ProjectDocument,
+): Tool & { mode: "add" | "cut" } {
   if (src.type === "hole") {
-    const [min, max] = part.shape.boundingBox.bounds;
-    const shape = holeTool(src, min, max);
+    const shape = holeTool(src, doc, part);
     return { shape, least: 0, most: measureVolume(shape) * (1 + 1e-6), mode: "cut" };
   }
   if (src.type === "sketch") return { ...makeSketchTool(src, partSpan(part)), mode: src.mode };
@@ -550,7 +614,7 @@ export function copyStep(
   const src = doc.features.find((x) => x.id === f.source);
   if (!src || !isCopyable(src))
     throw new ShapeCheckFailed("Choose an earlier shape, hole or sketch to copy.", f.id, "source");
-  const tool = sourceTool(src, part);
+  const tool = sourceTool(src, part, doc);
   const copies: Shape3D[] = [];
   try {
     if (f.type === "mirror")
@@ -638,7 +702,7 @@ export function buildDocument(doc: ProjectDocument, keepPieces = false): BuildRe
   for (const f of doc.features) {
     try {
       let next: Part;
-      if (f.type === "hole") next = drill(part!, f, issues, keep);
+      if (f.type === "hole") next = drill(part!, f, doc, issues, keep);
       else if (isCopyStep(f)) next = copyStep(part!, f, doc, issues, keep);
       else if (f.type === "hollow" || isEdgeStep(f)) {
         next = f.type === "hollow" ? hollow(part!, f) : edgeStep(part!, f);

@@ -22,6 +22,9 @@ import {
 import {
   PLATE_PLANE,
   SHAPES,
+  boxSideFace,
+  boxSideOf,
+  canFollow,
   hasErrors,
   isHollow,
   movableAxes,
@@ -35,7 +38,9 @@ import {
   newSketch,
   validateDocument,
   validateSketch,
+  type BoxFeature,
   type FaceOutline,
+  type HoleFace,
   type Issue,
   type ProjectDocument,
   type SketchFeature,
@@ -94,6 +99,12 @@ export function App() {
   const meshRef = useRef<MeshData | null>(null);
   /** Waiting for a click on a face to sketch on. */
   const [picking, setPicking] = useState(false);
+  /** What a picked face is for: a sketch (undefined), a new hole (null), or moving that hole onto it (its id). */
+  const [holeTarget, setHoleTarget] = useState<string | null | undefined>(undefined);
+  const pickPrompt =
+    holeTarget === undefined
+      ? "Click a flat face of the part to draw on it."
+      : "Click a flat face of the part to put the hole on. It goes in the middle; then set its distances.";
   const [pickMessage, setPickMessage] = useState<string | null>(null);
   const pointerDown = useRef<{ x: number; y: number } | null>(null);
   /** The sketch being drawn, if any. Its preview is built live, but it only joins the design on Done. */
@@ -220,8 +231,14 @@ export function App() {
 
   // Sketching: pick a face, draw, then add the sketch to the design.
   const startPicking = useCallback(() => {
+    setHoleTarget(undefined);
     setPicking(true);
     setPickMessage("Click a flat face of the part to draw on it.");
+  }, []);
+  const startHolePicking = useCallback((id: string | null) => {
+    setHoleTarget(id);
+    setPicking(true);
+    setPickMessage("Click a flat face of the part to put the hole on. It goes in the middle; then set its distances.");
   }, []);
   const stopPicking = useCallback(() => {
     setPicking(false);
@@ -270,9 +287,7 @@ export function App() {
     if (e.buttons) return;
     const hit = faceAt(e.clientX, e.clientY);
     viewportRef.current?.setHighlight(hit?.outline ? new Float32Array(hit.points.flat()) : null);
-    setPickMessage(
-      hit && !hit.outline ? "That face is curved. Pick a flat one." : "Click a flat face of the part to draw on it.",
-    );
+    setPickMessage(hit && !hit.outline ? "That face is curved. Pick a flat one." : pickPrompt);
   };
   const onHostPointerUp = (e: React.PointerEvent) => {
     const down = pointerDown.current;
@@ -289,7 +304,24 @@ export function App() {
     if (!allows(mode, "pick-face")) return;
     const hit = faceAt(e.clientX, e.clientY);
     if (!hit?.outline) return;
-    sketchOnFace(hit.outline);
+    if (holeTarget === undefined) sketchOnFace(hit.outline);
+    else holeOnFace(hit.outline, meshRef.current?.owners[hit.face]);
+  };
+
+  /**
+   * Puts a hole in the middle of a picked face, square to it. On a side of a box the hole follows the box when it
+   * is resized or moved; on any other face it stays where the face was.
+   */
+  const holeOnFace = (o: FaceOutline, owner: string | undefined) => {
+    stopPicking();
+    const box = doc.features.find((f): f is BoxFeature => f.id === owner && f.type === "box");
+    const side = boxSideOf(o.plane.normal);
+    const face: HoleFace =
+      box && side && canFollow(box, side)
+        ? { ...boxSideFace(box, side), on: { shape: box.id, side }, across: "centre", up: "centre" }
+        : { plane: o.plane, surface: o.label, width: o.width, height: o.height, across: "centre", up: "centre" };
+    if (holeTarget) project.updateFeature(holeTarget, { face, x: 0, y: 0 });
+    else addAndSelect({ ...newHole(doc), face });
   };
 
   const sketchOnFace = (o: FaceOutline) => {
@@ -321,7 +353,7 @@ export function App() {
     const m = built?.measurements;
     if (!showSizes || !m || draft) return vp.setDimensions([]);
     const focused = built.doc.features.find((f) => f.id === focusId);
-    vp.setDimensions([...partDimensions(m.min, m.max), ...(focused ? featureDimensions(focused, m) : [])]);
+    vp.setDimensions([...partDimensions(m.min, m.max), ...(focused ? featureDimensions(focused, m, built.doc) : [])]);
   }, [built, showSizes, focusId, draft]);
 
   // The selected piece: tinted, with move arrows in its middle. Redrawn with each new model.
@@ -664,6 +696,12 @@ export function App() {
         })),
         "separator" as const,
         { label: "Hole", onSelect: () => addAndSelect(newHole(doc, where)) },
+        {
+          label: "Hole on a face…",
+          onSelect: () => startHolePicking(null),
+          disabled: !built,
+          reason: "Add a shape first, then pick one of its faces",
+        },
         "separator" as const,
         {
           label: "Sketch on a face",
@@ -940,6 +978,7 @@ export function App() {
         onAdd={project.addFeature}
         onRemove={project.removeFeature}
         onSketchOnFace={startPicking}
+        onPickHoleFace={startHolePicking}
         onSketchOnPlate={sketchOnPlate}
         onRevolve={startRevolve}
         onEditSketch={editSketch}

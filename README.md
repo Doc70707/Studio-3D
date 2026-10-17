@@ -77,6 +77,10 @@ What works today:
   boxes at the pointer. F8 locks sides straight across or up, angle steps (15°, 30°, 45°, 90°) click sides to those
   angles, and the pointer snaps to ends, middles, circle centres, crossings and square to a side (Alt ignores
   snaps). A drawn outline lists its sides: change one side's length or angle and the sides after it follow.
+- Holes on any flat face (Create > Hole on a face…, or "Put on a face…" on a hole): drilled square into the face and
+  placed by distances from its left or right edge and its bottom or top edge (or the middle). Switching which edge a
+  distance is measured from keeps the hole where it is. On a side of a box the hole follows the box when it is
+  resized or moved. A hole that would run off its face names the edge; nothing is moved to make it fit.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

@@ -10,6 +10,13 @@ import {
   SIZE_FIELDS,
   PROFILE_LABELS,
   hasErrors,
+  ACROSS_LABELS,
+  UP_LABELS,
+  currentFace,
+  holeCentre,
+  measuredFrom,
+  type AcrossFrom,
+  type UpFrom,
   newHole,
   newHollow,
   newEdgeStep,
@@ -69,6 +76,8 @@ interface Props {
   onAdd: (feature: Feature) => void;
   onRemove: (id: string) => void;
   onSketchOnFace: () => void;
+  /** Waits for a face to be clicked and puts the hole on it (null: a new hole). */
+  onPickHoleFace: (id: string | null) => void;
   onSketchOnPlate: () => void;
   onRevolve: () => void;
   onEditSketch: (id: string) => void;
@@ -109,8 +118,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
   const features = doc.features;
   // The step whose properties are shown: the one picked, else the last one looked at, else the first.
   const [last, setLast] = useState<string | null>(null);
-  const current =
-    features.find((f) => f.id === picked) ?? features.find((f) => f.id === last) ?? features[0] ?? null;
+  const current = features.find((f) => f.id === picked) ?? features.find((f) => f.id === last) ?? features[0] ?? null;
   useEffect(() => {
     if (picked) setLast(picked);
   }, [picked]);
@@ -274,6 +282,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               doc={doc}
               issues={issuesOf(current.id)}
               onChange={(patch) => onChange(current.id, patch)}
+              onPickHoleFace={sketching.onPickHoleFace}
             />
           </section>
         )}
@@ -338,11 +347,20 @@ function StepRow(props: {
 }
 
 /** The editable values of one step. */
-function Properties(props: { step: Feature; doc: ProjectDocument; issues: Issue[]; onChange: (patch: Patch) => void }) {
+function Properties(props: {
+  step: Feature;
+  doc: ProjectDocument;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  onPickHoleFace: (id: string) => void;
+}) {
   const { step: f, doc, issues, onChange } = props;
   const first = doc.features[0]?.id === f.id;
   if (isShape(f)) return <ShapeProps shape={f} first={first} issues={issues} onChange={onChange} />;
-  if (f.type === "hole") return <HoleProps hole={f} issues={issues} onChange={onChange} />;
+  if (f.type === "hole")
+    return (
+      <HoleProps hole={f} doc={doc} issues={issues} onChange={onChange} onPickFace={() => props.onPickHoleFace(f.id)} />
+    );
   if (f.type === "sketch") return <SketchProps sketch={f} first={first} issues={issues} onChange={onChange} />;
   if (f.type === "hollow") return <HollowProps hollow={f} issues={issues} onChange={onChange} />;
   if (isEdgeStep(f)) return <EdgeProps step={f} issues={issues} onChange={onChange} />;
@@ -401,7 +419,11 @@ function stepSummary(f: Feature, doc: ProjectDocument): string {
   if (isShape(f)) return `${f.mode === "cut" ? "Cut · " : ""}${summary(f)}`;
   switch (f.type) {
     case "hole":
-      return `${f.thread ?? `Ø${mm(f.diameter)}`} · ${f.depth === 0 ? "through" : `${mm(f.depth)} mm deep`}`;
+      return [
+        f.thread ?? `Ø${mm(f.diameter)}`,
+        f.depth === 0 ? "through" : `${mm(f.depth)} mm deep`,
+        ...(f.face ? [f.face.surface] : []),
+      ].join(" · ");
     case "sketch":
       return sketchSummary(f);
     case "hollow":
@@ -513,29 +535,59 @@ function ShapeProps(props: { shape: ShapeFeature; first: boolean; issues: Issue[
   );
 }
 
-function HoleProps(props: { hole: HoleFeature; issues: Issue[]; onChange: (patch: Patch) => void }) {
+function HoleProps(props: {
+  hole: HoleFeature;
+  doc: ProjectDocument;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+  onPickFace: () => void;
+}) {
   const { hole, issues, onChange } = props;
   const through = hole.depth === 0;
   const issueFor = (field: keyof HoleFeature) => issues.find((i) => i.field === field);
+  const followed = hole.face?.on && props.doc.features.find((f) => f.id === hole.face!.on!.shape);
   return (
     <>
+      <div className="hole-on" data-testid="hole-on">
+        <span>
+          {hole.face
+            ? `On the ${hole.face.surface}${followed ? ` of ${followed.name}` : ""}, drilled square into it`
+            : "Drilled down from the top of the part"}
+        </span>
+        <span className="hole-on-actions">
+          <button type="button" className="link" onClick={props.onPickFace}>
+            {hole.face ? "Another face…" : "Put on a face…"}
+          </button>
+          {hole.face && (
+            <button type="button" className="link" onClick={() => onChange({ face: undefined, x: 0, y: 0 })}>
+              Top of the part
+            </button>
+          )}
+        </span>
+      </div>
+      {hole.face ? (
+        <FacePosition hole={hole} doc={props.doc} issues={issues} onChange={onChange} />
+      ) : (
+        <div className="hole-grid">
+          <NumberField
+            label="Left / right"
+            name={`${hole.name} left / right position`}
+            value={hole.x}
+            issue={issueFor("x")}
+            onCommit={(v) => onChange({ x: v })}
+            compact
+          />
+          <NumberField
+            label="Front / back"
+            name={`${hole.name} front / back position`}
+            value={hole.y}
+            issue={issueFor("y")}
+            onCommit={(v) => onChange({ y: v })}
+            compact
+          />
+        </div>
+      )}
       <div className="hole-grid">
-        <NumberField
-          label="Left / right"
-          name={`${hole.name} left / right position`}
-          value={hole.x}
-          issue={issueFor("x")}
-          onCommit={(v) => onChange({ x: v })}
-          compact
-        />
-        <NumberField
-          label="Front / back"
-          name={`${hole.name} front / back position`}
-          value={hole.y}
-          issue={issueFor("y")}
-          onCommit={(v) => onChange({ y: v })}
-          compact
-        />
         {!hole.thread && (
           <NumberField
             label="Diameter"
@@ -572,6 +624,85 @@ function HoleProps(props: { hole: HoleFeature; issues: Issue[]; onChange: (patch
       />
       <Messages issues={issues} />
     </>
+  );
+}
+
+/**
+ * Where a hole sits on its face: a distance across from the left or right edge (or the middle) and a distance up
+ * from the bottom or top edge (or the middle). Changing which edge it's measured from keeps the hole where it is.
+ */
+function FacePosition(props: {
+  hole: HoleFeature;
+  doc: ProjectDocument;
+  issues: Issue[];
+  onChange: (patch: Patch) => void;
+}) {
+  const { hole, onChange } = props;
+  const face = currentFace(props.doc, hole.face!);
+  const issueFor = (field: keyof HoleFeature) => props.issues.find((i) => i.field === field);
+  const remeasure = (across: AcrossFrom, up: UpFrom) => {
+    const at = holeCentre(face, hole.x, hole.y);
+    onChange({ face: { ...hole.face!, across, up }, ...measuredFrom(face, at, across, up) });
+  };
+  return (
+    <div className="face-position">
+      <div className="hole-grid">
+        <div className="field compact">
+          <label htmlFor={`${hole.id}-across`}>Across from</label>
+          <div className="input-row select-row">
+            <select
+              id={`${hole.id}-across`}
+              aria-label={`${hole.name} measured across from`}
+              value={face.across}
+              onChange={(e) => remeasure(e.target.value as AcrossFrom, face.up)}
+            >
+              {(Object.keys(ACROSS_LABELS) as AcrossFrom[]).map((k) => (
+                <option key={k} value={k}>
+                  {ACROSS_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <NumberField
+          label={face.across === "centre" ? "Right of middle" : "Distance"}
+          name={`${hole.name} distance across`}
+          value={hole.x}
+          issue={issueFor("x")}
+          onCommit={(v) => onChange({ x: v })}
+          compact
+        />
+        <div className="field compact">
+          <label htmlFor={`${hole.id}-up`}>Up from</label>
+          <div className="input-row select-row">
+            <select
+              id={`${hole.id}-up`}
+              aria-label={`${hole.name} measured up from`}
+              value={face.up}
+              onChange={(e) => remeasure(face.across, e.target.value as UpFrom)}
+            >
+              {(Object.keys(UP_LABELS) as UpFrom[]).map((k) => (
+                <option key={k} value={k}>
+                  {UP_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <NumberField
+          label={face.up === "centre" ? "Above middle" : "Distance"}
+          name={`${hole.name} distance up`}
+          value={hole.y}
+          issue={issueFor("y")}
+          onCommit={(v) => onChange({ y: v })}
+          compact
+        />
+      </div>
+      <p className="props-note" aria-label="Face size (measured)">
+        The {face.surface} is {round(face.width)} × {round(face.height)} mm
+        {hole.face!.on ? "; the hole follows it when the shape changes." : "."}
+      </p>
+    </div>
   );
 }
 

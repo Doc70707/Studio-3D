@@ -49,6 +49,10 @@ import {
   type FaceOutline,
   type Profile,
   type SketchFeature,
+  boxSideFace,
+  currentFace,
+  holeAxis,
+  type BoxSide,
 } from "@studio3d/document";
 import { checkBinaryStl } from "./stl-check";
 import { measureVolume } from "replicad";
@@ -948,7 +952,12 @@ describe("which step made each face (for clicking a piece of the part)", () => {
 
   it("rounded corners belong to the fillet; the flat faces stay the block's", () => {
     const block = { ...box({ wall: 0 }), id: "block" };
-    const round = { ...newEdgeStep({ units: "mm", features: [] }, "fillet"), id: "round", size: 5, edges: "vertical" as const };
+    const round = {
+      ...newEdgeStep({ units: "mm", features: [] }, "fillet"),
+      id: "round",
+      size: 5,
+      edges: "vertical" as const,
+    };
     const r = owned({ units: "mm", features: [block, round] });
     const d = 4.99 * Math.SQRT1_2; // just inside the curve, where the display's flat triangles are
     expect(r.at([25 + d, 15 + d, 15])).toBe("round");
@@ -999,7 +1008,8 @@ describe("fillets and chamfers", () => {
   it("rounding every edge of a block gives exactly a rounded box", () => {
     const r = designed({ units: "mm", features: [block(), edges("fillet", { size: 2, edges: "all" })] });
     const [a, b, c, k] = [56, 36, 26, 2];
-    const rounded = a * b * c + 2 * k * (a * b + b * c + a * c) + Math.PI * k * k * (a + b + c) + (4 / 3) * Math.PI * k ** 3;
+    const rounded =
+      a * b * c + 2 * k * (a * b + b * c + a * c) + Math.PI * k * k * (a + b + c) + (4 / 3) * Math.PI * k ** 3;
     expect(r.measurements.size).toEqual([60, 40, 30]);
     expect(rel(r.measurements.volume, rounded)).toBeLessThan(1e-6);
   });
@@ -1114,7 +1124,14 @@ describe("revolves", () => {
   });
 
   it("a triangle touching the line makes a cone; half a turn makes half of it", () => {
-    const tri: Profile = { kind: "polygon", points: [[0, 0], [10, 0], [0, 20]] };
+    const tri: Profile = {
+      kind: "polygon",
+      points: [
+        [0, 0],
+        [10, 0],
+        [0, 20],
+      ],
+    };
     expect(rel(designed(doc(spin([tri]))).measurements.volume, (Math.PI * 100 * 20) / 3)).toBeLessThan(1e-6);
     const half = designed(doc(spin([tri], { revolve: 180 })));
     expect(rel(half.measurements.volume, (Math.PI * 100 * 20) / 6)).toBeLessThan(1e-6);
@@ -1128,7 +1145,15 @@ describe("revolves", () => {
     expect(rel(ring.measurements.volume, 2 * Math.PI ** 2 * 20 * 25)).toBeLessThan(1e-6);
     const notched: Profile = {
       kind: "polygon",
-      points: [[0, 0], [20, 0], [20, 3], [17, 5], [20, 7], [20, 10], [0, 10]],
+      points: [
+        [0, 0],
+        [20, 0],
+        [20, 3],
+        [17, 5],
+        [20, 7],
+        [20, 10],
+        [0, 10],
+      ],
     };
     // The disc less the notch (a triangle of area 6 whose centre is 19 mm from the line) spun round.
     const pulley = designed(doc(spin([notched])));
@@ -1137,7 +1162,15 @@ describe("revolves", () => {
 
   it("a revolve can cut: a cone-shaped countersink in a block", () => {
     const block = shape("box", { width: 40, depth: 40, height: 20, wall: 0, id: "block" });
-    const sink: Profile = { kind: "polygon", points: [[0, 10], [10, 20], [10, 21], [0, 21]] };
+    const sink: Profile = {
+      kind: "polygon",
+      points: [
+        [0, 10],
+        [10, 20],
+        [10, 21],
+        [0, 21],
+      ],
+    };
     const r = designed(doc(block, spin([sink], { mode: "cut" })));
     // The cone from radius 0 at z = 10 to radius 10 at z = 20 is removed; the 1 mm above the block cuts nothing.
     expect(rel(r.measurements.volume, 32000 - (Math.PI * 100 * 10) / 3)).toBeLessThan(1e-6);
@@ -1177,3 +1210,124 @@ function onTriangle(p: number[], a: number[], b: number[], c: number[]): boolean
   const side = (u: number[], v: number[]) => dotp(cross(sub(v, u), sub(p, u)), n) >= -1e-9;
   return side(a, b) && side(b, c) && side(c, a);
 }
+
+describe("holes on any flat face, measured from its edges", () => {
+  const block = (over: Partial<BoxFeature> = {}) => box({ id: "blk", wall: 0, ...over }); // 60 x 40 x 30
+  const onSide = (b: BoxFeature, side: BoxSide, over: Partial<HoleFeature> = {}, follow = true): HoleFeature => ({
+    ...hole({ diameter: 6, depth: 0 }),
+    x: 15,
+    y: 10,
+    face: {
+      ...boxSideFace(b, side),
+      ...(follow && { on: { shape: b.id, side } }),
+      across: "left",
+      up: "bottom",
+    },
+    ...over,
+  });
+
+  it("each side of a box, worked out from the box, is the same face a click finds", () => {
+    const b = block();
+    const mesh = tessellate(designed(design(b)).shape);
+    const picked = Array.from({ length: faceCount(mesh) }, (_, f) => outlineOfFace(mesh, f)!);
+    for (const side of ["top", "bottom", "front", "back", "left", "right"] as const) {
+      const face = boxSideFace(b, side);
+      const o = picked.find((p) => p.label === face.surface)!;
+      expect(face.plane).toEqual(o.plane);
+      expect([face.width, face.height]).toEqual([o.width, o.height]);
+    }
+  });
+
+  it("a through hole in the front face goes straight through the 40 mm depth", () => {
+    const b = block();
+    const r = designed(design(b, onSide(b, "front")));
+    expect(rel(r.measurements.volume, 72000 - cyl(6, 40))).toBeLessThan(1e-9);
+    expect(r.issues).toEqual([]);
+  });
+
+  it("blind holes stop at their depth on every side", () => {
+    const b = block();
+    for (const side of ["top", "bottom", "front", "back", "left", "right"] as const) {
+      const r = designed(design(b, onSide(b, side, { depth: 7 })));
+      expect(rel(r.measurements.volume, 72000 - cyl(6, 7))).toBeLessThan(1e-9);
+    }
+  });
+
+  it("measured from the right edge or the middle puts the hole where it says", () => {
+    const b = block();
+    // On the right face (40 wide, 30 tall) 5 from the right edge and 4 above the middle, 20 deep.
+    const h = onSide(b, "right", { x: 5, y: 4, depth: 20, diameter: 4 });
+    h.face = { ...h.face!, across: "right", up: "centre" };
+    const { point, direction } = holeAxis(currentFace(design(b, h), h.face), h.x, h.y);
+    expect(point).toEqual([30, 15, 19]);
+    expect(direction).toEqual([-1, -0, -0]);
+    const r = designed(design(b, h));
+    expect(rel(r.measurements.volume, 72000 - cyl(4, 20))).toBeLessThan(1e-9);
+  });
+
+  it("follows its box: wider, taller or moved, the hole keeps its distances from the edges", () => {
+    const b = block();
+    const h = onSide(b, "front", { x: 10, y: 8 });
+    h.face = { ...h.face!, across: "right", up: "top" };
+    for (const changed of [block({ width: 90 }), block({ height: 50 }), block({ x: 12, y: -7, z: 5 })]) {
+      const doc = design(changed, h);
+      const face = currentFace(doc, h.face);
+      expect(face.plane.origin[1]).toBe(changed.y - changed.depth / 2); // still on the front face
+      const { point } = holeAxis(face, h.x, h.y);
+      expect(point[0]).toBeCloseTo(changed.x + changed.width / 2 - 10, 9); // 10 from the right edge
+      expect(point[2]).toBeCloseTo(changed.z + changed.height - 8, 9); // 8 below the top edge
+      const r = designed(doc);
+      const v = changed.width * changed.depth * changed.height;
+      expect(rel(r.measurements.volume, v - cyl(6, changed.depth))).toBeLessThan(1e-9);
+    }
+  });
+
+  it("a hole that runs off an edge of its face is refused, naming the edge; nothing is moved to fit", () => {
+    const b = block();
+    const off = onSide(b, "front", { x: 2 }); // 6 across, 2 from the left edge
+    const r = buildDocument(design(b, off));
+    expect(r.ok).toBe(false);
+    expect(r.issues[0]).toMatchObject({
+      field: "x",
+      message: "Hole 1 runs off the left edge of the front face. Move it in or make it smaller.",
+    });
+    const thin = designed(design(b, onSide(b, "front", { y: 3.2 })));
+    expect(thin.issues[0]).toMatchObject({ severity: "warning", field: "y" });
+    expect(thin.issues[0]!.message).toContain("bottom edge of the front face");
+  });
+
+  it("a blind hole deeper than the part is under it says how deep it can go", () => {
+    const b = block();
+    const r = buildDocument(design(b, onSide(b, "left", { depth: 75 })));
+    expect(r.ok).toBe(false);
+    expect(r.issues[0]!.message).toBe(
+      "The part is only 60 mm deep under Hole 1. Use 60 mm or less, or 0 to go all the way through.",
+    );
+  });
+
+  it("a threaded hole in a side face removes exactly the thread's space", { timeout: 60_000 }, () => {
+    const b = block();
+    const h = onSide(b, "front", { x: 30, y: 15, thread: "M6", fit: 0.3, diameter: THREADS.M6.diameter });
+    const r = designed(design(b, h));
+    expect(rel(72000 - r.measurements.volume, threadVolume(threadProfile("M6", 0.3, false), 40))).toBeLessThan(2e-5);
+  });
+
+  it("a hole on a face that doesn't follow a box stays where it was picked; copies of it are drilled too", () => {
+    const b = block();
+    const fixed = onSide(b, "front", { x: 10, depth: 5 }, false);
+    const moved = block({ x: 5 });
+    // The box moved 5 right but the hole didn't: 5 + 10 = 15 from the box's new left edge.
+    expect(holeAxis(currentFace(design(moved, fixed), fixed.face!), fixed.x, fixed.y).point[0]).toBe(-20);
+    const doc = design(b, fixed);
+    doc.features.push({ ...newPattern(doc, fixed.id), kind: "grid", count: 3, spacing: 15, rows: 1 });
+    const r = designed(doc);
+    expect(rel(r.measurements.volume, 72000 - 3 * cyl(6, 5))).toBeLessThan(1e-9);
+  });
+
+  it("saves and opens with its face", () => {
+    const b = block();
+    const doc = design(b, onSide(b, "back", { depth: 4 }));
+    const back = parseProject(serializeProject(doc, { name: "Studio 3D", version: "test" }));
+    expect(back.ok && back.document).toEqual(doc);
+  });
+});

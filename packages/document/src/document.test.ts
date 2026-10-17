@@ -28,6 +28,12 @@ import {
   moveFeature,
   movableAxes,
   newSketch,
+  boxSideFace,
+  boxSideOf,
+  canFollow,
+  holeCentre,
+  measuredFrom,
+  type HoleFace,
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
@@ -364,5 +370,55 @@ describe("moving a step", () => {
     const hol = newHollow(doc);
     expect(moveFeature(hol, [1, 1, 1])).toBe(hol);
     expect(movableAxes(hol)).toEqual([]);
+  });
+});
+
+describe("holes on a face", () => {
+  const b: BoxFeature = { ...DEFAULT_BOX, id: "b", name: "Box", mode: "add", x: 0, y: 0, z: 0, wall: 0 };
+  const face = (over: Partial<HoleFace> = {}): HoleFace => ({
+    ...boxSideFace(b, "front"),
+    on: { shape: "b", side: "front" },
+    across: "left",
+    up: "bottom",
+    ...over,
+  });
+
+  it("switching which edge a hole is measured from keeps it in the same place", () => {
+    const f = face();
+    const at = holeCentre(f, 12, 7);
+    for (const across of ["left", "right", "centre"] as const)
+      for (const up of ["bottom", "top", "centre"] as const) {
+        const { x, y } = measuredFrom(f, at, across, up);
+        expect(holeCentre({ ...f, across, up }, x, y)).toEqual(at);
+      }
+    expect(measuredFrom(f, at, "right", "top")).toEqual({ x: 48, y: 23 });
+    expect(measuredFrom(f, at, "centre", "centre")).toEqual({ x: -18, y: -8 });
+  });
+
+  it("which side of a box a face is, from the way it points", () => {
+    expect(boxSideOf([0, -1, 0])).toBe("front");
+    expect(boxSideOf([0, 0, 1])).toBe("top");
+    expect(boxSideOf([0.6, 0.8, 0])).toBeNull();
+    expect(canFollow({ ...b, wall: 2 }, "top")).toBe(false); // an open container's top is its rim
+    expect(canFollow({ ...b, wall: 2 }, "front")).toBe(true);
+    expect(canFollow({ ...b, mode: "cut" }, "front")).toBe(false);
+  });
+
+  it("the document check names the edge a hole runs off, using the box's current size", () => {
+    const h: HoleFeature = { ...newHole({ units: "mm", features: [b] }), x: 58, y: 10, diameter: 6, face: face() };
+    const issues = validateDocument({ units: "mm", features: [b, h] });
+    expect(issues).toEqual([
+      expect.objectContaining({ field: "x", message: expect.stringContaining("right edge of the front face") }),
+    ]);
+    // Widen the box and the same hole fits.
+    expect(validateDocument({ units: "mm", features: [{ ...b, width: 80 }, h] })).toEqual([]);
+  });
+
+  it("a hole's face with a bad shape is a damaged file", () => {
+    const h = { ...newHole({ units: "mm", features: [b] }), face: { ...face(), across: "sideways" } };
+    const text = serializeProject({ units: "mm", features: [b, h as HoleFeature] }, { name: "t", version: "t" });
+    const r = parseProject(text);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toContain("doesn't say which edges it is measured from");
   });
 });

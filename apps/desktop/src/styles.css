@@ -1765,3 +1765,38 @@ input:focus-visible {
   display: grid;
   gap: 6px;
 }
+
+/* Where a hole is drilled from, with links to put it on another face. */
+.hole-on {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.hole-on-actions {
+  display: inline-flex;
+  gap: 10px;
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.link:hover {
+  text-decoration: underline;
+}
+
+.face-position {
+  display: grid;
+  gap: 6px;
+}

@@ -7,7 +7,8 @@ export default defineConfig({
   // Rebuilds run the real geometry engine in WebAssembly beside software-rendered WebGL. With two test workers
   // and thread builds taking seconds, 5 s is too tight for "the model is up to date", so allow 15 s.
   expect: { timeout: 15_000 },
-  use: { baseURL: "http://localhost:4173", viewport: { width: 1280, height: 800 } },
+  // A failed test keeps a trace (in the HTML report on CI), so a rare failure can be looked at afterwards.
+  use: { baseURL: "http://localhost:4173", viewport: { width: 1280, height: 800 }, trace: "retain-on-failure" },
   projects: [
     {
       name: "chromium",

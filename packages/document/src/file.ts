@@ -83,6 +83,7 @@ const knownKeys = (type: Feature["type"]) =>
     ...(type === "fillet" || type === "chamfer" ? ["edges"] : []),
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles", "revolve"] : []),
+    ...(type === "hole" ? ["face"] : []),
     ...NUMBERS[type],
   ]);
 const DEFAULT_NAMES: Record<Feature["type"], string> = {
@@ -152,6 +153,30 @@ function sketchProblem(f: Record<string, unknown>): string | null {
             : false;
     if (!ok) return `has an outline it can't read ("${String(p.kind)}")`;
   }
+  return null;
+}
+
+const SIDES = ["top", "bottom", "front", "back", "left", "right"];
+
+/** What's wrong with a stored hole face, or null when it can be read. */
+function holeFaceProblem(face: unknown): string | null {
+  if (!isObject(face)) return "has an unreadable face";
+  const plane = face.plane;
+  if (!isObject(plane) || !isNumbers(plane.origin, 3) || !isNumbers(plane.xDir, 3) || !isNumbers(plane.normal, 3))
+    return "has an unreadable face position";
+  if (typeof face.surface !== "string") return "doesn't say which face it is on";
+  if (![face.width, face.height].every((n) => typeof n === "number" && Number.isFinite(n) && n > 0))
+    return "has an unreadable face size";
+  if (
+    !["left", "right", "centre"].includes(face.across as string) ||
+    !["bottom", "top", "centre"].includes(face.up as string)
+  )
+    return "doesn't say which edges it is measured from";
+  if (
+    face.on !== undefined &&
+    (!isObject(face.on) || typeof face.on.shape !== "string" || !SIDES.includes(face.on.side as string))
+  )
+    return "doesn't say which shape's face it follows";
   return null;
 }
 
@@ -280,6 +305,14 @@ export function parseProject(text: string): ParseResult {
         ok: false,
         error: `This project file is damaged: ${where} doesn't say whether it adds or cuts.`,
       };
+    }
+    if (type === "hole" && f.face !== undefined) {
+      const problem = holeFaceProblem(f.face);
+      if (problem)
+        return {
+          ok: false,
+          error: `This project file is damaged: ${where} ${problem}.`,
+        };
     }
     if (type === "sketch") {
       const problem = sketchProblem(f);
