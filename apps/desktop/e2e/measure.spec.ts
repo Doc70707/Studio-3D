@@ -61,10 +61,16 @@ test("the status bar says where the pointer is on the part", async ({ page }) =>
 
 test("the standard views frame the part, not the whole plate, so its sizes are readable", async ({ page }) => {
   const canvas = (await page.getByTestId("viewport-canvas").boundingBox())!;
-  const boxes = await Promise.all((await labels(page).all()).map((l) => l.boundingBox()));
-  const xs = boxes.flatMap((b) => [b!.x, b!.x + b!.width]);
-  // The labels spread over a good part of the screen rather than bunching on a tiny part.
-  expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(canvas.width * 0.2);
+  await expect(labels(page)).toHaveCount(3);
+  const measure = async () => Promise.all((await labels(page).all()).map((l) => l.boundingBox()));
+  const spread = async () => {
+    const xs = (await measure()).flatMap((b) => [b!.x, b!.x + b!.width]);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  // The labels spread over a good part of the screen rather than bunching on a tiny part. Under load the first
+  // frames can still be framing the part, so wait for the view to settle rather than reading it once.
+  await expect.poll(spread).toBeGreaterThan(canvas.width * 0.2);
+  const boxes = await measure();
   // And none of them cover each other.
   for (let i = 0; i < boxes.length; i++)
     for (let j = i + 1; j < boxes.length; j++) {
