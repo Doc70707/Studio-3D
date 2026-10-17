@@ -36,7 +36,7 @@ test("click a piece to select it, nudge it with the keys, drag its arrow, then r
   await page.mouse.click(m.x, m.y);
   await expect(bar(page)).toContainText("Cylinder 1 · top face");
   await expect(card(page, "Cylinder 1")).toHaveClass(/picked/);
-  await expect(card(page, "Cylinder 1")).toHaveClass(/open/); // its settings are ready to edit
+  await expect(card(page, "Cylinder 1")).toHaveClass(/current/); // its settings are ready to edit
 
   // Arrow keys move it 1 mm, Shift 10 mm; every move is one undo step.
   await page.keyboard.press("ArrowRight");

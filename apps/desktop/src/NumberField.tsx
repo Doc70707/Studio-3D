@@ -6,11 +6,12 @@ export function NumberField(props: {
   label: string;
   /** Accessible name when the visible label alone is ambiguous, e.g. "Hole 1 diameter". */
   name?: string;
+  /** Shown when the pointer rests on the label (and read out with the box), not as text under it. */
   help?: string;
   value: number;
   issue?: Issue;
   onCommit: (v: number) => void;
-  /** Compact fields show no help or message underneath; the caller shows messages instead. */
+  /** Compact fields show no message underneath; the caller shows messages instead. */
   compact?: boolean;
   /** Unit shown after the box; "" for none. */
   unit?: string;
@@ -32,7 +33,9 @@ export function NumberField(props: {
   const severity = typingError ? "error" : props.issue?.severity;
   return (
     <div className={props.compact ? "field compact" : "field"}>
-      <label htmlFor={id}>{props.label}</label>
+      <label htmlFor={id} title={props.help}>
+        {props.label}
+      </label>
       <div className="input-row">
         <input
           id={id}
@@ -40,7 +43,7 @@ export function NumberField(props: {
           value={text}
           aria-label={props.name}
           aria-invalid={severity === "error"}
-          aria-describedby={props.help ? `${id}-help` : undefined}
+          aria-description={props.help}
           onChange={(e) => {
             setText(e.target.value);
             const v = parse(e.target.value);
@@ -59,14 +62,12 @@ export function NumberField(props: {
             {typingError}
           </p>
         )
-      ) : message ? (
-        <p className={`issue ${severity}`} role={severity === "error" ? "alert" : undefined}>
-          {message}
-        </p>
       ) : (
-        <p id={`${id}-help`} className="help">
-          {props.help}
-        </p>
+        message && (
+          <p className={`issue ${severity}`} role={severity === "error" ? "alert" : undefined}>
+            {message}
+          </p>
+        )
       )}
     </div>
   );

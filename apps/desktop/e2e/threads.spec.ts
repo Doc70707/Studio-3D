@@ -61,5 +61,5 @@ test("a cylinder becomes an M8 threaded rod standing on the block", async ({ pag
 
   // Too short for two turns of thread: explained, and the last good version stays.
   await field(page, "Height").fill("2");
-  await expect(page.getByTestId("shape").filter({ hasText: "Cylinder 1" })).toContainText("at least two turns");
+  await expect(page.getByTestId("properties")).toContainText("at least two turns");
 });

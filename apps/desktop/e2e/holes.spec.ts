@@ -9,6 +9,9 @@ const volume = (page: Page) => page.getByTestId("volume");
 const cm3 = (mm3: number) => `${(mm3 / 1000).toFixed(2)} cm³`;
 const cyl = (d: number, h: number) => Math.PI * (d / 2) ** 2 * h;
 const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
+/** A step's line in the list; clicking it shows its properties. */
+const step = (page: Page, name: string) =>
+  page.getByRole("list", { name: "Steps" }).getByRole("button", { name: new RegExp(`^${name}\\b`) });
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -22,7 +25,9 @@ test("adding a hole cuts it through the floor with the real geometry engine", as
   // Default box 60 × 40 × 30 with 2 mm walls; a 5 mm through hole removes a 2 mm-tall disc from the floor.
   await expect(volume(page)).toHaveText(cm3(15552 - cyl(5, 2)));
 
+  await step(page, "Box").click();
   await field(page, "Wall thickness").fill("0");
+  await step(page, "Hole 1").click();
   await field(page, "Hole 1 diameter").fill("10");
   await current(page);
   await expect(volume(page)).toHaveText(cm3(72000 - cyl(10, 30)));
@@ -56,7 +61,7 @@ test("a hole in the empty inside gets a plain warning", async ({ page }) => {
 test("removing a hole puts the material back", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
   await page.getByRole("button", { name: "Add hole" }).click();
-  await expect(page.getByText("Hole 2", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("hole")).toHaveCount(2);
   await page.getByRole("button", { name: "Remove Hole 1" }).click();
   await page.getByRole("button", { name: "Remove Hole 2" }).click();
   await expect(page.getByTestId("hole")).toHaveCount(0);
@@ -115,6 +120,7 @@ test("holes are saved and reopened exactly", async ({ page }) => {
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Open…" }).click();
   await (await chooser).setFiles(path);
+  await step(page, "Hole 1").click();
   await expect(field(page, "Hole 1 diameter")).toHaveValue("3.5");
   await expect(field(page, "Hole 1 left / right position")).toHaveValue("12.25");
   await current(page);

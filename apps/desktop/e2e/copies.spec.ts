@@ -8,6 +8,10 @@ const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometr
 const cm3 = (mm3: number) => `${(mm3 / 1000).toFixed(2)} cm³`;
 const cyl = (d: number, h: number) => Math.PI * (d / 2) ** 2 * h;
 
+/** A step's line in the list; clicking it shows its properties. */
+const step = (page: Page, name: string) =>
+  page.getByRole("list", { name: "Steps" }).getByRole("button", { name: new RegExp(`^${name}\\b`) });
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await current(page);
@@ -26,8 +30,8 @@ test("a hole repeated in a 3 × 2 grid makes six holes, and follows the original
   await current(page);
   await page.getByRole("button", { name: "Pattern", exact: true }).click();
   await current(page);
-  const card = page.getByTestId("copy-step");
-  await expect(card).toContainText("Pattern 1");
+  await expect(page.getByTestId("copy-step")).toContainText("Pattern 1");
+  const card = page.getByTestId("properties");
   await expect(card.getByLabel("Copies")).toHaveValue(/.+/);
   await field(page, "Pattern 1 across").fill("3");
   await field(page, "Pattern 1 spacing").fill("20");
@@ -38,6 +42,7 @@ test("a hole repeated in a 3 × 2 grid makes six holes, and follows the original
   await page.screenshot({ path: `${OUT}pattern.png` });
 
   // Changing the original changes every copy.
+  await step(page, "Hole 1").click();
   await field(page, "Hole 1 diameter").fill("4");
   await current(page);
   await expect(volume(page)).toHaveText(cm3(24000 - 6 * cyl(4, 10)));

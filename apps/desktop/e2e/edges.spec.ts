@@ -17,8 +17,8 @@ test.beforeEach(async ({ page }) => {
 test("round the upright edges of a block, then make them rounder", async ({ page }) => {
   await page.getByRole("button", { name: "Fillet", exact: true }).click();
   await current(page);
-  const card = page.getByTestId("edge-step");
-  await expect(card).toContainText("Fillet 1");
+  await expect(page.getByTestId("edge-step")).toContainText("Fillet 1");
+  const card = page.getByTestId("properties");
   await card.getByLabel("Edges").selectOption("vertical");
   await field(page, "Fillet 1 size").fill("5");
   await current(page);

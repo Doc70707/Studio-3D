@@ -35,6 +35,7 @@ import {
 } from "@studio3d/document";
 import { DesignPanel, SHAPE_ORDER, copySource, placeNew } from "./DesignPanel";
 import { MenuBar, type Menu } from "./MenuBar";
+import { allows, interactionMode } from "./interaction";
 import { SketchEditor, type SketchDraft } from "./SketchEditor";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
@@ -87,6 +88,7 @@ export function App() {
   const [selection, setSelection] = useState<{ id: string; face: number | null } | null>(null);
   /** How far the selected piece has been dragged so far, while its move arrows are held. */
   const [moveBy, setMoveBy] = useState<[number, number, number] | null>(null);
+  const mode = interactionMode({ sketching: !!draft, picking, moving: moveBy !== null });
   const hovered = useRef<string | null>(null);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
@@ -239,10 +241,10 @@ export function App() {
   };
 
   const onHostPointerMove = (e: React.PointerEvent) => {
-    if (!picking) {
+    if (!allows(mode, "pick-face")) {
       const still = !e.buttons && !viewportRef.current?.moving;
       showPointer(still ? (viewportRef.current?.pickPoint(e.clientX, e.clientY) ?? null) : null);
-      const over = still && !draft ? ownerAt(e.clientX, e.clientY) : null;
+      const over = still && allows(mode, "hover") ? ownerAt(e.clientX, e.clientY) : null;
       hoverPiece(over && over.id !== selection?.id ? over.id : null);
       return;
     }
@@ -258,14 +260,14 @@ export function App() {
     pointerDown.current = null;
     if (!down || e.button !== 0 || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return; // a drag orbits
     if (!(e.target instanceof HTMLCanvasElement)) return; // a click on a floating panel, not the part
-    if (!picking) {
+    if (allows(mode, "select")) {
       // A click picks the piece under the pointer; a click on empty space lets go of it.
-      if (draft) return;
       const hit = ownerAt(e.clientX, e.clientY);
       setSelection(hit ? { id: hit.id, face: hit.face } : null);
       hoverPiece(null);
       return;
     }
+    if (!allows(mode, "pick-face")) return;
     const hit = faceAt(e.clientX, e.clientY);
     if (!hit?.outline) return;
     sketchOnFace(hit.outline);
@@ -391,8 +393,10 @@ export function App() {
   const finishSketch = useCallback(() => {
     if (!draft) return;
     const f = draft.feature;
-    if (draft.isNew) project.addFeature(f);
-    else
+    if (draft.isNew) {
+      project.addFeature(f);
+      setSelection({ id: f.id, face: null }); // its settings show in the panel, ready to change
+    } else
       project.updateFeature(f.id, {
         profiles: f.profiles,
         mode: f.mode,
@@ -442,13 +446,14 @@ export function App() {
   // Keyboard: views, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, and Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (draft) return; // the sketch screen handles its own keys
-      if (picking && e.key === "Escape") {
+      if (mode === "pick-face" && e.key === "Escape") {
         stopPicking();
         return;
       }
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      if (mod && !allows(mode, "file-keys")) return; // the sketch screen has its own undo
+      if (!mod && !allows(mode, "view-keys")) return;
       // The app's undo replaces the text box's own undo, so one Ctrl+Z always means one design step.
       if (mod && (key === "y" || (key === "z" && e.shiftKey))) {
         e.preventDefault();
@@ -480,7 +485,7 @@ export function App() {
         e.target instanceof HTMLSelectElement ||
         e.target instanceof HTMLTextAreaElement;
       if (mod || e.altKey || typing) return;
-      if (selection && selected) {
+      if (selection && selected && allows(mode, "edit-keys")) {
         if (e.key === "Escape") {
           setSelection(null);
           return;
@@ -517,7 +522,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [project, draft, picking, stopPicking, selection, selected, doc]);
+  }, [project, mode, stopPicking, selection, selected, doc]);
 
   // Window title and close guard
   // The title is only set once the geometry engine has loaded, so it also tells (and CI checks) that the kernel started.
@@ -681,7 +686,7 @@ export function App() {
   ];
 
   return (
-    <div className={`app${draft ? " sketching" : ""}${picking ? " picking" : ""}`}>
+    <div className={`app${draft ? " sketching" : ""}${picking ? " picking" : ""}`} data-mode={mode}>
       <main
         className="viewport-host"
         ref={hostRef}
@@ -878,7 +883,6 @@ export function App() {
       <DesignPanel
         ref={panelRef}
         doc={doc}
-        holes={project.holes}
         issues={issues}
         measurements={built?.measurements ?? null}
         builtDoc={built?.doc ?? null}

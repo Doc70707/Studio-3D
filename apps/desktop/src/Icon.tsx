@@ -18,15 +18,23 @@ const PATHS = {
   polygon: "M5 18L8 5l11 4-3 9z",
   ruler: "M3 15l12-12 6 6-12 12zM7 11l2 2M10 8l2 2M13 5l2 2",
   hollow: "M4 6h16v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM8 6v10h8V6",
-  face: "M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8",
+  face: "M3 9l7-4 7 4v6l-7 4-7-4zM3 9l7 4 7-4M10 13v6M15 21l1-3 5-5 2 2-5 5z",
   fillet: "M4 20V12a8 8 0 0 1 8-8h8",
   chamfer: "M4 20v-9l7-7h9",
   pattern: "M4 4h5v5H4zM15 4h5v5h-5zM4 15h5v5H4zM15 15h5v5h-5z",
   mirror: "M12 3v18M9 6L4 18h5zM15 6l5 12h-5z",
+  box: "M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8",
+  cylinder: "M5 6a7 2.5 0 1 0 14 0a7 2.5 0 1 0-14 0M5 6v12a7 2.5 0 0 0 14 0V6",
+  tube: "M5 6a7 2.5 0 1 0 14 0a7 2.5 0 1 0-14 0M9 6a3 1 0 1 0 6 0a3 1 0 1 0-6 0M5 6v12a7 2.5 0 0 0 14 0V6",
+  cone: "M12 3L5 18a7 2.5 0 0 0 14 0z",
+  sphere: "M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM4 12a8 3 0 0 0 16 0",
+  hole: "M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
   revolve: "M12 2v20M5 9a7 3 0 0 0 14 0a7 3 0 0 0-10-2.7M9 3.8v2.6l2.6.4M7 12v6l5 2 5-2v-6",
 } as const;
 
-export function Icon({ name }: { name: keyof typeof PATHS }) {
+export type IconName = keyof typeof PATHS;
+
+export function Icon({ name }: { name: IconName }) {
   return (
     <svg className="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
       <path

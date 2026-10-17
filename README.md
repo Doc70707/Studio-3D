@@ -14,6 +14,9 @@ A beginner-first 3D design studio for making functional, dimensionally accurate 
 
 What works today:
 
+- A tidy side panel: one toolbar of icons to add shapes, holes, sketches and edits; the steps of the part, one line
+  each in build order; and the settings of just the step you're working on, with rarely needed ones under More.
+  Help is in tooltips rather than paragraphs, and a step with a problem shows it on its line.
 - A box with width, depth, height and wall thickness (0 = solid block, more = open-top container),
   built as a real solid by the OCCT geometry kernel in a background worker. The 3D view updates as you type.
 - Plain-language errors for impossible values; the last valid box stays on screen and Export is disabled until fixed.
