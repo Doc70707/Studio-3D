@@ -23,6 +23,7 @@ import {
   newHollow,
   newMirror,
   newPattern,
+  newRevolve,
   newShape,
   newSketch,
   validateDocument,
@@ -358,12 +359,20 @@ export function App() {
     });
   }, [built, doc, stopPicking]);
 
+  /** A revolve is drawn on the upright plane through the plate's centre, as half of the part's outline. */
+  const startRevolve = useCallback(() => {
+    stopPicking();
+    setSketchView("2d");
+    setDraft({ feature: newRevolve(doc), isNew: true, face: null, area: [-10, -5, 50, 45] });
+  }, [doc, stopPicking]);
+
   const editSketch = useCallback(
     (id: string) => {
       const f = doc.features.find((x): x is SketchFeature => x.id === id && x.type === "sketch");
       if (!f) return;
       const mesh = meshRef.current;
-      const triangles = f.surface !== "plate" && mesh ? trianglesInPlane(mesh, f.plane) : [];
+      const onPart = f.surface !== "plate" && f.revolve === undefined;
+      const triangles = onPart && mesh ? trianglesInPlane(mesh, f.plane) : [];
       const xs = triangles.map((t) => t[0]);
       const ys = triangles.map((t) => t[1]);
       const face = triangles.length ? { triangles, width: Math.max(...xs), height: Math.max(...ys) } : null;
@@ -373,7 +382,7 @@ export function App() {
         feature: f,
         isNew: false,
         face,
-        area: face ? [0, 0, face.width, face.height] : [-60, -60, 60, 60],
+        area: face ? [0, 0, face.width, face.height] : f.revolve !== undefined ? [-10, -5, 50, 45] : [-60, -60, 60, 60],
       });
     },
     [doc, stopPicking],
@@ -388,6 +397,7 @@ export function App() {
         profiles: f.profiles,
         mode: f.mode,
         depth: f.depth,
+        ...(f.revolve !== undefined && { revolve: f.revolve }),
       });
     setDraft(null);
   }, [draft, project]);
@@ -621,6 +631,7 @@ export function App() {
           reason: "Add a shape first, then pick one of its faces",
         },
         { label: "Sketch on the plate", onSelect: sketchOnPlate },
+        { label: "Revolve (spin an outline)", onSelect: startRevolve },
       ],
     },
     {
@@ -877,6 +888,7 @@ export function App() {
         onRemove={project.removeFeature}
         onSketchOnFace={startPicking}
         onSketchOnPlate={sketchOnPlate}
+        onRevolve={startRevolve}
         onEditSketch={editSketch}
         picking={picking}
         onFocus={setFocusId}

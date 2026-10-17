@@ -89,6 +89,8 @@ export function SketchEditor(props: {
   const { draft, onChange } = props;
   const s = draft.feature;
   const onPlate = s.surface === "plate";
+  /** A revolve: the outlines spin round the drawing's up line (x = 0), which stands on the plate (y = 0). */
+  const spun = s.revolve !== undefined;
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [cam, setCam] = useState<{ cx: number; cy: number; k: number } | null>(null);
@@ -434,9 +436,11 @@ export function SketchEditor(props: {
   });
 
   const errors = hasErrors(props.issues);
-  const across = onPlate ? "Left / right" : "Across";
-  const up = onPlate ? "Front / back" : "Up";
-  const hint = TOOLS.find((t) => t.tool === tool)!.hint;
+  const across = onPlate ? "Left / right" : spun ? "Out from the line" : "Across";
+  const up = onPlate ? "Front / back" : spun ? "Height" : "Up";
+  const hint =
+    (spun && tool !== "select" ? "Draw half of the part's outline, right of the spin line. " : "") +
+    TOOLS.find((t) => t.tool === tool)!.hint;
   const sel = selected !== null ? s.profiles[selected] : undefined;
   const depths = useMemo(() => nestingDepths(s.profiles), [s.profiles]);
   useEffect(() => setOffsetError(null), [selected]);
@@ -530,7 +534,9 @@ export function SketchEditor(props: {
           {cam && (
             <>
               <Grid cam={cam} size={size} />
-              {onPlate ? (
+              {spun ? (
+                <SpinLine toScreen={toScreen} size={size} />
+              ) : onPlate ? (
                 <>
                   <line className="axis x" x1={0} x2={size.w} y1={toScreen([0, 0])[1]} y2={toScreen([0, 0])[1]} />
                   <line className="axis y" y1={0} y2={size.h} x1={toScreen([0, 0])[0]} x2={toScreen([0, 0])[0]} />
@@ -611,7 +617,9 @@ export function SketchEditor(props: {
           <p className="help">
             {onPlate
               ? "Measured from the centre of the build plate."
-              : `Measured from the bottom-left corner of the ${s.surface}.`}
+              : spun
+                ? "Measured out from the spin line and up from the plate."
+                : `Measured from the bottom-left corner of the ${s.surface}.`}
           </p>
         </div>
       )}
@@ -646,7 +654,17 @@ export function SketchEditor(props: {
               Cut in
             </button>
           </div>
-          {!(s.mode === "cut" && s.depth === 0) && (
+          {spun && (
+            <NumberField
+              label="Angle"
+              name="Revolve angle"
+              unit="°"
+              value={s.revolve!}
+              onCommit={(v) => onChange({ ...s, revolve: v })}
+              compact
+            />
+          )}
+          {!spun && !(s.mode === "cut" && s.depth === 0) && (
             <NumberField
               label={s.mode === "add" ? "Height" : "Depth"}
               name={s.mode === "add" ? "Sketch height" : "Sketch depth"}
@@ -655,7 +673,7 @@ export function SketchEditor(props: {
               compact
             />
           )}
-          {s.mode === "cut" && (
+          {!spun && s.mode === "cut" && (
             <label className="check">
               <input
                 type="checkbox"
@@ -745,6 +763,23 @@ function Grid({ cam, size }: { cam: { cx: number; cy: number; k: number }; size:
 }
 
 type ToScreen = (p: Point2) => Point2;
+
+/** A revolve's spin line (x = 0), with the plate's surface (y = 0) under it. */
+function SpinLine({ toScreen, size }: { toScreen: ToScreen; size: { w: number; h: number } }) {
+  const [ox, oy] = toScreen([0, 0]);
+  return (
+    <g className="spin" data-testid="spin-line">
+      <line className="plate-line" x1={0} x2={size.w} y1={oy} y2={oy} />
+      <text className="plate-label" x={size.w - 8} y={oy + 16} textAnchor="end">
+        Plate
+      </text>
+      <line className="spin-line" x1={ox} x2={ox} y1={0} y2={size.h} />
+      <text className="spin-label" x={ox + 6} y={14}>
+        Spin line
+      </text>
+    </g>
+  );
+}
 
 function Face({ face, toScreen }: { face: NonNullable<SketchDraft["face"]>; toScreen: ToScreen }) {
   let d = "";

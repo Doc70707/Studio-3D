@@ -36,6 +36,8 @@ import {
   add3,
   nestingDepths,
   profileArea,
+  profileMoment,
+  yDirOf,
   scale,
   type BoxFeature,
   type Profile,
@@ -263,26 +265,52 @@ function drawProfile(p: Profile): Drawing {
  * area times its length before the outlines are joined.
  */
 export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
+  if (s.revolve !== undefined) return makeRevolveTool(s);
   const cut = s.mode === "cut";
   const extra = cut ? 1 : 0;
   const length = (cut && s.depth === 0 ? partSize + 2 : s.depth) + extra;
   const origin = add3(s.plane.origin, scale(s.plane.normal, extra));
+  return joinOutlines(s, (p) => [
+    drawProfile(p)
+      .sketchOnPlane(new Plane(origin, s.plane.xDir, s.plane.normal))
+      .extrude(cut ? -length : length) as Shape3D,
+    profileArea(p) * length,
+  ]);
+}
+
+/**
+ * Spins a revolve's outlines round the drawing's up line through its (0, 0). Each outline is checked against
+ * its exact volume (Pappus: the angle times its area times how far its centre is from the line).
+ */
+function makeRevolveTool(s: SketchFeature): Tool {
+  const angle = s.revolve!;
+  const plane = new Plane(s.plane.origin, s.plane.xDir, s.plane.normal);
+  return joinOutlines(s, (p) => [
+    drawProfile(p)
+      .sketchOnPlane(plane)
+      .revolve(yDirOf(s.plane), { origin: s.plane.origin, angle }) as Shape3D,
+    ((angle * Math.PI) / 180) * profileMoment(p),
+  ]);
+}
+
+/**
+ * Makes each outline's solid, checks it against the volume it must have, and joins them: outlines on their own
+ * add, one drawn inside another is a hole in it, and an island in a hole adds again.
+ */
+function joinOutlines(s: SketchFeature, make: (p: Profile) => [Shape3D, number]): Tool {
   const depths = nestingDepths(s.profiles);
-  // Outlines on their own add; one drawn inside another is a hole in it; an island in a hole adds again.
   const order = s.profiles.map((p, i) => ({ p, depth: depths[i]! })).sort((a, b) => a.depth - b.depth);
+  const wrong = () => new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
   let tool: Shape3D | null = null;
   let most = 0;
   let biggest = 0;
   let holes = 0;
   try {
     for (const { p, depth } of order) {
-      const solid = drawProfile(p)
-        .sketchOnPlane(new Plane(origin, s.plane.xDir, s.plane.normal))
-        .extrude(cut ? -length : length) as Shape3D;
-      const want = profileArea(p) * length;
+      const [solid, want] = make(p);
       if (Math.abs(measureVolume(solid) - want) > 1e-6 * want) {
         solid.delete();
-        throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
+        throw wrong();
       }
       if (depth % 2 === 0) {
         most += want;
@@ -305,7 +333,7 @@ export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
   // Joined outlines can't be bigger than all of them together, or smaller than the biggest minus every hole.
   if (v > most * (1 + 1e-6) || v < (biggest - holes) * (1 - 1e-6) - 1e-9) {
     tool.delete();
-    throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
+    throw wrong();
   }
   if (v <= 1e-9 * most) {
     tool.delete();

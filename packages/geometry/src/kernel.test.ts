@@ -38,6 +38,7 @@ import {
   newEdgeStep,
   newPattern,
   newMirror,
+  newRevolve,
   type EdgeFeature,
   type OpenSide,
   PLATE_PLANE,
@@ -1086,6 +1087,78 @@ describe("patterns and mirrors", () => {
     const h = hole({ id: "h" });
     expect(fails(doc(plate(), h, grid("h", { count: 1 })))).toContain("at least 2");
     expect(fails(doc(plate(), grid("h"), h))).toContain("Choose an earlier");
+  });
+});
+
+describe("revolves", () => {
+  const doc = (...features: Feature[]): ProjectDocument => ({ units: "mm", features });
+  const spin = (profiles: Profile[], over: Partial<SketchFeature> = {}): SketchFeature => ({
+    ...newRevolve(doc()),
+    id: "spin",
+    profiles,
+    ...over,
+  });
+  const rect = (x: number, y: number, width: number, height: number): Profile => ({
+    kind: "rectangle",
+    x,
+    y,
+    width,
+    height,
+  });
+
+  it("a rectangle off the spin line makes a tube standing on the plate", () => {
+    const r = designed(doc(spin([rect(5, 0, 10, 20)])));
+    expect(rel(r.measurements.volume, Math.PI * (15 ** 2 - 5 ** 2) * 20)).toBeLessThan(1e-6);
+    r.measurements.min.forEach((v, i) => expect(v).toBeCloseTo([-15, -15, 0][i]!, 6));
+    r.measurements.max.forEach((v, i) => expect(v).toBeCloseTo([15, 15, 20][i]!, 6));
+  });
+
+  it("a triangle touching the line makes a cone; half a turn makes half of it", () => {
+    const tri: Profile = { kind: "polygon", points: [[0, 0], [10, 0], [0, 20]] };
+    expect(rel(designed(doc(spin([tri]))).measurements.volume, (Math.PI * 100 * 20) / 3)).toBeLessThan(1e-6);
+    const half = designed(doc(spin([tri], { revolve: 180 })));
+    expect(rel(half.measurements.volume, (Math.PI * 100 * 20) / 6)).toBeLessThan(1e-6);
+    // Half a turn, anticlockwise seen from above, from the right-hand side round the back.
+    expect(half.measurements.min[1]).toBeCloseTo(0, 6);
+    expect(half.measurements.max[1]).toBeCloseTo(10, 6);
+  });
+
+  it("a circle spun round makes a ring (torus); a notched outline makes a V-groove pulley", () => {
+    const ring = designed(doc(spin([{ kind: "circle", x: 20, y: 5, diameter: 10 }])));
+    expect(rel(ring.measurements.volume, 2 * Math.PI ** 2 * 20 * 25)).toBeLessThan(1e-6);
+    const notched: Profile = {
+      kind: "polygon",
+      points: [[0, 0], [20, 0], [20, 3], [17, 5], [20, 7], [20, 10], [0, 10]],
+    };
+    // The disc less the notch (a triangle of area 6 whose centre is 19 mm from the line) spun round.
+    const pulley = designed(doc(spin([notched])));
+    expect(rel(pulley.measurements.volume, Math.PI * 400 * 10 - 2 * Math.PI * 6 * 19)).toBeLessThan(1e-6);
+  });
+
+  it("a revolve can cut: a cone-shaped countersink in a block", () => {
+    const block = shape("box", { width: 40, depth: 40, height: 20, wall: 0, id: "block" });
+    const sink: Profile = { kind: "polygon", points: [[0, 10], [10, 20], [10, 21], [0, 21]] };
+    const r = designed(doc(block, spin([sink], { mode: "cut" })));
+    // The cone from radius 0 at z = 10 to radius 10 at z = 20 is removed; the 1 mm above the block cuts nothing.
+    expect(rel(r.measurements.volume, 32000 - (Math.PI * 100 * 10) / 3)).toBeLessThan(1e-6);
+  });
+
+  it("an outline crossing the spin line, or a bad angle, is explained before building", () => {
+    const r = buildDocument(doc(spin([rect(-5, 0, 10, 20)])));
+    expect(r.ok).toBe(false);
+    expect(r.ok ? "" : r.issues[0]!.message).toContain("crosses the spin line");
+    const zero = buildDocument(doc(spin([rect(5, 0, 10, 20)], { revolve: 0 })));
+    expect(zero.ok ? "" : zero.issues[0]!.message).toContain("from 1° to 360°");
+  });
+
+  it("a revolve can be moved, patterned and mirrored like any sketch", () => {
+    const peg = spin([rect(0, 0, 3, 10)], { plane: { ...newRevolve(doc()).plane, origin: [10, 0, 0] } });
+    const p = { ...newPattern(doc(), "spin"), count: 3, spacing: 10 };
+    expect(rel(designed(doc(peg, p)).measurements.volume, 3 * cyl(6, 10))).toBeLessThan(1e-6);
+    const m = { ...newMirror(doc(), "spin"), axis: "x" as const, at: 0 };
+    const r = designed(doc(peg, m));
+    expect(rel(r.measurements.volume, 2 * cyl(6, 10))).toBeLessThan(1e-6);
+    expect(r.measurements.min[0]).toBeCloseTo(-13, 6);
   });
 });
 

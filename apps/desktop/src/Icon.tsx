@@ -23,6 +23,7 @@ const PATHS = {
   chamfer: "M4 20v-9l7-7h9",
   pattern: "M4 4h5v5H4zM15 4h5v5h-5zM4 15h5v5H4zM15 15h5v5h-5z",
   mirror: "M12 3v18M9 6L4 18h5zM15 6l5 12h-5z",
+  revolve: "M12 2v20M5 9a7 3 0 0 0 14 0a7 3 0 0 0-10-2.7M9 3.8v2.6l2.6.4M7 12v6l5 2 5-2v-6",
 } as const;
 
 export function Icon({ name }: { name: keyof typeof PATHS }) {

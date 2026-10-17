@@ -57,6 +57,8 @@ export function sketchViewpoint(d: SketchDraft): {
   const { plane } = d.feature;
   const target = toWorld(plane, [(x0 + x1) / 2, (y0 + y1) / 2]);
   const yDir = cross(plane.normal, plane.xDir);
-  const direction = normalize(add3(add3(scale(plane.normal, 2), scale(yDir, -0.8)), scale(plane.xDir, 0.5)));
+  // A revolve stands up from the plate, so it is looked at from a little above rather than below.
+  const lift = d.feature.revolve !== undefined ? 0.8 : -0.8;
+  const direction = normalize(add3(add3(scale(plane.normal, 2), scale(yDir, lift)), scale(plane.xDir, 0.5)));
   return { target, direction, size: Math.max(x1 - x0, y1 - y0) * 1.4 };
 }

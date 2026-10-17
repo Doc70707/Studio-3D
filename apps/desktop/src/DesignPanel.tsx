@@ -71,6 +71,7 @@ interface Props {
   onRemove: (id: string) => void;
   onSketchOnFace: () => void;
   onSketchOnPlate: () => void;
+  onRevolve: () => void;
   onEditSketch: (id: string) => void;
   /** Waiting for a face to be clicked. */
   picking: boolean;
@@ -210,11 +211,16 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
               <Icon name="pencil" />
               Draw on the plate
             </button>
+            <button type="button" className="add" onClick={sketching.onRevolve}>
+              <Icon name="revolve" />
+              Revolve
+            </button>
           </div>
           {sketches.length === 0 && (
             <p className="help">
               Draw rectangles, circles or any outline on a flat face, then push it out (for a bracket or a boss) or cut
-              it in (for a pocket, slot or hole).
+              it in (for a pocket, slot or hole). Revolve spins half an outline round a line, for round parts like
+              knobs, vases and pulleys.
             </p>
           )}
           {sketches.map((sk) => (
@@ -644,8 +650,14 @@ function SketchCard(props: {
   for (const p of sk.profiles) counts.set(PROFILE_LABELS[p.kind], (counts.get(PROFILE_LABELS[p.kind]) ?? 0) + 1);
   const what =
     [...counts].map(([label, n]) => `${n} ${label.toLowerCase()}${n === 1 ? "" : "s"}`).join(", ") || "empty";
-  const how =
-    sk.mode === "add" ? `out ${mm(sk.depth)} mm` : sk.depth === 0 ? "cut through" : `cut ${mm(sk.depth)} mm deep`;
+  const spun = sk.revolve !== undefined;
+  const how = spun
+    ? `${sk.mode === "add" ? "spun" : "cut"} ${mm(sk.revolve!)}°`
+    : sk.mode === "add"
+      ? `out ${mm(sk.depth)} mm`
+      : sk.depth === 0
+        ? "cut through"
+        : `cut ${mm(sk.depth)} mm deep`;
   const canCut = !props.first && sk.surface !== "plate";
   return (
     <div
@@ -700,7 +712,18 @@ function SketchCard(props: {
             Cut in
           </button>
         </div>
-        {!(sk.mode === "cut" && sk.depth === 0) && (
+        {spun && (
+          <NumberField
+            label="Angle"
+            name={`${sk.name} angle`}
+            unit="°"
+            help="How far round the outline spins: 360° for a whole round part."
+            value={sk.revolve!}
+            issue={issues.find((i) => i.field === "revolve")}
+            onCommit={(v) => onChange({ revolve: v })}
+          />
+        )}
+        {!spun && !(sk.mode === "cut" && sk.depth === 0) && (
           <NumberField
             label={sk.mode === "add" ? "Height" : "Depth"}
             name={`${sk.name} ${sk.mode === "add" ? "height" : "depth"}`}
@@ -714,7 +737,7 @@ function SketchCard(props: {
             onCommit={(v) => onChange({ depth: v })}
           />
         )}
-        {sk.mode === "cut" && (
+        {!spun && sk.mode === "cut" && (
           <label className="check">
             <input
               type="checkbox"
@@ -726,7 +749,7 @@ function SketchCard(props: {
         )}
       </div>
       {issues
-        .filter((i) => i.field !== "depth" || (sk.mode === "cut" && sk.depth === 0))
+        .filter((i) => (i.field !== "depth" || (sk.mode === "cut" && sk.depth === 0)) && i.field !== "revolve")
         .map((i) => (
           <p key={i.message} className={`issue ${i.severity}`} role={i.severity === "error" ? "alert" : undefined}>
             {i.message}

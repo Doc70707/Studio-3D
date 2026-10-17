@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   PLATE_PLANE,
+  SPIN_PLANE,
+  isRevolve,
+  newRevolve,
+  profileMoment,
   axesFor,
   faceLabel,
   faceOutline,
@@ -330,5 +334,52 @@ describe("holes in sketches", () => {
     const a: Profile = { kind: "rectangle", x: 0, y: 0, width: 20, height: 20 };
     const b: Profile = { kind: "rectangle", x: 10, y: 10, width: 20, height: 20 };
     expect(nestingDepths([a, b])).toEqual([0, 0]);
+  });
+});
+
+describe("revolves", () => {
+  const spin = (profiles: Profile[], over: Partial<SketchFeature> = {}): SketchFeature => ({
+    ...newRevolve(newDocument()),
+    profiles,
+    ...over,
+  });
+
+  it("start on the upright plane, facing the front with up in the drawing up in the world, spun all the way", () => {
+    const s = newRevolve(newDocument());
+    expect([s.name, s.surface, s.revolve, s.plane]).toEqual(["Revolve 1", "upright plane", 360, SPIN_PLANE]);
+    expect(toWorld(s.plane, [10, 20])).toEqual([10, 0, 20]);
+    expect(isRevolve(s)).toBe(true);
+    expect(isRevolve(sketch([rect]))).toBe(false);
+  });
+
+  it("an outline's distance from the spin line is its area times its centre's x, whichever way it is drawn", () => {
+    expect(profileMoment({ kind: "rectangle", x: 5, y: 0, width: 10, height: 2 })).toBe(200);
+    expect(profileMoment({ kind: "circle", x: 20, y: 0, diameter: 2 })).toBeCloseTo(20 * Math.PI, 12);
+    const tri: Profile = { kind: "polygon", points: [[0, 0], [6, 0], [0, 3]] };
+    const back: Profile = { kind: "polygon", points: [[0, 3], [6, 0], [0, 0]] };
+    expect(profileMoment(tri)).toBeCloseTo(9 * 2, 12); // area 9, centre at x = 2
+    expect(profileMoment(back)).toBeCloseTo(18, 12);
+  });
+
+  it("outlines must stay on one side of the spin line, and the angle from 1° to 360°", () => {
+    expect(hasErrors(validateSketch(spin([{ kind: "rectangle", x: 0, y: 0, width: 5, height: 5 }])))).toBe(false);
+    const crossing = validateSketch(spin([{ kind: "circle", x: 2, y: 5, diameter: 6 }]));
+    expect(crossing.map((i) => [i.field, i.message])).toEqual([
+      ["profiles.0.x", "Circle 1 crosses the spin line. Keep it on the right of the line (touching is fine)."],
+    ]);
+    for (const revolve of [0, 361, Number.NaN])
+      expect(validateSketch(spin([rect], { revolve })).map((i) => i.field)).toEqual(["revolve"]);
+    // The depth isn't used by a revolve, so it isn't checked.
+    expect(hasErrors(validateSketch(spin([rect], { depth: -4 })))).toBe(false);
+  });
+
+  it("save and open with the angle; a damaged angle is reported", () => {
+    const doc = { units: "mm" as const, features: [spin([rect], { revolve: 90 })] };
+    const r = parseProject(serializeProject(doc, app));
+    expect(r.ok && r.document).toEqual(doc);
+    const file = JSON.parse(serializeProject(doc, app));
+    file.document.features[0].revolve = "lots";
+    const bad = parseProject(JSON.stringify(file));
+    expect(bad.ok ? "" : bad.error).toContain("unreadable spin angle");
   });
 });

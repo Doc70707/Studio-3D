@@ -46,6 +46,9 @@ What works today:
 - Patterns and mirrors: repeat a shape, hole or sketch in a row, a grid or round a circle (bolt holes, feet, ribs),
   or mirror it to the other side. Copies follow the original when it changes, and go with it if it's removed.
   Hole grids, bolt circles and mirrored bosses are checked against their exact volumes.
+- Revolve: draw half of a round part's outline beside a spin line and spin it round, all the way or part way, like a
+  part on a lathe (knobs, vases, pulleys, spacers). It can add material or cut it (a countersink, a round groove).
+  Tubes, cones, rings and grooved pulleys are checked against their exact volumes (Pappus's theorem).
 - Threads: give a cylinder or a hole a real ISO metric thread (M3 to M20, coarse pitch). A cylinder that adds becomes a
   threaded rod; a hole, or a cylinder that cuts, becomes a threaded hole a bolt screws into. A fit clearance (0.3 mm by
   default) leaves room so printed threads turn, and a test screws a printed-size bolt into its hole to check they

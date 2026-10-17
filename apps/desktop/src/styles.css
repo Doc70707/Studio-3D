@@ -1331,6 +1331,23 @@ input:focus-visible {
   stroke: #5cb85c;
 }
 
+.sketch-canvas .spin .spin-line {
+  stroke: var(--warning);
+  stroke-width: 1.5;
+  stroke-dasharray: 10 4 2 4;
+}
+
+.sketch-canvas .spin .plate-line {
+  stroke: rgba(108, 180, 255, 0.7);
+  stroke-width: 1.5;
+}
+
+.sketch-canvas .spin text {
+  font-size: 11px;
+  fill: var(--muted);
+  pointer-events: none;
+}
+
 .sketch-canvas .face path {
   fill: rgba(108, 180, 255, 0.22);
 }

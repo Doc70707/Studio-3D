@@ -82,7 +82,7 @@ const knownKeys = (type: Feature["type"]) =>
     ...(type === "hollow" ? ["open"] : []),
     ...(type === "fillet" || type === "chamfer" ? ["edges"] : []),
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit"] : []),
-    ...(type === "sketch" ? ["plane", "surface", "profiles"] : []),
+    ...(type === "sketch" ? ["plane", "surface", "profiles", "revolve"] : []),
     ...NUMBERS[type],
   ]);
 const DEFAULT_NAMES: Record<Feature["type"], string> = {
@@ -138,6 +138,8 @@ function sketchProblem(f: Record<string, unknown>): string | null {
     return "has an unreadable sketch position";
   if (typeof f.surface !== "string") return "doesn't say what it was drawn on";
   if (!Array.isArray(f.profiles)) return "has no outlines";
+  if (f.revolve !== undefined && (typeof f.revolve !== "number" || !Number.isFinite(f.revolve)))
+    return "has an unreadable spin angle";
   for (const p of f.profiles) {
     if (!isObject(p)) return "has an unreadable outline";
     const ok =

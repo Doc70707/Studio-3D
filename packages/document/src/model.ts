@@ -1,7 +1,17 @@
 // The project document. Parameters are the source of truth; geometry is always rebuilt from them.
 // All lengths are stored in millimetres. Positions are measured from the centre of the build plate:
 // x to the right (red axis), y to the back (green axis), z up from the plate.
-import { profileArea, selfIntersects, type Profile, type SketchPlane, PROFILE_LABELS, dot, length3 } from "./sketch";
+import {
+  profileArea,
+  profileBounds,
+  selfIntersects,
+  type Profile,
+  type SketchPlane,
+  PROFILE_LABELS,
+  SPIN_PLANE,
+  dot,
+  length3,
+} from "./sketch";
 import {
   MAX_FIT,
   THREADS,
@@ -104,6 +114,11 @@ export interface SketchFeature {
   surface: string;
   profiles: Profile[];
   depth: number;
+  /**
+   * Set for a revolve: the outlines spin this many degrees (up to 360) round the drawing's up line through
+   * its (0, 0), like a part on a lathe, instead of being pushed straight. The depth is not used then.
+   */
+  revolve?: number;
 }
 
 /** Which side of the part a hollow leaves open. "none" keeps it closed, with an empty space inside. */
@@ -339,6 +354,16 @@ export function newSketch(
     depth,
   };
 }
+
+/** Where a revolve is drawn, in plain words. */
+export const SPIN_SURFACE = "upright plane";
+
+/** A new revolve: outlines drawn on the upright plane through the plate's centre, spun all the way round. */
+export function newRevolve(doc: ProjectDocument, mode: Mode = "add"): SketchFeature {
+  return { ...newSketch(doc, SPIN_PLANE, SPIN_SURFACE, [], mode, 10), name: nextName(doc, "Revolve"), revolve: 360 };
+}
+
+export const isRevolve = (f: Feature): f is SketchFeature => f.type === "sketch" && f.revolve !== undefined;
 
 /** A new hollow: 2 mm walls, open at the top. */
 export function newHollow(doc: ProjectDocument): HollowFeature {
@@ -795,6 +820,20 @@ export function validateSketch(s: SketchFeature): Issue[] {
     }
   });
 
+  if (s.revolve !== undefined) {
+    if (!finite(s.revolve)) add("revolve", "The angle needs to be a number.");
+    else if (s.revolve < 1 || s.revolve > 360) add("revolve", "The angle must be from 1° to 360°.");
+    // An outline crossing the spin line would sweep through itself.
+    s.profiles.forEach((p, i) => {
+      if (profileBounds(p)[0] < -1e-9)
+        add(
+          profileField(i, p.kind === "polygon" ? "points" : "x"),
+          `${PROFILE_LABELS[p.kind]} ${i + 1} crosses the spin line. ` +
+            "Keep it on the right of the line (touching is fine).",
+        );
+    });
+    return issues;
+  }
   if (!finite(s.depth)) add("depth", "Depth needs to be a number.");
   else if (s.mode === "add") {
     if (s.depth < LIMITS.minSize) add("depth", `Height must be at least ${fmt(LIMITS.minSize)}.`);
