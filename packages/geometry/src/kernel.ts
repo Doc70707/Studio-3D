@@ -2,12 +2,13 @@
 // Everything else uses the plain data it returns, so the kernel can be swapped later.
 import {
   setOC,
+  getOC,
+  asPnt,
   draw,
   drawCircle,
   drawRectangle,
   makeBaseBox,
   makeCylinder,
-  makeCompound,
   makeSphere,
   makeVertex,
   measureArea,
@@ -16,6 +17,7 @@ import {
   Plane,
   type Drawing,
   type Edge,
+  type Face,
   type Shape3D,
 } from "replicad";
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
@@ -801,11 +803,8 @@ const ON_SURFACE = 1e-3;
  */
 export function faceOwners(mesh: MeshData, pieces: Piece[]): string[] {
   const surfaces = pieces.map((p) => {
-    const faces = p.shape.faces;
-    const shell = makeCompound(faces);
-    faces.forEach((f) => f.delete());
     const [lo, hi] = p.shape.boundingBox.bounds;
-    return { id: p.id, modifier: !!p.modifier, shell, lo, hi, query: new DistanceQuery(shell) };
+    return { id: p.id, modifier: !!p.modifier, lo, hi, faces: faceIndex(p.shape) };
   });
   const steps = surfaces.filter((s) => !s.modifier);
   const modifiers = surfaces.filter((s) => s.modifier);
@@ -832,8 +831,8 @@ export function faceOwners(mesh: MeshData, pieces: Piece[]): string[] {
       const on = (s: (typeof surfaces)[number]) => {
         const inside = (q: number[]) => q.every((v, k) => v >= s.lo[k]! - 0.1 && v <= s.hi[k]! + 0.1);
         if (!inside(mid)) return false;
-        if (distanceTo(s.query, mid) > MESH.tolerance + ON_SURFACE) return false;
-        return pts.every((q) => distanceTo(s.query, q) <= ON_SURFACE);
+        if (!within(s.faces, mid, MESH.tolerance + ON_SURFACE)) return false;
+        return pts.every((q) => within(s.faces, q, ON_SURFACE));
       };
       // The last shape or sketch whose own surface has the face; failing that, the first hollow, fillet or chamfer
       // after which the face exists (its inside walls, rounded edges or bevels).
@@ -841,20 +840,87 @@ export function faceOwners(mesh: MeshData, pieces: Piece[]): string[] {
       owners.push(owner);
     }
   } finally {
-    surfaces.forEach((s) => {
-      s.query.delete();
-      s.shell.delete();
-    });
+    surfaces.forEach((s) =>
+      s.faces.forEach((x) => {
+        x.query?.delete();
+        x.projector?.delete();
+        x.face.delete();
+      }),
+    );
   }
   return owners;
 }
 
-function distanceTo(query: DistanceQuery, at: [number, number, number]): number {
-  const v = makeVertex(at);
+/**
+ * A solid's faces, each with its bounding box, for asking how far a point is from the solid's surface. Only the faces
+ * whose boxes reach the point are measured. Flat and simple round faces are measured exactly. Free-form faces (a
+ * thread's tooth) are measured against their surface with a projector set up once per face, which is far quicker
+ * than a full shape-to-shape distance each time; the exact distance is still used when the point doesn't project
+ * inside the face's surface patch.
+ */
+interface IndexedFace {
+  lo: number[];
+  hi: number[];
+  face: Face;
+  query: DistanceQuery | null;
+  projector: OcProjector | null | undefined;
+}
+
+type OcProjector = {
+  Perform(p: unknown): void;
+  NbPoints(): number;
+  LowerDistance(): number;
+  delete(): void;
+};
+
+const FREE_FORM = new Set(["BSPLINE_SURFACE", "BEZIER_SURFACE", "OFFSET_SURFACE", "OTHER_SURFACE"]);
+
+function faceIndex(shape: Shape3D): IndexedFace[] {
+  return shape.faces.map((face) => {
+    const [lo, hi] = face.boundingBox.bounds;
+    return { lo, hi, face, query: null, projector: FREE_FORM.has(face.geomType) ? undefined : null };
+  });
+}
+
+function projectorFor(f: IndexedFace): OcProjector | null {
+  if (f.projector !== undefined) return f.projector;
+  const oc = getOC();
+  const surface = oc.BRep_Tool.Surface(f.face.wrapped);
+  const { uMin, uMax, vMin, vMax } = f.face.UVBounds;
+  const projector = new oc.GeomAPI_ProjectPointOnSurf() as unknown as OcProjector & {
+    Init(...args: unknown[]): void;
+  };
+  projector.Init(surface, uMin, uMax, vMin, vMax, oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad);
+  (surface as unknown as { delete(): void }).delete();
+  f.projector = projector;
+  return projector;
+}
+
+/** Whether a point is within `tolerance` of any of the faces. */
+function within(faces: IndexedFace[], at: [number, number, number], tolerance: number): boolean {
+  const pad = tolerance + 1e-6;
+  let v: ReturnType<typeof makeVertex> | null = null;
+  let p: { delete(): void } | null = null;
   try {
-    return query.distanceTo(v);
+    for (const f of faces) {
+      if (!at.every((c, k) => c >= f.lo[k]! - pad && c <= f.hi[k]! + pad)) continue;
+      const projector = projectorFor(f);
+      if (projector) {
+        p ??= asPnt(at);
+        projector.Perform(p);
+        if (projector.NbPoints() > 0) {
+          if (projector.LowerDistance() <= tolerance) return true;
+          continue;
+        }
+      }
+      v ??= makeVertex(at);
+      f.query ??= new DistanceQuery(f.face);
+      if (f.query.distanceTo(v) <= tolerance) return true;
+    }
+    return false;
   } finally {
-    v.delete();
+    v?.delete();
+    p?.delete();
   }
 }
 

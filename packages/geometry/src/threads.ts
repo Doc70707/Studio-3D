@@ -25,6 +25,12 @@ const ROOT_OVERLAP = 0.02;
 const cache = new Map<string, Shape3D>();
 const CACHE_SIZE = 12;
 
+/** Forgets every finished thread, so the next one is built from scratch (for timing a cold build). */
+export function clearThreadCache(): void {
+  cache.forEach((shape) => shape.delete());
+  cache.clear();
+}
+
 /**
  * A threaded solid standing on z = 0, `length` tall, centred on the z axis. The caller owns the returned shape.
  */
