@@ -35,6 +35,8 @@ async function drag(page: Page, testId: string, button: "middle" | "right", by: 
   await page.mouse.move(x + by[0], y + by[1], { steps: 5 });
   await page.mouse.up({ button });
   if (shift) await page.keyboard.up("Shift");
+  // The view publishes its camera after drawing the next frame; wait for it so the next read isn't one frame old.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
 test.beforeEach(async ({ page }) => {
