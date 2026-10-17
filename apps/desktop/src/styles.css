@@ -1800,3 +1800,12 @@ button.link:hover {
   display: grid;
   gap: 6px;
 }
+
+/* A threaded hole's depth and drawing, and a plain hole's screw clearance and head recess. */
+.tapped,
+.screw-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 0 0 14px;
+}

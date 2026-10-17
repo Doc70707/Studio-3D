@@ -3,6 +3,9 @@ import {
   currentFace,
   holeCentre,
   holeDiameter,
+  headOf,
+  holeKindLabel,
+  type HoleFeature,
   isCopyStep,
   isEdgeStep,
   scale,
@@ -15,6 +18,11 @@ import type { Dimension, Vec3 } from "@studio3d/viewport";
 
 const fmt = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
 const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
+/** The width line across a hole's mouth: the head recess when there is one, else what kind of hole it is. */
+const mouth = (h: HoleFeature) => {
+  const head = headOf(h);
+  return head ? `${head.kind} Ø${fmt(head.diameter)}` : holeKindLabel(h);
+};
 
 /**
  * For a shape: its own width, depth and height, and how far its left and front sides are from the part's.
@@ -36,7 +44,7 @@ export function featureDimensions(f: Feature, part: { min: Vec3; max: Vec3 }, do
     const [u, v] = holeCentre(face, f.x, f.y);
     const at = (p: [number, number]) => toWorld(face.plane, p);
     const off = (n: number) => scale(face.plane.normal, n);
-    dim(at([u - r, v]), at([u + r, v]), off(gap * 0.5), f.thread ? `${f.thread} thread` : `Ø${fmt(f.diameter)}`);
+    dim(at([u - r, v]), at([u + r, v]), off(gap * 0.5), mouth(f));
     const edgeU = face.across === "left" ? 0 : face.across === "right" ? face.width : face.width / 2;
     const edgeV = face.up === "bottom" ? 0 : face.up === "top" ? face.height : face.height / 2;
     if (!near(u, edgeU)) dim(at([edgeU, v]), at([u, v]), off(0.01), fmt(Math.abs(u - edgeU)));
@@ -46,7 +54,7 @@ export function featureDimensions(f: Feature, part: { min: Vec3; max: Vec3 }, do
   if (f.type === "hole") {
     const top = part.max[2];
     const r = holeDiameter(f) / 2;
-    const label = f.thread ? `${f.thread} thread` : `Ø${fmt(f.diameter)}`;
+    const label = mouth(f);
     dim([f.x - r, f.y, top], [f.x + r, f.y, top], [0, 0, gap * 0.5], label);
     if (!near(f.x, px0)) dim([px0, f.y, top], [f.x, f.y, top], [0, 0, 0.01], fmt(f.x - px0));
     if (!near(f.y, py0)) dim([f.x, py0, top], [f.x, f.y, top], [0, 0, 0.01], fmt(f.y - py0));

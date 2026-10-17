@@ -55,7 +55,7 @@ import {
   type BoxSide,
 } from "@studio3d/document";
 import { checkBinaryStl } from "./stl-check";
-import { measureVolume } from "replicad";
+import { makeBaseBox, measureVolume } from "replicad";
 
 const require = createRequire(import.meta.url);
 const OUT = new URL("../../../test-output/", import.meta.url).pathname;
@@ -1329,5 +1329,100 @@ describe("holes on any flat face, measured from its edges", () => {
     const doc = design(b, onSide(b, "back", { depth: 4 }));
     const back = parseProject(serializeProject(doc, { name: "Studio 3D", version: "test" }));
     expect(back.ok && back.document).toEqual(doc);
+  });
+});
+
+describe("clearance, tapped, counterbored and countersunk holes", { timeout: 120_000 }, () => {
+  const block = () => box({ id: "blk", wall: 0 }); // 60 x 40 x 30, 72000 mm³
+  const frustum = (D: number, d: number, h: number) =>
+    (Math.PI * h * ((D / 2) ** 2 + (D / 2) * (d / 2) + (d / 2) ** 2)) / 3;
+
+  it("an M5 normal clearance hole is ISO 273's 5.5 mm, whatever diameter was typed", () => {
+    const h = hole({ diameter: 3, clearance: { screw: "M5", series: "medium" } });
+    const r = designed(design(block(), h));
+    expect(rel(r.measurements.volume, 72000 - cyl(5.5, 30))).toBeLessThan(1e-9);
+  });
+
+  it("a counterbore for an M5 cap screw adds a 9.5 mm step 5 mm deep", async () => {
+    const h = hole({
+      clearance: { screw: "M5", series: "medium" },
+      head: { kind: "counterbore", diameter: 9.5, depth: 5 },
+    });
+    const r = designed(design(block(), h));
+    expect(rel(r.measurements.volume, 72000 - cyl(5.5, 25) - cyl(9.5, 5))).toBeLessThan(1e-7);
+    expect(maxHoleVolume(h, 30)).toBeCloseTo(cyl(5.5, 25) + cyl(9.5, 5), 6);
+    expect(checkBinaryStl(await exportStl(r.shape)).watertight).toBe(true);
+  });
+
+  it("a 90° countersink for an M6 flat head is a cone from 13.44 mm at the face down to the hole", () => {
+    const h = hole({
+      depth: 12,
+      clearance: { screw: "M6", series: "medium" },
+      head: { kind: "countersink", diameter: 13.44 },
+    });
+    const sink = (13.44 - 6.6) / 2; // 45° each side: as deep as it is wide on each side
+    const r = designed(design(block(), h));
+    expect(rel(r.measurements.volume, 72000 - cyl(6.6, 12 - sink) - frustum(13.44, 6.6, sink))).toBeLessThan(1e-7);
+  });
+
+  it("a countersink on a side face opens out at that face, not the far side", () => {
+    const b = block();
+    const h: HoleFeature = {
+      ...hole({ diameter: 6, head: { kind: "countersink", diameter: 12 } }),
+      x: 30,
+      y: 15,
+      face: { ...boxSideFace(b, "front"), on: { shape: b.id, side: "front" }, across: "left", up: "bottom" },
+    };
+    const r = designed(design(b, h));
+    expect(rel(r.measurements.volume, 72000 - cyl(6, 37) - frustum(12, 6, 3))).toBeLessThan(1e-7);
+    // The 1 mm slice behind the front face has the wide end of the cone in it.
+    const slice = makeBaseBox(60, 1, 30).translate([0, -19.5, 0]);
+    const kept = measureVolume(r.shape.intersect(slice));
+    expect(kept).toBeCloseTo(1800 - frustum(12, 10, 1), 6);
+  });
+
+  it("a simplified M6 tapped hole is the 5 mm tap drill; no thread is built", () => {
+    const h = hole({ depth: 10, thread: "M6", fit: 0.3, diameter: 6, simplified: true });
+    const r = designed(design(block(), h));
+    expect(rel(r.measurements.volume, 72000 - cyl(5, 10))).toBeLessThan(1e-9);
+  });
+
+  it("an M6 thread 8 mm deep at the top of a 15 mm hole; the hole carries on at the thread's root", () => {
+    const h = hole({ depth: 15, thread: "M6", fit: 0.3, diameter: 6, threadDepth: 8 });
+    const t = threadProfile("M6", 0.3, false);
+    const r = designed(design(block(), h));
+    expect(rel(72000 - r.measurements.volume, threadVolume(t, 8) + Math.PI * t.minor ** 2 * 7)).toBeLessThan(2e-5);
+    // The thread is at the top: a 1 mm slice under the top face has thread grooves cut wider than the root.
+    const top = measureVolume(r.shape.intersect(makeBaseBox(60, 40, 1).translate([0, 0, 29])));
+    expect(2400 - top).toBeGreaterThan(Math.PI * t.minor ** 2 * 1.01);
+  });
+
+  it.each(["1/4-20 UNC", "#10-32 UNF", "M10x1.25"] as const)(
+    "a %s threaded hole has its exact thread volume",
+    (size) => {
+      const h = hole({ depth: 10, thread: size, fit: 0.3, diameter: THREADS[size].diameter });
+      const r = designed(design(block(), h));
+      expect(rel(72000 - r.measurements.volume, threadVolume(threadProfile(size, 0.3, false), 10))).toBeLessThan(2e-5);
+    },
+  );
+
+  it("a counterbore as deep as the part, or a thread deeper than it, is refused with the depth there is", () => {
+    const deep = buildDocument(
+      design(block(), hole({ diameter: 5, head: { kind: "counterbore", diameter: 9, depth: 30 } })),
+    );
+    expect(!deep.ok && deep.issues[0]!.message).toBe(
+      "The counterbore on Hole 1 reaches 30 mm deep, but the part is only 30 mm deep there. " +
+        "Make the counterbore smaller.",
+    );
+    const thread = buildDocument(design(block(), hole({ thread: "M6", diameter: 6, threadDepth: 40 })));
+    expect(!thread.ok && thread.issues[0]).toMatchObject({ field: "threadDepth" });
+    expect(!thread.ok && thread.issues[0]!.message).toContain("only 30 mm deep under Hole 1");
+  });
+
+  it("a counterbored hole can be patterned", () => {
+    const doc = design(block(), hole({ x: -15, diameter: 4, head: { kind: "counterbore", diameter: 8, depth: 3 } }));
+    doc.features.push({ ...newPattern(doc, doc.features[1]!.id), kind: "grid", count: 3, spacing: 15, rows: 1 });
+    const r = designed(doc);
+    expect(rel(r.measurements.volume, 72000 - 3 * (cyl(4, 27) + cyl(8, 3)))).toBeLessThan(1e-7);
   });
 });

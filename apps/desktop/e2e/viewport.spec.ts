@@ -6,6 +6,9 @@ const cameraPos = async (page: Page) =>
 const distance = (p: number[]) => Math.hypot(p[0] ?? 0, p[1] ?? 0, p[2] ?? 0);
 const cameraTarget = async (page: Page) =>
   ((await host(page).getAttribute("data-camera-target")) ?? "").split(",").map(Number);
+/** The view publishes its camera after drawing the next frame; wait for it so a read isn't one frame old. */
+const settled = (page: Page) =>
+  page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 /** How far the camera is from the point it orbits around. */
 const orbitRadius = async (page: Page) => {
   const [p, t] = [await cameraPos(page), await cameraTarget(page)];
@@ -67,6 +70,9 @@ test("keyboard shortcuts change the view", async ({ page }) => {
 });
 
 test("dragging orbits the camera", async ({ page }) => {
+  // The view frames the part when it is first built; start once that has happened.
+  await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
+  await settled(page);
   const before = await cameraPos(page);
   const radius = await orbitRadius(page);
   const box = (await page.getByTestId("viewport-canvas").boundingBox())!;
@@ -74,6 +80,7 @@ test("dragging orbits the camera", async ({ page }) => {
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 200, box.y + box.height / 2 + 50, { steps: 10 });
   await page.mouse.up();
+  await settled(page);
   await expect(host(page)).toHaveAttribute("data-camera-view", "custom");
   const after = await cameraPos(page);
   expect(after).not.toEqual(before);
@@ -112,10 +119,12 @@ async function dragWith(page: Page, button: "middle" | "right", shift = false) {
   await page.mouse.move(x + 150, y + 40, { steps: 10 });
   await page.mouse.up({ button });
   if (shift) await page.keyboard.up("Shift");
+  await settled(page);
 }
 
 test("wheel-drag pans like Civil 3D: the view slides without turning", async ({ page }) => {
   await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
+  await settled(page);
   const [pos, target, radius] = [await cameraPos(page), await cameraTarget(page), await orbitRadius(page)];
   await dragWith(page, "middle");
   const [pos2, target2] = [await cameraPos(page), await cameraTarget(page)];
@@ -127,6 +136,7 @@ test("wheel-drag pans like Civil 3D: the view slides without turning", async ({ 
 
 test("Shift + wheel-drag orbits around the same point", async ({ page }) => {
   await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
+  await settled(page);
   const [pos, target, radius] = [await cameraPos(page), await cameraTarget(page), await orbitRadius(page)];
   await dragWith(page, "middle", true);
   await expect(host(page)).toHaveAttribute("data-camera-view", "custom");
@@ -137,6 +147,7 @@ test("Shift + wheel-drag orbits around the same point", async ({ page }) => {
 
 test("double-clicking the wheel fits everything back on screen", async ({ page }) => {
   await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 30_000 });
+  await settled(page);
   const radius = await orbitRadius(page);
   const box = (await page.getByTestId("viewport-canvas").boundingBox())!;
   const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];

@@ -5,7 +5,22 @@ import {
   OPEN_SIDES,
   THREADS,
   THREAD_SIZES,
+  THREAD_STANDARDS,
   threadLabel,
+  tapDrill,
+  CLEARANCE,
+  CLEARANCE_LABELS,
+  CLEARANCE_SERIES,
+  COUNTERBORE,
+  COUNTERSINK,
+  SCREW_SIZES,
+  boreDiameter,
+  headOf,
+  holeKindLabel,
+  type ClearanceSeries,
+  type HoleHead,
+  type ScrewSize,
+  type ThreadStandard,
   SHAPES,
   SIZE_FIELDS,
   PROFILE_LABELS,
@@ -420,7 +435,8 @@ function stepSummary(f: Feature, doc: ProjectDocument): string {
   switch (f.type) {
     case "hole":
       return [
-        f.thread ?? `Ø${mm(f.diameter)}`,
+        holeKindLabel(f),
+        ...(headOf(f) ? [`${headOf(f)!.kind} Ø${mm(headOf(f)!.diameter)}`] : []),
         f.depth === 0 ? "through" : `${mm(f.depth)} mm deep`,
         ...(f.face ? [f.face.surface] : []),
       ].join(" · ");
@@ -588,7 +604,7 @@ function HoleProps(props: {
         </div>
       )}
       <div className="hole-grid">
-        {!hole.thread && (
+        {!hole.thread && !hole.clearance && (
           <NumberField
             label="Diameter"
             name={`${hole.name} diameter`}
@@ -620,10 +636,198 @@ function HoleProps(props: {
         fit={hole.fit}
         title="Cuts a thread inside the hole that a bolt of this size screws into."
         issues={issues}
-        onChange={onChange}
+        onChange={(p) => onChange(p.thread ? { ...p, clearance: undefined, head: undefined } : p)}
       />
+      {hole.thread ? (
+        <TappedOptions hole={hole} issues={issues} onChange={onChange} />
+      ) : (
+        <ScrewOptions hole={hole} issues={issues} onChange={onChange} />
+      )}
       <Messages issues={issues} />
     </>
+  );
+}
+
+/** A threaded hole: how deep the thread goes, and whether it is modelled or left as the tap drill. */
+function TappedOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (patch: Patch) => void }) {
+  const { hole, onChange } = props;
+  const size = hole.thread!;
+  const whole = hole.threadDepth === undefined;
+  const firstDepth = () => {
+    const turns = 2 * THREADS[size].pitch;
+    return hole.depth > 0 ? Math.max(turns, Math.round(hole.depth / 2)) : 10;
+  };
+  return (
+    <div className="tapped">
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={whole}
+          onChange={(e) => onChange({ threadDepth: e.target.checked ? undefined : firstDepth() })}
+        />
+        Thread the whole hole
+      </label>
+      {!whole && (
+        <NumberField
+          label="Thread depth"
+          name={`${hole.name} thread depth`}
+          help="How far the thread goes in from the face. Below it the hole carries on plain."
+          value={hole.threadDepth!}
+          issue={props.issues.find((i) => i.field === "threadDepth")}
+          onCommit={(v) => onChange({ threadDepth: v })}
+          compact
+        />
+      )}
+      <div className="segmented-small" role="group" aria-label={`${hole.name} how the thread is drawn`}>
+        <button type="button" aria-pressed={!hole.simplified} onClick={() => onChange({ simplified: undefined })}>
+          Modelled thread
+        </button>
+        <button
+          type="button"
+          aria-pressed={!!hole.simplified}
+          title="A plain hole the tap drill size, to tap after printing or for a thread-forming screw. Builds faster."
+          onClick={() => onChange({ simplified: true })}
+        >
+          Simplified
+        </button>
+      </div>
+      {hole.simplified && (
+        <p className="props-note">
+          Drawn as the {mm(tapDrill(size))} mm tap drill for {threadLabel(size)}; the thread isn't modelled.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const HEAD_LABELS = { counterbore: "Counterbore", countersink: "Countersink (90°)" } as const;
+
+/**
+ * A plain hole: optionally sized as an ISO 273 clearance hole for a metric screw, and optionally with a counterbore
+ * or countersink for the screw's head. A chosen screw fills in the head size for its standard screw.
+ */
+function ScrewOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (patch: Patch) => void }) {
+  const { hole, onChange } = props;
+  const issueFor = (field: string) => props.issues.find((i) => i.field === field);
+  const screw = hole.clearance?.screw;
+  const headFor = (kind: HoleHead["kind"], s: ScrewSize | undefined = screw): HoleHead => {
+    const bore = s ? CLEARANCE[s][hole.clearance?.series ?? "medium"] : hole.diameter;
+    if (kind === "counterbore")
+      return s
+        ? { kind, ...COUNTERBORE[s] }
+        : { kind, diameter: Math.round(bore * 2 * 2) / 2, depth: Math.round(bore * 2) / 2 };
+    return { kind, diameter: s ? COUNTERSINK[s] : Math.round(bore * 2 * 2) / 2 };
+  };
+  const head = hole.head;
+  return (
+    <div className="screw-options">
+      <div className="hole-grid">
+        <div className="field compact">
+          <label htmlFor={`${hole.id}-screw`} title="Sizes the hole for a metric screw to pass through (ISO 273).">
+            Clearance for
+          </label>
+          <div className="input-row select-row">
+            <select
+              id={`${hole.id}-screw`}
+              aria-label={`${hole.name} clearance for screw`}
+              value={screw ?? ""}
+              aria-invalid={issueFor("clearance") ? true : undefined}
+              onChange={(e) => {
+                const s = e.target.value as ScrewSize | "";
+                if (!s) return onChange({ clearance: undefined });
+                const series = hole.clearance?.series ?? "medium";
+                onChange({
+                  clearance: { screw: s, series },
+                  diameter: CLEARANCE[s][series],
+                  ...(head && { head: headFor(head.kind, s) }),
+                });
+              }}
+            >
+              <option value="">No screw (type a size)</option>
+              {SCREW_SIZES.map((s) => (
+                <option key={s} value={s}>
+                  {s} screw
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {screw && (
+          <div className="field compact">
+            <label htmlFor={`${hole.id}-series`}>Fit</label>
+            <div className="input-row select-row">
+              <select
+                id={`${hole.id}-series`}
+                aria-label={`${hole.name} clearance fit`}
+                value={hole.clearance!.series}
+                onChange={(e) => {
+                  const series = e.target.value as ClearanceSeries;
+                  onChange({ clearance: { screw, series }, diameter: CLEARANCE[screw][series] });
+                }}
+              >
+                {CLEARANCE_SERIES.map((x) => (
+                  <option key={x} value={x}>
+                    {CLEARANCE_LABELS[x]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+      {screw && (
+        <p className="props-note" data-testid="clearance-size">
+          {mm(boreDiameter(hole))} mm across, the ISO 273 {hole.clearance!.series} size for an {screw} screw.
+        </p>
+      )}
+      <div className="field compact">
+        <label htmlFor={`${hole.id}-head`}>Screw head</label>
+        <div className="input-row select-row">
+          <select
+            id={`${hole.id}-head`}
+            aria-label={`${hole.name} screw head`}
+            value={head?.kind ?? ""}
+            onChange={(e) => {
+              const kind = e.target.value as HoleHead["kind"] | "";
+              onChange({ head: kind ? headFor(kind) : undefined });
+            }}
+          >
+            <option value="">Flat (no recess)</option>
+            <option value="counterbore">{HEAD_LABELS.counterbore}</option>
+            <option value="countersink">{HEAD_LABELS.countersink}</option>
+          </select>
+        </div>
+      </div>
+      {head && (
+        <div className="hole-grid">
+          <NumberField
+            label={head.kind === "counterbore" ? "Counterbore Ø" : "Countersink Ø"}
+            name={`${hole.name} ${head.kind} diameter`}
+            value={head.diameter}
+            issue={issueFor("headDiameter")}
+            onCommit={(v) => onChange({ head: { ...head, diameter: v } })}
+            compact
+          />
+          {head.kind === "counterbore" && (
+            <NumberField
+              label="Counterbore depth"
+              name={`${hole.name} counterbore depth`}
+              value={head.depth}
+              issue={issueFor("headDepth")}
+              onCommit={(v) => onChange({ head: { ...head, depth: v } })}
+              compact
+            />
+          )}
+        </div>
+      )}
+      {head && screw && (
+        <p className="props-note">
+          {head.kind === "counterbore"
+            ? `Starting size for an ISO 4762 ${screw} socket head cap screw, so the head sits flush.`
+            : `Starting size for an ISO 10642 ${screw} countersunk screw, so the head sits flush.`}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -744,10 +948,14 @@ function ThreadPicker(props: {
             }}
           >
             <option value="">None (smooth)</option>
-            {THREAD_SIZES.map((size) => (
-              <option key={size} value={size}>
-                {threadLabel(size)}
-              </option>
+            {THREAD_STANDARDS.map((standard) => (
+              <optgroup key={standard} label={STANDARD_LABELS[standard]}>
+                {THREAD_SIZES.filter((size) => THREADS[size].standard === standard).map((size) => (
+                  <option key={size} value={size}>
+                    {threadLabel(size)}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
@@ -768,6 +976,13 @@ function ThreadPicker(props: {
     </div>
   );
 }
+
+const STANDARD_LABELS: Record<ThreadStandard, string> = {
+  "ISO coarse": "Metric (ISO coarse)",
+  "ISO fine": "Metric fine",
+  UNC: "Inch coarse (UNC)",
+  UNF: "Inch fine (UNF)",
+};
 
 /** A sketch's settings; the drawing itself is changed on the sketch screen (Edit). */
 function SketchProps(props: {

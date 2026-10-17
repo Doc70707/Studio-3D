@@ -52,7 +52,8 @@ What works today:
 - Revolve: draw half of a round part's outline beside a spin line and spin it round, all the way or part way, like a
   part on a lathe (knobs, vases, pulleys, spacers). It can add material or cut it (a countersink, a round groove).
   Tubes, cones, rings and grooved pulleys are checked against their exact volumes (Pappus's theorem).
-- Threads: give a cylinder or a hole a real ISO metric thread (M3 to M20, coarse pitch). A cylinder that adds becomes a
+- Threads: give a cylinder or a hole a real thread: ISO metric coarse (M3 to M20), the ISO fine pitches two sources
+  agree on, and inch UNC and UNF (#4 to 1/2"). A cylinder that adds becomes a
   threaded rod; a hole, or a cylinder that cuts, becomes a threaded hole a bolt screws into. A fit clearance (0.3 mm by
   default) leaves room so printed threads turn, and a test screws a printed-size bolt into its hole to check they
   never touch. Every thread's volume is checked against the exact ISO maths.
@@ -81,6 +82,10 @@ What works today:
   placed by distances from its left or right edge and its bottom or top edge (or the middle). Switching which edge a
   distance is measured from keeps the hole where it is. On a side of a box the hole follows the box when it is
   resized or moved. A hole that would run off its face names the edge; nothing is moved to make it fit.
+- Screw holes: a clearance hole for an M3 to M20 screw (ISO 273 close, normal or loose), with a counterbore for a
+  socket head cap screw or a 90° countersink for a flat head screw, pre-sized for the screw and editable. A threaded
+  hole can be threaded part way down, and can be simplified to its tap drill instead of modelling the thread. Every
+  size comes from a published table; the sources are listed in `packages/document/src/threads.ts`.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

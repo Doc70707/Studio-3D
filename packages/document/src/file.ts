@@ -2,7 +2,7 @@
 // Rules: never silently drop data we don't understand, never guess at a newer format,
 // and explain every rejection in plain language.
 import { EDGE_SETS, OPEN_SIDES, SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
-import { isThreadSize } from "./threads";
+import { CLEARANCE_SERIES, isScrewSize, isThreadSize } from "./threads";
 
 export const FILE_FORMAT = "studio3d-project";
 export const FILE_FORMAT_VERSION = 2;
@@ -83,7 +83,7 @@ const knownKeys = (type: Feature["type"]) =>
     ...(type === "fillet" || type === "chamfer" ? ["edges"] : []),
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles", "revolve"] : []),
-    ...(type === "hole" ? ["face"] : []),
+    ...(type === "hole" ? ["face", "threadDepth", "simplified", "clearance", "head"] : []),
     ...NUMBERS[type],
   ]);
 const DEFAULT_NAMES: Record<Feature["type"], string> = {
@@ -157,6 +157,30 @@ function sketchProblem(f: Record<string, unknown>): string | null {
 }
 
 const SIDES = ["top", "bottom", "front", "back", "left", "right"];
+
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** What's wrong with a stored hole's thread depth, clearance or head, or null when they can be read. */
+function holeKindProblem(f: Record<string, unknown>): string | null {
+  if (f.threadDepth !== undefined && !finite(f.threadDepth)) return "has a thread depth that isn't a number";
+  if (f.simplified !== undefined && typeof f.simplified !== "boolean") return "doesn't say how its thread is drawn";
+  if (f.clearance !== undefined) {
+    const c = f.clearance as Record<string, unknown> | null;
+    if (typeof c !== "object" || !c || !isScrewSize(c.screw) || !CLEARANCE_SERIES.includes(c.series as never))
+      return "has a clearance hole size this version doesn't know";
+  }
+  if (f.head !== undefined) {
+    const h = f.head as Record<string, unknown> | null;
+    if (
+      typeof h !== "object" ||
+      !h ||
+      !finite(h.diameter) ||
+      !(h.kind === "countersink" || (h.kind === "counterbore" && finite(h.depth)))
+    )
+      return "has a counterbore or countersink that can't be read";
+  }
+  return null;
+}
 
 /** What's wrong with a stored hole face, or null when it can be read. */
 function holeFaceProblem(face: unknown): string | null {
@@ -305,6 +329,14 @@ export function parseProject(text: string): ParseResult {
         ok: false,
         error: `This project file is damaged: ${where} doesn't say whether it adds or cuts.`,
       };
+    }
+    if (type === "hole") {
+      const problem = holeKindProblem(f);
+      if (problem)
+        return {
+          ok: false,
+          error: `This project file is damaged: ${where} ${problem}.`,
+        };
     }
     if (type === "hole" && f.face !== undefined) {
       const problem = holeFaceProblem(f.face);

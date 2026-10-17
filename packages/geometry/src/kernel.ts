@@ -35,6 +35,10 @@ import {
   type Vec3,
   threadOf,
   threadVolume,
+  boreDiameter,
+  headDepth,
+  headOf,
+  modelledThread,
   shapeSize,
   shapeVolume,
   validateDocument,
@@ -173,12 +177,25 @@ export function buildBox(b: BoxFeature): BuildResult {
   }
 }
 
-/** The most material a hole can remove: a full cylinder of its diameter and depth. */
+/**
+ * The most material a hole can remove, worked out from its sizes: its bore all the way down, plus the ring of a
+ * counterbore or the cone of a countersink; for a modelled thread, the thread plus the plain hole below it.
+ */
 export function maxHoleVolume(h: HoleFeature, partHeight: number): number {
   const depth = h.depth === 0 ? partHeight : h.depth;
-  const thread = threadOf(h);
-  if (thread) return threadVolume(thread, depth) * (1 + tolerance(h));
-  return Math.PI * (h.diameter / 2) ** 2 * depth;
+  const thread = modelledThread(h) ? threadOf(h) : null;
+  if (thread) {
+    const threaded = Math.min(h.threadDepth ?? depth, depth);
+    return threadVolume(thread, threaded) * (1 + tolerance(h)) + Math.PI * thread.minor ** 2 * (depth - threaded);
+  }
+  const r = boreDiameter(h) / 2;
+  const bore = Math.PI * r * r * depth;
+  const head = headOf(h);
+  if (!head) return bore;
+  const R = head.diameter / 2;
+  const down = headDepth(h);
+  if (head.kind === "counterbore") return bore + Math.PI * (R * R - r * r) * down;
+  return bore + (Math.PI * down * (R * R + R * r + r * r)) / 3 - Math.PI * r * r * down;
 }
 
 interface Part {
@@ -292,9 +309,7 @@ function makeRevolveTool(s: SketchFeature): Tool {
   const angle = s.revolve!;
   const plane = new Plane(s.plane.origin, s.plane.xDir, s.plane.normal);
   return joinOutlines(s, (p) => [
-    drawProfile(p)
-      .sketchOnPlane(plane)
-      .revolve(yDirOf(s.plane), { origin: s.plane.origin, angle }) as Shape3D,
+    drawProfile(p).sketchOnPlane(plane).revolve(yDirOf(s.plane), { origin: s.plane.origin, angle }) as Shape3D,
     ((angle * Math.PI) / 180) * profileMoment(p),
   ]);
 }
@@ -383,31 +398,49 @@ function faceHole(h: HoleFeature & { face: NonNullable<HoleFeature["face"]> }, d
 /** The solid a hole cuts. */
 function holeTool(h: HoleFeature, doc: ProjectDocument, part: Part): Shape3D {
   const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
-  const thread = threadOf(h);
   const [min, max] = part.shape.boundingBox.bounds;
   if (h.face) {
     // Square into the face: from the bottom of the hole (or past the far side of the part) out to 1 mm above the face.
     const { point, direction, reach } = faceHole({ ...h, face: h.face }, doc, part);
     const deep = h.depth === 0 ? reach + extra : h.depth;
-    const length = deep + extra;
-    const end = add3(point, scale(direction, deep));
-    const out = scale(direction, -1);
-    return thread
-      ? pointAlong(makeThread(thread, Math.ceil(length / 5) * 5), out).translate(end)
-      : makeCylinder(h.diameter / 2, length, end, out);
+    return pointAlong(localHoleTool(h, deep, extra), scale(direction, -1)).translate(point);
   }
-  return topHoleTool(h, min, max, thread);
+  // From the top: down to its depth, or to 1 mm below the part.
+  const deep = h.depth === 0 ? max[2]! - min[2]! + extra : h.depth;
+  return localHoleTool(h, deep, extra).translate([h.x, h.y, max[2]!]);
 }
 
-/** The solid a hole from the top cuts: from 1 mm above the part's top down to its depth (or 1 mm below the part). */
-function topHoleTool(h: HoleFeature, min: number[], max: number[], thread: ReturnType<typeof threadOf>): Shape3D {
-  const extra = 1;
-  const bottom = h.depth === 0 ? min[2]! - extra : max[2]! - h.depth;
-  // A threaded tool is made in 5 mm steps of length (any extra pokes out of the top, cutting nothing), so a thread
-  // already built is reused while the part's height or the hole's depth changes a little.
-  return thread
-    ? makeThread(thread, Math.ceil((max[2]! + extra - bottom) / 5) * 5).translate([h.x, h.y, bottom])
-    : makeCylinder(h.diameter / 2, max[2]! + extra - bottom, [h.x, h.y, bottom], [0, 0, 1]);
+/**
+ * A hole's solid made with its face at z = 0, going `deep` down into -z and `extra` up out of the face.
+ * - A modelled thread runs from its thread depth up; below it the hole carries on at the thread's smallest
+ *   diameter, so there's no step.
+ * - A plain, clearance or simplified threaded hole is a cylinder.
+ * - A counterbore or countersink is the hole's side profile spun round its axis.
+ */
+function localHoleTool(h: HoleFeature, deep: number, extra: number): Shape3D {
+  const thread = modelledThread(h) ? threadOf(h) : null;
+  if (thread) {
+    const threaded = Math.min(h.threadDepth ?? deep, deep);
+    // A threaded tool is made in 5 mm steps of length (any extra pokes out of the face, cutting nothing), so a
+    // thread already built is reused while the part or the hole's depth changes a little.
+    const tool = makeThread(thread, Math.ceil((threaded + extra) / 5) * 5).translate([0, 0, -threaded]);
+    if (threaded >= deep - 1e-9) return tool;
+    const rest = makeCylinder(thread.minor, deep - threaded, [0, 0, -deep], [0, 0, 1]);
+    try {
+      return tool.fuse(rest);
+    } finally {
+      tool.delete();
+      rest.delete();
+    }
+  }
+  const r = boreDiameter(h) / 2;
+  const head = headOf(h);
+  if (!head) return makeCylinder(r, deep + extra, [0, 0, -deep], [0, 0, 1]);
+  const R = head.diameter / 2;
+  const down = headDepth(h);
+  const pen = draw([0, -deep]).lineTo([r, -deep]).lineTo([r, -down]);
+  const side = head.kind === "counterbore" ? pen.lineTo([R, -down]) : pen.lineTo([R, 0]);
+  return side.lineTo([R, extra]).lineTo([0, extra]).close().sketchOnPlane("XZ").revolve([0, 0, 1]) as Shape3D;
 }
 
 /**
@@ -432,6 +465,23 @@ function drill(part: Part, h: HoleFeature, doc: ProjectDocument, issues: Issue[]
     const edge = holeEdgeIssues(h, min, max, height);
     if (hasErrors(edge)) throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
     issues.push(...edge);
+  }
+  // A through hole's thread and head are checked against how deep the part is under it.
+  if (modelledThread(h) && h.threadDepth !== undefined && h.threadDepth > height + 1e-9)
+    throw new ShapeCheckFailed(
+      `The part is only ${fmt(height)} deep under ${h.name}, so the thread can't go deeper than that.`,
+      h.id,
+      "threadDepth",
+    );
+  const head = headOf(h);
+  if (head && headDepth(h) >= height - 1e-9) {
+    const name = head.kind === "counterbore" ? "counterbore" : "countersink";
+    throw new ShapeCheckFailed(
+      `The ${name} on ${h.name} reaches ${fmt(headDepth(h))} deep, but the part is only ${fmt(height)} deep there. ` +
+        `Make the ${name} smaller.`,
+      h.id,
+      head.kind === "counterbore" ? "headDepth" : "headDiameter",
+    );
   }
 
   const tool = holeTool(h, doc, part);
@@ -619,9 +669,7 @@ export function copyStep(
   try {
     if (f.type === "mirror")
       copies.push(
-        f.axis === "x"
-          ? tool.shape.clone().mirror("YZ", [f.at, 0, 0])
-          : tool.shape.clone().mirror("XZ", [0, f.at, 0]),
+        f.axis === "x" ? tool.shape.clone().mirror("YZ", [f.at, 0, 0]) : tool.shape.clone().mirror("XZ", [0, f.at, 0]),
       );
     else
       for (const m of patternMoves(f))
@@ -707,8 +755,7 @@ export function buildDocument(doc: ProjectDocument, keepPieces = false): BuildRe
       else if (f.type === "hollow" || isEdgeStep(f)) {
         next = f.type === "hollow" ? hollow(part!, f) : edgeStep(part!, f);
         keep?.push({ id: f.id, shape: next.shape.clone(), modifier: true });
-      }
-      else if (f.type === "sketch") {
+      } else if (f.type === "sketch") {
         const tool = makeSketchTool(f, partSpan(part));
         if (part) next = applyTool(part, tool, f, issues, keep);
         else {

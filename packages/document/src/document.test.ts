@@ -34,6 +34,17 @@ import {
   holeCentre,
   measuredFrom,
   type HoleFace,
+  THREADS,
+  THREAD_SIZES,
+  threadLabel,
+  tapDrill,
+  SCREW_SIZES,
+  CLEARANCE,
+  COUNTERBORE,
+  COUNTERSINK,
+  boreDiameter,
+  headDepth,
+  type ProjectDocument,
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
@@ -420,5 +431,95 @@ describe("holes on a face", () => {
     const r = parseProject(text);
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toContain("doesn't say which edges it is measured from");
+  });
+});
+
+describe("thread sizes and screw holes", () => {
+  const h = (over: Partial<HoleFeature> = {}): HoleFeature => ({ ...newHole(newDocument()), id: "h", ...over });
+
+  it("inch threads come from their size in inches and threads per inch", () => {
+    expect(THREADS["1/4-20 UNC"]).toMatchObject({ diameter: 6.35, pitch: 1.27, standard: "UNC" });
+    expect(THREADS["#10-32 UNF"].diameter).toBeCloseTo(4.826, 9);
+    expect(THREADS["#10-32 UNF"].pitch).toBeCloseTo(0.79375, 9);
+    expect(threadLabel("M5")).toBe("M5 × 0.8");
+    expect(threadLabel("M10x1.25")).toBe("M10 × 1.25 fine");
+    expect(threadLabel("3/8-16 UNC")).toBe("3/8-16 UNC");
+  });
+
+  it("tap drills: the sourced size where there is one, else major diameter minus pitch", () => {
+    expect(tapDrill("M8")).toBe(6.8);
+    expect(tapDrill("M12x1.5")).toBe(10.5);
+    expect(tapDrill("1/4-20 UNC")).toBeCloseTo(0.201 * 25.4, 9);
+    expect(
+      THREAD_SIZES.every((s) => tapDrill(s) < THREADS[s].diameter && tapDrill(s) > THREADS[s].diameter * 0.7),
+    ).toBe(true);
+  });
+
+  it("clearance and head sizes are larger than the screw, smallest to largest", () => {
+    for (const s of SCREW_SIZES) {
+      const c = CLEARANCE[s];
+      expect(THREADS[s].diameter).toBeLessThan(c.fine);
+      expect(c.fine).toBeLessThan(c.medium);
+      expect(c.medium).toBeLessThan(c.coarse);
+      expect(COUNTERBORE[s].diameter).toBeGreaterThan(c.coarse);
+      expect(COUNTERSINK[s]).toBeGreaterThan(c.coarse);
+    }
+  });
+
+  it("the size a hole cuts follows its kind", () => {
+    expect(boreDiameter(h({ clearance: { screw: "M4", series: "coarse" } }))).toBe(4.8);
+    expect(boreDiameter(h({ thread: "M6", simplified: true }))).toBe(5);
+    const cb = h({
+      clearance: { screw: "M5", series: "medium" },
+      head: { kind: "counterbore", diameter: 9.5, depth: 5 },
+    });
+    expect(holeDiameter(cb)).toBe(9.5);
+    expect(headDepth(h({ diameter: 6, head: { kind: "countersink", diameter: 12 } }))).toBe(3);
+    expect(holeDiameter(h({ thread: "M6", head: { kind: "countersink", diameter: 12 } }))).toBeLessThan(7); // no head
+  });
+
+  it("explains bad thread depths and heads, and never changes them", () => {
+    const msg = (over: Partial<HoleFeature>) =>
+      validateDocument({ units: "mm", features: [box(), h(over)] })[0]?.message;
+    expect(msg({ thread: "M6", depth: 10, threadDepth: 12 })).toBe(
+      "The thread can't go deeper than the hole: use 10 mm or less.",
+    );
+    expect(msg({ thread: "M6", threadDepth: 1 })).toBe(
+      "The M6 × 1 thread needs at least two turns: make it at least 2 mm deep.",
+    );
+    expect(msg({ thread: "M6", clearance: { screw: "M6", series: "fine" } })).toContain(
+      "both threaded and a clearance",
+    );
+    expect(msg({ diameter: 6, head: { kind: "counterbore", diameter: 5, depth: 3 } })).toBe(
+      "The counterbore needs to be wider than the hole (6 mm).",
+    );
+    expect(msg({ diameter: 6, head: { kind: "counterbore", diameter: 10, depth: 0 } })).toBe(
+      "Counterbore depth needs to be more than 0 mm.",
+    );
+    expect(msg({ diameter: 6, depth: 2, head: { kind: "countersink", diameter: 12 } })).toContain(
+      "as deep as the hole",
+    );
+  });
+
+  it("saves and opens every hole kind; damaged ones are reported", () => {
+    const doc: ProjectDocument = {
+      units: "mm",
+      features: [
+        box(),
+        h({ id: "a", thread: "1/4-20 UNC", fit: 0.3, depth: 10, threadDepth: 6, simplified: false }),
+        h({
+          id: "b",
+          clearance: { screw: "M5", series: "medium" },
+          head: { kind: "counterbore", diameter: 9.5, depth: 5 },
+        }),
+        h({ id: "c", clearance: { screw: "M6", series: "fine" }, head: { kind: "countersink", diameter: 13.44 } }),
+      ],
+    };
+    const back = parseProject(serializeProject(doc, app));
+    expect(back.ok && back.document).toEqual(doc);
+    const broken = JSON.parse(serializeProject(doc, app));
+    broken.document.features[2].clearance.screw = "M7";
+    const r = parseProject(JSON.stringify(broken));
+    expect(!r.ok && r.error).toContain("clearance hole size this version doesn't know");
   });
 });

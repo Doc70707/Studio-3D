@@ -14,10 +14,17 @@ import {
 } from "./sketch";
 import { currentFace, faceEdgeIssues, type HoleFace } from "./holeFace";
 import {
+  CLEARANCE,
+  CLEARANCE_SERIES,
   MAX_FIT,
   THREADS,
+  isScrewSize,
   isThreadSize,
+  tapDrill,
+  threadLabel,
   threadProfile,
+  type ClearanceSeries,
+  type ScrewSize,
   threadVolume,
   type ThreadProfile,
   type ThreadSize,
@@ -101,7 +108,26 @@ export interface HoleFeature extends Threadable {
   diameter: number;
   depth: number;
   face?: HoleFace;
+  /** With a thread: how deep the thread goes from the face, in mm. Unset, the whole hole is threaded. */
+  threadDepth?: number;
+  /**
+   * With a thread: the thread is not modelled, and the hole is the tap drill size instead, ready to tap or to take
+   * a thread-forming screw. Much quicker to build, and the file stays small.
+   */
+  simplified?: boolean;
+  /** A clearance hole for a metric screw: the diameter comes from the ISO 273 table for the screw and series. */
+  clearance?: { screw: ScrewSize; series: ClearanceSeries };
+  /** A recess at the face for a screw head. Not used with a thread. */
+  head?: HoleHead;
 }
+
+/**
+ * A counterbore is a wider flat-bottomed step for a socket head cap screw; a countersink is a 90° cone for a
+ * countersunk (flat head) screw, sized by its diameter at the face.
+ */
+export type HoleHead =
+  | { kind: "counterbore"; diameter: number; depth: number }
+  | { kind: "countersink"; diameter: number };
 
 /**
  * Outlines drawn on a flat face of the part (or on the plate) and pushed straight out of the face to add
@@ -290,7 +316,8 @@ export const isShape = (f: Feature): f is ShapeFeature => f.type in SHAPES;
 export const isSketch = (f: Feature): f is SketchFeature => f.type === "sketch";
 export const isHollow = (f: Feature): f is HollowFeature => f.type === "hollow";
 export const isEdgeStep = (f: Feature): f is EdgeFeature => f.type === "fillet" || f.type === "chamfer";
-export const isCopyStep = (f: Feature): f is PatternFeature | MirrorFeature => f.type === "pattern" || f.type === "mirror";
+export const isCopyStep = (f: Feature): f is PatternFeature | MirrorFeature =>
+  f.type === "pattern" || f.type === "mirror";
 /** Steps a pattern or mirror can copy: the ones that add or cut material where they stand. */
 export const isCopyable = (f: Feature): f is ShapeFeature | HoleFeature | SketchFeature =>
   isShape(f) || f.type === "hole" || f.type === "sketch";
@@ -606,8 +633,63 @@ export function validateHole(h: HoleFeature): Issue[] {
   if (h.diameter < HOLE_LIMITS.minDiameter)
     add("diameter", `A hole needs to be at least ${fmt(HOLE_LIMITS.minDiameter)} across.`);
   if (h.depth < 0) add("depth", "Depth can't be negative. Use 0 to go all the way through.");
+  if (issues.length) return issues;
+  if (h.thread !== undefined && h.clearance)
+    return [...issues, holeIssue(h, "clearance", "A hole can't be both threaded and a clearance hole. Pick one.")];
+  if (h.clearance && (!isScrewSize(h.clearance.screw) || !CLEARANCE_SERIES.includes(h.clearance.series)))
+    return [...issues, holeIssue(h, "clearance", "Choose a screw size and fit from the lists.")];
   issues.push(...threadIssues(h, h.depth));
+  if (h.thread !== undefined && h.threadDepth !== undefined && !issues.length) issues.push(...threadDepthIssues(h));
+  if (headOf(h) && !issues.length) issues.push(...headIssues(h));
   return issues;
+}
+
+const holeIssue = (h: HoleFeature, field: string, message: string): Issue => ({
+  severity: "error",
+  featureId: h.id,
+  field,
+  message,
+});
+
+function threadDepthIssues(h: HoleFeature): Issue[] {
+  const d = h.threadDepth!;
+  const pitch = THREADS[h.thread!].pitch;
+  if (!Number.isFinite(d)) return [holeIssue(h, "threadDepth", "Thread depth needs to be a number.")];
+  if (d < 2 * pitch - 1e-9)
+    return [
+      holeIssue(
+        h,
+        "threadDepth",
+        `The ${threadLabel(h.thread!)} thread needs at least two turns: make it at least ${fmt(2 * pitch)} deep.`,
+      ),
+    ];
+  if (h.depth > 0 && d > h.depth + 1e-9)
+    return [holeIssue(h, "threadDepth", `The thread can't go deeper than the hole: use ${fmt(h.depth)} or less.`)];
+  return [];
+}
+
+function headIssues(h: HoleFeature): Issue[] {
+  const head = h.head!;
+  const name = head.kind === "counterbore" ? "Counterbore" : "Countersink";
+  if (!Number.isFinite(head.diameter)) return [holeIssue(h, "headDiameter", `${name} diameter needs to be a number.`)];
+  const bore = boreDiameter(h);
+  if (head.diameter <= bore + 1e-9)
+    return [holeIssue(h, "headDiameter", `The ${name.toLowerCase()} needs to be wider than the hole (${fmt(bore)}).`)];
+  if (head.kind === "counterbore") {
+    if (!Number.isFinite(head.depth)) return [holeIssue(h, "headDepth", "Counterbore depth needs to be a number.")];
+    if (head.depth <= 0) return [holeIssue(h, "headDepth", "Counterbore depth needs to be more than 0 mm.")];
+  }
+  const reach = headDepth(h);
+  if (h.depth > 0 && reach >= h.depth - 1e-9)
+    return [
+      holeIssue(
+        h,
+        head.kind === "counterbore" ? "headDepth" : "headDiameter",
+        `The ${name.toLowerCase()} reaches ${fmt(reach)} deep, as deep as the hole itself. Make the hole deeper ` +
+          `or the ${name.toLowerCase()} smaller.`,
+      ),
+    ];
+  return [];
 }
 
 /**
@@ -742,8 +824,7 @@ export function validateCopyStep(f: PatternFeature | MirrorFeature, doc: Project
   const at = doc.features.findIndex((x) => x.id === f.id);
   const source = doc.features.findIndex((x) => x.id === f.source);
   const src = doc.features[source];
-  if (!src || (at >= 0 && source > at))
-    return add("source", "Choose an earlier shape, hole or sketch to copy.");
+  if (!src || (at >= 0 && source > at)) return add("source", "Choose an earlier shape, hole or sketch to copy.");
   if (!isCopyable(src)) return add("source", `${src.name} can't be copied. Choose a shape, hole or sketch.`);
   const num = (k: string, v: number) => (Number.isFinite(v) ? null : add(k, "This needs to be a number."));
   if (f.type === "mirror") return num("at", f.at) ?? [];
@@ -908,11 +989,46 @@ export function threadOf(f: Feature): ThreadProfile | null {
   return threadProfile(f.thread, f.fit ?? 0, f.type === "cylinder" && f.mode === "add");
 }
 
-/** The widest a hole cuts: its diameter, or for a threaded hole the outside of the thread's grooves. */
-export const holeDiameter = (h: HoleFeature): number => {
-  const t = threadOf(h);
-  return t ? 2 * t.major : h.diameter;
-};
+/** Whether a threaded hole's thread is actually modelled (not simplified to its tap drill). */
+export const modelledThread = (h: HoleFeature) => h.thread !== undefined && !h.simplified;
+
+/**
+ * The diameter of a hole's bore below any head: the ISO 273 clearance for a screw, the tap drill for a simplified
+ * threaded hole, the outside of the grooves for a modelled one, or else the diameter typed in.
+ */
+export function boreDiameter(h: HoleFeature): number {
+  if (h.thread && isThreadSize(h.thread)) {
+    if (h.simplified) return tapDrill(h.thread);
+    const t = threadOf(h);
+    if (t) return 2 * t.major;
+  }
+  if (h.clearance && isScrewSize(h.clearance.screw) && CLEARANCE_SERIES.includes(h.clearance.series))
+    return CLEARANCE[h.clearance.screw][h.clearance.series];
+  return h.diameter;
+}
+
+/** The head recess a hole really has: none with a thread. */
+export const headOf = (h: HoleFeature): HoleHead | undefined => (h.thread ? undefined : h.head);
+
+/** The widest a hole cuts, at its face: the head recess when it has one, else its bore. */
+export const holeDiameter = (h: HoleFeature): number => Math.max(boreDiameter(h), headOf(h)?.diameter ?? 0);
+
+const short = (n: number) => `${Math.round(n * 100) / 100 + 0}`;
+
+/** What kind of hole it is, in a few words: "Ø5 mm", "M5 thread", "M6 tapped, Ø5 mm drill", "M5 clearance Ø5.5 mm". */
+export function holeKindLabel(h: HoleFeature): string {
+  if (h.thread) return h.simplified ? `${h.thread} tapped, Ø${short(boreDiameter(h))} mm drill` : `${h.thread} thread`;
+  if (h.clearance) return `${h.clearance.screw} clearance Ø${short(boreDiameter(h))} mm`;
+  return `Ø${short(h.diameter)} mm`;
+}
+
+/** How deep a head recess reaches below the face: a counterbore's depth, or a 90° countersink's cone. */
+export function headDepth(h: HoleFeature): number {
+  const head = headOf(h);
+  if (!head) return 0;
+  if (head.kind === "counterbore") return head.depth;
+  return Math.max(0, (head.diameter - boreDiameter(h)) / 2);
+}
 
 /** Checks the thread settings of a cylinder or hole; `length` is how long the thread is (0 = through). */
 function threadIssues(f: CylinderFeature | HoleFeature, length: number): Issue[] {
@@ -924,10 +1040,11 @@ function threadIssues(f: CylinderFeature | HoleFeature, length: number): Issue[]
   if (fit < 0) return issue("fit", "Fit clearance can't be negative. Use 0 for the exact ISO size.");
   if (fit > MAX_FIT) return issue("fit", `Fit clearance can be at most ${fmt(MAX_FIT)}.`);
   const pitch = THREADS[f.thread].pitch;
+  if (f.type === "hole" && f.threadDepth !== undefined) return [];
   if (length > 0 && length < 2 * pitch)
     return issue(
       f.type === "hole" ? "depth" : "height",
-      `An ${f.thread} thread needs at least two turns: make it at least ${fmt(2 * pitch)} long.`,
+      `The ${threadLabel(f.thread)} thread needs at least two turns: make it at least ${fmt(2 * pitch)} long.`,
     );
   return [];
 }
