@@ -27,11 +27,21 @@ describe("Print Studio", () => {
     expect(new Set(PRINTERS.map((p) => p.id)).size).toBe(PRINTERS.length);
     for (const p of PRINTERS) {
       expect(p.volume.every((v) => v > 0)).toBe(true);
-      expect(p.source).toMatch(/^https:\/\/[^/]*(bambulab|prusa3d|creality|elegoo)\.com\//);
+      // Only the makers' own sites, never another slicer's printer profiles.
+      expect(p.source).toMatch(
+        /^https:\/\/([^/]*\.)?(bambulab|prusa3d|creality|elegoo|anycubic|sovol3d|qidi3d|flashforge)\.com\//,
+      );
+      if (p.nozzle !== undefined) expect(p.nozzle).toBe(0.4);
+      for (const t of [p.maxNozzleTemp, p.maxBedTemp]) if (t !== undefined) expect(t > 50 && t <= 400).toBe(true);
     }
     expect(printerById(undefined).id).toBe(DEFAULT_PRINTER);
     expect(printerById("no-such-printer").id).toBe(DEFAULT_PRINTER);
     expect(a1mini.volume).toEqual([180, 180, 180]);
+    expect(PRINTERS.length).toBeGreaterThanOrEqual(40);
+    // Spot checks against the makers' pages.
+    expect(printerById("creality-k2-plus").volume).toEqual([350, 350, 350]);
+    expect(printerById("anycubic-kobra3-max").volume).toEqual([420, 420, 500]);
+    expect(printerById("prusa-mk4s")).toMatchObject({ maxNozzleTemp: 290, maxBedTemp: 120 });
   });
 
   it("a closed, single, flat part that fits passes every check", () => {

@@ -15,6 +15,16 @@ import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { defaultSlicer, readSlicerMemory, slicerList, writeSlicerMemory, type SlicerMemory } from "./slicerChoice";
 
 const round = (n: number) => Math.round(n * 10) / 10 + 0;
+/** What the maker publishes about the printer, leaving out anything they don't state. */
+export function printerSummary(p: Printer): string {
+  const parts = [`Build volume ${p.volume.join(" × ")} mm.`];
+  const nozzle = p.nozzle ? `${p.nozzle} mm nozzle` : "Nozzle";
+  if (p.maxNozzleTemp) parts.push(`${nozzle} up to ${p.maxNozzleTemp} °C.`);
+  else if (p.nozzle) parts.push(`${nozzle}.`);
+  if (p.maxBedTemp) parts.push(`Bed up to ${p.maxBedTemp} °C.`);
+  return parts.join(" ");
+}
+
 const MAKERS = [...new Set(PRINTERS.map((p) => p.maker))];
 
 export type PrintState =
@@ -151,7 +161,7 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
           data-testid="build-volume"
           title={`From the maker's specifications: ${printer.source}`}
         >
-          Build volume {printer.volume.join(" × ")} mm.
+          {printerSummary(printer)}
         </p>
 
         <h2 className="panel-title">Before printing</h2>

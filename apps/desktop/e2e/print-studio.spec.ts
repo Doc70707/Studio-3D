@@ -43,7 +43,9 @@ test("changing the printer never touches the design, and undo puts it back", asy
 
   await page.getByLabel("Printer").selectOption("bambu-a1-mini");
   await expect(host(page)).toHaveAttribute("data-plate", "180,180,180");
-  await expect(page.getByTestId("build-volume")).toHaveText("Build volume 180 × 180 × 180 mm.");
+  await expect(page.getByTestId("build-volume")).toHaveText(
+    "Build volume 180 × 180 × 180 mm. 0.4 mm nozzle up to 300 °C. Bed up to 80 °C.",
+  );
   await expect(check(page, "fits")).toHaveAttribute("data-status", "error");
   await expect(check(page, "fits")).toHaveText(
     "Too big for the A1 mini: 200 mm wide, the most is 180 mm. Make it smaller, split it, or pick a bigger printer.",
@@ -52,6 +54,13 @@ test("changing the printer never touches the design, and undo puts it back", asy
   await expect(page.getByTestId("save-status")).toContainText("Unsaved changes"); // the printer is saved with it
   await page.screenshot({ path: `${OUT}print-studio-too-big.png` });
 
+  // A printer the maker gives less detail for shows only what they publish.
+  await page.getByLabel("Printer").selectOption("bambu-x1c");
+  await expect(page.getByTestId("build-volume")).toHaveText("Build volume 256 × 256 × 256 mm.");
+  await page.getByLabel("Printer").selectOption("anycubic-kobra3-max");
+  await expect(host(page)).toHaveAttribute("data-plate", "420,420,500");
+  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Control+z");
   await page.keyboard.press("Control+z");
   await expect(page.getByLabel("Printer")).toHaveValue("bambu-a1");
   await expect(check(page, "fits")).toHaveAttribute("data-status", "ok");
