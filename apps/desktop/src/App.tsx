@@ -1090,10 +1090,25 @@ export function App() {
 
       <header className="topbar" ref={topbarRef}>
         <div className="glass bar">
-          <span className="brand" title={`${APP_INFO.name} ${APP_INFO.version}`}>
-            <span className="logo" aria-hidden="true" />
-            <span className="visually-hidden">{APP_INFO.name}</span>
-          </span>
+          <nav className="segmented workspaces" aria-label="Workspace">
+            <button
+              type="button"
+              aria-pressed={!printing}
+              title="Design: build and change the part"
+              onClick={() => setWorkspace("design")}
+            >
+              Design
+            </button>
+            <button
+              type="button"
+              aria-pressed={printing}
+              title="Prepare to print: check the part on your printer's plate, then export it"
+              onClick={openPrintStudio}
+            >
+              Print Studio
+            </button>
+          </nav>
+          <span className="divider" aria-hidden="true" />
           <MenuBar menus={menus} />
           <span className="divider" aria-hidden="true" />
           <nav className="group" aria-label="Quick access">
@@ -1189,24 +1204,6 @@ export function App() {
         </nav>
 
         {focus && screenModes}
-        <nav className="glass bar segmented workspaces" aria-label="Workspace">
-          <button
-            type="button"
-            aria-pressed={!printing}
-            title="Design: build and change the part"
-            onClick={() => setWorkspace("design")}
-          >
-            Design
-          </button>
-          <button
-            type="button"
-            aria-pressed={printing}
-            title="Prepare to print: check the part on your printer's plate, then export it"
-            onClick={openPrintStudio}
-          >
-            Print Studio
-          </button>
-        </nav>
       </header>
 
       {printing ? (
