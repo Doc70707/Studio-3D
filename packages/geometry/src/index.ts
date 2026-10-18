@@ -4,3 +4,4 @@ export type { Measurements, MeshData } from "./protocol";
 export * from "./faces";
 export { checkBinaryStl, type StlReport } from "./stl-check";
 export { stlTo3mf, type ThreeMfOptions } from "./threemf";
+export { layerBounds, loopArea, sliceStl, type Layer, type SliceResult } from "./slice";

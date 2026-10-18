@@ -7,6 +7,7 @@ import {
   holesOf,
   isCopyStep,
   isShape,
+  DEFAULT_PRINTER,
   moveFeature as moved,
   newDocument,
   parseProject,
@@ -25,7 +26,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.26.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.27.0" };
 
 /** How long after the last edit the unsaved work is backed up. */
 export const BACKUP_DELAY_MS = 2000;
@@ -141,6 +142,11 @@ export function useProject() {
   /** Print Studio's printer. Saved with the project and undoable, but beside the design, so it never rebuilds. */
   const setPrinter = useCallback(
     (printer: string) => edit((d) => ({ ...d, print: { ...d.print, printer } }), null),
+    [edit],
+  );
+  const setLayerHeight = useCallback(
+    (layerHeight: number) =>
+      edit((d) => ({ ...d, print: { printer: d.print?.printer ?? DEFAULT_PRINTER, ...d.print, layerHeight } }), null),
     [edit],
   );
 
@@ -373,6 +379,7 @@ export function useProject() {
       updateReference,
       removeReference,
       setPrinter,
+      setLayerHeight,
       undo,
       redo,
       canUndo: undoable,
@@ -403,6 +410,7 @@ export function useProject() {
       updateReference,
       removeReference,
       setPrinter,
+      setLayerHeight,
       undo,
       redo,
       undoable,

@@ -1,7 +1,8 @@
 // Print Studio's side panel: the printer, the checks run on the exact file that would go to a slicer, and export or
 // opening it in a slicer the user installed. Nothing here changes the design; the printer is saved beside it.
 import { forwardRef, useEffect, useState } from "react";
-import { PRINTERS, type PrintCheck, type Printer } from "@studio3d/document";
+import { LAYER_HEIGHTS, PRINTERS, type PrintCheck, type Printer } from "@studio3d/document";
+import type { Layer } from "@studio3d/geometry";
 import { Icon } from "./Icon";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { defaultSlicer, readSlicerMemory, slicerList, writeSlicerMemory, type SlicerMemory } from "./slicerChoice";
@@ -17,8 +18,24 @@ export type PrintState =
   | { kind: "checked"; checks: PrintCheck[]; size: [number, number, number]; volume: number }
   | { kind: "failed"; reason: string };
 
+/** The sliced layers being previewed, and which one is shown on top. */
+export interface LayerPreview {
+  count: number;
+  index: number;
+  layer: Layer | null;
+  /** Cut lines that didn't close into outlines (a gap in the surface). */
+  openEnds: number;
+}
+
+const mm = (n: number) => `${(Math.round(n * 100) / 100 + 0).toFixed(2)} mm`;
+
 interface Props {
   printer: Printer;
+  layerHeight: number;
+  onLayerHeight: (h: number) => void;
+  layers: LayerPreview | null;
+  onLayerView: (on: boolean) => void;
+  onLayer: (index: number) => void;
   state: PrintState;
   onPrinter: (id: string) => void;
   onExport: (format: MeshFormat) => void;
@@ -114,6 +131,66 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
               </li>
             ))}
           </ul>
+        )}
+
+        <h2 className="panel-title">Layers</h2>
+        <div className="field compact">
+          <label htmlFor="layer-height">Layer height</label>
+          <div className="input-row select-row">
+            <select
+              id="layer-height"
+              value={props.layerHeight}
+              onChange={(e) => props.onLayerHeight(Number(e.target.value))}
+              title="Thinner layers show less of the steps on curves and slopes, and take longer to print"
+            >
+              {(LAYER_HEIGHTS.includes(props.layerHeight) ? LAYER_HEIGHTS : [...LAYER_HEIGHTS, props.layerHeight])
+                .sort((a, b) => a - b)
+                .map((h) => (
+                  <option key={h} value={h}>
+                    {mm(h)}
+                  </option>
+                ))}
+            </select>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="layer-toggle"
+          aria-pressed={!!props.layers}
+          disabled={!props.layers && state.kind !== "checked"}
+          onClick={() => props.onLayerView(!props.layers)}
+          title={state.kind !== "checked" ? "The checks need to finish first" : "Cut the part into its printed layers"}
+        >
+          {props.layers ? "Show the part" : "Preview layers"}
+        </button>
+        {props.layers && (
+          <>
+            <div className="field compact">
+              <label htmlFor="layer">Layer</label>
+              <div className="input-row range-row">
+                <input
+                  id="layer"
+                  type="range"
+                  min={1}
+                  max={props.layers.count}
+                  value={props.layers.index + 1}
+                  onChange={(e) => props.onLayer(Number(e.target.value) - 1)}
+                />
+              </div>
+            </div>
+            {props.layers.layer && (
+              <p className="props-note" data-testid="layer-info">
+                Layer {props.layers.index + 1} of {props.layers.count}: {mm(props.layers.layer.bottom)} to{" "}
+                {mm(props.layers.layer.top)}, {Math.round(props.layers.layer.area * 10) / 10} mm² of material.
+              </p>
+            )}
+            {props.layers.openEnds > 0 && (
+              <p className="issue warning" role="alert">
+                Some layers have outlines that don't close: the surface has a gap there.
+              </p>
+            )}
+            <p className="props-note">Outlines from Studio 3D's own slicer. Walls, infill and G-code come next.</p>
+          </>
         )}
       </div>
 

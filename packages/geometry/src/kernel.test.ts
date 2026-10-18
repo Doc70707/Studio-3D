@@ -56,6 +56,7 @@ import {
 } from "@studio3d/document";
 import { checkBinaryStl } from "./stl-check";
 import { crc32, stlTo3mf } from "./threemf";
+import { layerBounds, loopArea, sliceStl } from "./slice";
 import { crc32 as nodeCrc32 } from "node:zlib";
 import { makeBaseBox, measureVolume } from "replicad";
 
@@ -1519,5 +1520,107 @@ describe("3MF export", () => {
       `${OUT}tray.3mf.expected.json`,
       JSON.stringify({ volume: expectedBoxVolume(b), size: [80, 40, 30], name: "Tray <A&B>", min: [88, 108, 0] }),
     );
+  });
+});
+
+describe("slicing into layers", () => {
+  const stlOf = async (doc: ProjectDocument) => exportStl(designed(doc).shape);
+  const outsides = (loops: Float64Array[]) => loops.filter((l) => loopArea(l) > 0).length;
+  const holes = (loops: Float64Array[]) => loops.filter((l) => loopArea(l) < 0).length;
+
+  it("layers stack from the plate to the top, the first one its own height", () => {
+    const b = layerBounds(0, 1, { layerHeight: 0.2, firstLayerHeight: 0.3 });
+    expect(b.map((l) => [l.bottom, l.top].map((v) => Math.round(v * 1000) / 1000))).toEqual([
+      [0, 0.3],
+      [0.3, 0.5],
+      [0.5, 0.7],
+      [0.7, 0.9],
+      [0.9, 1],
+    ]);
+    expect(layerBounds(0, 30, { layerHeight: 0.2 })).toHaveLength(150);
+    expect(() => layerBounds(0, 1, { layerHeight: 0 })).toThrow("more than 0 mm");
+  });
+
+  it("a solid block is a 60 × 40 rectangle on every layer", async () => {
+    const stl = await exportStl(built(box({ width: 60, depth: 40, height: 30, wall: 0 })).shape);
+    const { layers, openEnds } = sliceStl(stl, { layerHeight: 0.2 });
+    expect(openEnds).toBe(0);
+    expect(layers).toHaveLength(150);
+    for (const l of layers) {
+      expect(l.loops).toHaveLength(1);
+      expect(l.loops[0]!.length).toBe(8); // four corners: the cut lines along each side are merged
+      expect(l.area).toBeCloseTo(2400, 6);
+    }
+  });
+
+  it("an open-top container is a frame of 2 mm walls above its 2 mm floor", async () => {
+    const stl = await exportStl(built(box({ width: 60, depth: 40, height: 30, wall: 2 })).shape);
+    const { layers, openEnds } = sliceStl(stl, { layerHeight: 0.2, firstLayerHeight: 0.3 });
+    expect(openEnds).toBe(0);
+    for (const l of layers) {
+      const floor = l.z < 2;
+      expect([outsides(l.loops), holes(l.loops)]).toEqual(floor ? [1, 0] : [1, 1]);
+      expect(l.area).toBeCloseTo(floor ? 2400 : 2400 - 56 * 36, 6);
+    }
+    // Area times thickness, layer by layer, is the volume that will print. With a 0.3 mm first layer the floor's top
+    // falls mid-layer (1.9 to 2.1 mm), and that layer is a wall layer: the floor prints 1.9 mm thick.
+    const printed = (ls: typeof layers) => ls.reduce((s, l) => s + l.area * (l.top - l.bottom), 0);
+    expect(printed(layers)).toBeCloseTo(2400 * 1.9 + (2400 - 56 * 36) * 28.1, 6);
+    // When layers meet at the floor's top, it is the part's exact volume.
+    const aligned = sliceStl(stl, { layerHeight: 0.2 }).layers;
+    expect(printed(aligned)).toBeCloseTo(15552, 6);
+  });
+
+  it("a cylinder's layers are circles of its area, and a hole through a block is a hole in every layer", async () => {
+    const c = sliceStl(await stlOf(part(shape("cylinder", { diameter: 20, height: 10 }))), { layerHeight: 0.25 });
+    expect(c.openEnds).toBe(0);
+    expect(c.layers).toHaveLength(40);
+    for (const l of c.layers) expect(rel(l.area, Math.PI * 100)).toBeLessThan(0.005);
+
+    const block = box({ width: 30, depth: 30, height: 10, wall: 0 });
+    const holed = sliceStl(await stlOf(design(block, hole({ diameter: 8 }))), { layerHeight: 0.2 });
+    expect(holed.openEnds).toBe(0);
+    for (const l of holed.layers) {
+      expect([outsides(l.loops), holes(l.loops)]).toEqual([1, 1]);
+      expect(rel(l.area, 900 - Math.PI * 16)).toBeLessThan(0.002);
+    }
+  });
+
+  it("a sphere's layers follow the exact circle at each height", async () => {
+    const stl = await stlOf(part(shape("sphere", { diameter: 20 })));
+    const report = checkBinaryStl(stl);
+    const { layers, openEnds } = sliceStl(stl, { layerHeight: 0.2 });
+    expect(openEnds).toBe(0);
+    const centre = (report.min[2] + report.max[2]) / 2;
+    // Away from the poles, where a flat-faced mesh differs most from the true sphere.
+    for (const l of layers.filter((l) => Math.abs(l.z - centre) < 8)) {
+      expect(l.loops).toHaveLength(1);
+      expect(rel(l.area, Math.PI * (100 - (l.z - centre) ** 2))).toBeLessThan(0.02);
+    }
+  });
+
+  it("two separate shapes give two outlines on the layers they share", async () => {
+    const stl = await stlOf(
+      part(shape("box", { width: 10, depth: 10, height: 5 }), shape("cylinder", { diameter: 6, height: 8, x: 20 })),
+    );
+    const { layers } = sliceStl(stl, { layerHeight: 0.5 });
+    expect(layers.map((l) => outsides(l.loops))).toEqual([...Array(10).fill(2), ...Array(6).fill(1)]);
+  });
+
+  it("a surface with a gap is reported, not hidden", async () => {
+    const stl = await exportStl(built(box({ width: 10, depth: 10, height: 10, wall: 0 })).shape);
+    // Drop one side triangle: every layer's outline is broken there.
+    const view = new DataView(stl);
+    const n = view.getUint32(80, true);
+    let side = -1;
+    for (let t = 0; t < n && side < 0; t++) {
+      const zs = [0, 1, 2].map((v) => view.getFloat32(84 + t * 50 + 12 + v * 12 + 8, true));
+      if (Math.max(...zs) - Math.min(...zs) > 5) side = t;
+    }
+    const broken = new Uint8Array(84 + (n - 1) * 50);
+    broken.set(new Uint8Array(stl, 0, 84 + side * 50));
+    broken.set(new Uint8Array(stl, 84 + (side + 1) * 50), 84 + side * 50);
+    new DataView(broken.buffer).setUint32(80, n - 1, true);
+    expect(sliceStl(broken.buffer, { layerHeight: 1 }).openEnds).toBeGreaterThan(0);
   });
 });

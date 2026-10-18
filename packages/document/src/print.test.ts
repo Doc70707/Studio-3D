@@ -77,6 +77,9 @@ describe("Print Studio", () => {
     newer.document.print.layerHeight = 0.2;
     const kept = parseProject(JSON.stringify(newer));
     expect(kept.ok && kept.document.print).toEqual({ printer: "prusa-mk4s", layerHeight: 0.2 });
+    newer.document.print = { printer: "bambu-a1", layerHeight: -1 };
+    const badHeight = parseProject(JSON.stringify(newer));
+    expect(badHeight.ok ? "" : badHeight.error).toContain("layer height");
     newer.document.print = { printer: 7 };
     const broken = parseProject(JSON.stringify(newer));
     expect(broken.ok ? "" : broken.error).toBe(

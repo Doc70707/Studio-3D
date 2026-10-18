@@ -107,6 +107,11 @@ What works today:
   program; nothing of it is built into Studio 3D. Export 3MF saves the same file: in millimetres, named after the
   project, and placed in the middle of the chosen printer's plate. Only the part's shape is sure to go across, so pick
   your printer, filament and settings in the slicer. Tests check the 3MF independently with trimesh.
+- Studio 3D's own slicer, step one (written for Studio 3D, no other slicer's code): Preview layers cuts the checked
+  part into its printed layers at the chosen layer height (0.08 to 0.28 mm, saved beside the design) and shows them
+  on the plate, with a slider to go up and down through them. Each layer's area is checked against the exact cross
+  section of boxes, containers, cylinders, spheres and holed blocks, and a gap in the surface is reported. Walls,
+  infill and G-code come next.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.
@@ -115,7 +120,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: slicing inside Studio 3D, and more than one part on the plate.
+Not yet: toolpaths and G-code from Studio 3D's own slicer, and more than one part on the plate.
 
 ## Getting the Windows app (no setup needed)
 

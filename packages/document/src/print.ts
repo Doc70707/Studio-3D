@@ -111,7 +111,13 @@ export const DEFAULT_PRINTER = "bambu-a1";
 
 export interface PrintSetup {
   printer: string;
+  /** Height of each printed layer, mm. Absent means the default. */
+  layerHeight?: number;
 }
+
+/** Layer heights offered for a 0.4 mm nozzle, the size every listed printer ships with: fine detail to fast drafts. */
+export const LAYER_HEIGHTS = [0.08, 0.12, 0.16, 0.2, 0.24, 0.28];
+export const DEFAULT_LAYER_HEIGHT = 0.2;
 
 export const printerById = (id: string | undefined): Printer =>
   PRINTERS.find((p) => p.id === id) ?? PRINTERS.find((p) => p.id === DEFAULT_PRINTER)!;
@@ -120,6 +126,8 @@ export const printerById = (id: string | undefined): Printer =>
 export function printSetupProblem(p: unknown): string | null {
   if (typeof p !== "object" || !p) return "isn't a print setup";
   if (typeof (p as Record<string, unknown>).printer !== "string") return "doesn't say which printer";
+  const h = (p as Record<string, unknown>).layerHeight;
+  if (h !== undefined && !(typeof h === "number" && h > 0 && h <= 1)) return "has a layer height that isn't 0 to 1 mm";
   return null;
 }
 

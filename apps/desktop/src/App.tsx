@@ -18,7 +18,10 @@ import {
   trianglesInPlane,
   checkBinaryStl,
   stlTo3mf,
+  sliceStl,
   type Measurements,
+  type Layer,
+  type SliceResult,
   type MeshData,
   type StlReport,
 } from "@studio3d/geometry";
@@ -52,6 +55,7 @@ import {
   type SketchFeature,
   printChecks,
   printerById,
+  DEFAULT_LAYER_HEIGHT,
 } from "@studio3d/document";
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { DesignPanel, SHAPE_ORDER, copySource, placeNew } from "./DesignPanel";
@@ -287,7 +291,7 @@ export function App() {
   // Print Studio checks the exact STL that would go to a slicer, made from the design as it is now.
   const printer = printerById(doc.print?.printer);
   const [printFile, setPrintFile] = useState<
-    { doc: ProjectDocument; report: StlReport } | { doc: ProjectDocument; error: string } | null
+    { doc: ProjectDocument; report: StlReport; stl: ArrayBuffer } | { doc: ProjectDocument; error: string } | null
   >(null);
   useEffect(() => {
     const client = geometryRef.current;
@@ -295,7 +299,7 @@ export function App() {
     let live = true;
     const from = built.doc;
     client.exportStl().then(
-      (data) => live && setPrintFile({ doc: from, report: checkBinaryStl(data) }),
+      (data) => live && setPrintFile({ doc: from, report: checkBinaryStl(data), stl: data }),
       (e: Error) => live && setPrintFile({ doc: from, error: `The file couldn't be made: ${e.message}` }),
     );
     return () => {
@@ -323,6 +327,34 @@ export function App() {
   const fitsPrinter = !(
     printState.kind === "checked" && printState.checks.some((c) => c.id === "fits" && c.status === "error")
   );
+  // Layers: the checked file cut at the chosen layer height, shown in place of the part while previewing.
+  const layerHeight = doc.print?.layerHeight ?? DEFAULT_LAYER_HEIGHT;
+  const [layerView, setLayerView] = useState(false);
+  const [layerAt, setLayerAt] = useState<number | null>(null);
+  const checkedStl = printState.kind === "checked" && printFile && "stl" in printFile ? printFile.stl : null;
+  const sliced: SliceResult | null = useMemo(
+    () => (printing && layerView && checkedStl ? sliceStl(checkedStl, { layerHeight }) : null),
+    [printing, layerView, checkedStl, layerHeight],
+  );
+  const layerCount = sliced?.layers.length ?? 0;
+  const layer = sliced ? Math.min(layerAt ?? layerCount - 1, layerCount - 1) : -1;
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    if (!sliced || layer < 0) return vp.setLayers(null);
+    const shown = sliced.layers[layer]!;
+    vp.setLayers({
+      below: layerLines(sliced.layers.slice(0, layer)),
+      current: layerLines([shown]),
+      fill: { z: shown.z, loops: shown.loops },
+    });
+  }, [sliced, layer]);
+  // A new slice (another height, a changed part) starts at the top layer again.
+  useEffect(() => setLayerAt(null), [checkedStl, layerHeight]);
+  useEffect(() => {
+    if (!printing) setLayerView(false);
+  }, [printing]);
+
   // The plate under the part: the printer's own, with its build volume outlined, in Print Studio.
   useEffect(() => {
     const v = printer.volume;
@@ -1046,6 +1078,7 @@ export function App() {
         data-camera-target={camera ? camera.target.join(",") : ""}
         data-references={shownPictures.length}
         data-plate={printing ? printer.volume.join(",") : "256,256"}
+        data-layers={sliced ? `${layer + 1}/${layerCount}` : undefined}
         data-geometry={
           engine === "ready" ? (empty ? "empty" : shownCurrent ? "current" : building ? "building" : "stale") : engine
         }
@@ -1248,6 +1281,15 @@ export function App() {
           state={printState}
           busy={busy}
           onPrinter={project.setPrinter}
+          layerHeight={layerHeight}
+          onLayerHeight={project.setLayerHeight}
+          layers={
+            sliced
+              ? { count: layerCount, index: layer, layer: sliced.layers[layer] ?? null, openEnds: sliced.openEnds }
+              : null
+          }
+          onLayerView={setLayerView}
+          onLayer={setLayerAt}
           onExport={(format) => void exportMesh(format)}
           onOpenInSlicer={(slicer) => void openInSlicer(slicer)}
           onBackToDesign={() => setWorkspace("design")}
@@ -1409,6 +1451,24 @@ function HelpDialog({ kind, onClose }: { kind: "shortcuts" | "about"; onClose: (
 }
 
 /** The design with a sketch that's being drawn: added at the end, or in place of the one being edited. */
+/** Layer outlines as line pairs for the viewport, each at its layer's cut height. */
+function layerLines(layers: Layer[]): Float32Array {
+  let n = 0;
+  for (const l of layers) for (const loop of l.loops) n += loop.length * 3;
+  const out = new Float32Array(n);
+  let o = 0;
+  for (const l of layers)
+    for (const loop of l.loops) {
+      const k = loop.length / 2;
+      for (let i = 0; i < k; i++) {
+        const j = (i + 1) % k;
+        out.set([loop[2 * i]!, loop[2 * i + 1]!, l.z, loop[2 * j]!, loop[2 * j + 1]!, l.z], o);
+        o += 6;
+      }
+    }
+  return out;
+}
+
 function withDraft(doc: ProjectDocument, f: SketchFeature, isNew: boolean): ProjectDocument {
   return {
     ...doc,

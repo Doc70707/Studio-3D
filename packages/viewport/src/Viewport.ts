@@ -116,6 +116,7 @@ export class Viewport {
   } | null = null;
   private moveListeners = new Set<(e: MoveEvent) => void>();
   private sketchLines: THREE.LineSegments | null = null;
+  private layers: THREE.Group | null = null;
   private references: THREE.Group | null = null;
   /** Pictures already loaded, by id, so changing a picture's place or see-through doesn't load it again. */
   private textures = new Map<string, { src: string; texture: THREE.Texture }>();
@@ -284,6 +285,7 @@ export class Viewport {
       const e = new THREE.BufferGeometry();
       e.setAttribute("position", new THREE.BufferAttribute(mesh.edges, 3));
       group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x123a6b })));
+      group.visible = !this.layers;
       this.scene.add(group);
       this.model = group;
     }
@@ -489,6 +491,45 @@ export class Viewport {
       this.sketchLines.renderOrder = 3;
       this.scene.add(this.sketchLines);
     }
+    this.requestRender();
+  }
+
+  /**
+   * Shows the part's sliced layers in its place, as outlines (x, y, z line pairs): the layers below the current one
+   * faint, the current one bright and filled (`fill`: its outlines, x, y pairs, counter-clockwise outsides and clockwise
+   * holes, at height z). Null shows the part again.
+   */
+  setLayers(
+    layers: { below: Float32Array; current: Float32Array; fill?: { z: number; loops: Float64Array[] } } | null,
+  ): void {
+    if (this.layers) {
+      this.scene.remove(this.layers);
+      disposeObject(this.layers);
+      this.layers = null;
+    }
+    if (layers) {
+      const group = new THREE.Group();
+      group.name = "layers";
+      const lines = (positions: Float32Array, color: number, opacity: number) => {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        const m = new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity });
+        return new THREE.LineSegments(g, m);
+      };
+      if (layers.below.length) group.add(lines(layers.below, 0x6cb4ff, 0.35));
+      if (layers.current.length) group.add(lines(layers.current, 0xffc94d, 1));
+      if (layers.fill) {
+        const fill = new THREE.Mesh(
+          layerFill(layers.fill.loops),
+          new THREE.MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.45, side: THREE.DoubleSide }),
+        );
+        fill.position.z = layers.fill.z;
+        group.add(fill);
+      }
+      this.scene.add(group);
+      this.layers = group;
+    }
+    if (this.model) this.model.visible = !this.layers;
     this.requestRender();
   }
 
@@ -922,4 +963,35 @@ function buildPlate(width: number, depth: number): THREE.Group {
   group.add(lines([-width / 2, 0, 0.02, width / 2, 0, 0.02], 0xd9534f)); // X axis, red
   group.add(lines([0, -depth / 2, 0.02, 0, depth / 2, 0.02], 0x5cb85c)); // Y axis, green
   return group;
+}
+
+/** A layer's material as flat triangles: each outside outline with the holes that lie inside it. */
+function layerFill(loops: Float64Array[]): THREE.BufferGeometry {
+  const area = (l: Float64Array) => {
+    let a = 0;
+    for (let i = 0, n = l.length / 2, j = n - 1; i < n; j = i++)
+      a += l[2 * j]! * l[2 * i + 1]! - l[2 * i]! * l[2 * j + 1]!;
+    return a / 2;
+  };
+  const inside = (x: number, y: number, l: Float64Array) => {
+    let c = false;
+    for (let i = 0, n = l.length / 2, j = n - 1; i < n; j = i++) {
+      const [xi, yi, xj, yj] = [l[2 * i]!, l[2 * i + 1]!, l[2 * j]!, l[2 * j + 1]!];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  const path = (l: Float64Array) => {
+    const pts: THREE.Vector2[] = [];
+    for (let i = 0; i < l.length; i += 2) pts.push(new THREE.Vector2(l[i]!, l[i + 1]!));
+    return pts;
+  };
+  // Smallest outsides first, so a hole goes to the innermost outside around it (an island inside a hole).
+  const outsides = loops.filter((l) => area(l) > 0).sort((a, b) => area(a) - area(b));
+  const shapes = outsides.map((l) => new THREE.Shape(path(l)));
+  for (const hole of loops.filter((l) => area(l) < 0)) {
+    const k = outsides.findIndex((o) => inside(hole[0]!, hole[1]!, o));
+    if (k >= 0) shapes[k]!.holes.push(new THREE.Path(path(hole)));
+  }
+  return new THREE.ShapeGeometry(shapes);
 }
