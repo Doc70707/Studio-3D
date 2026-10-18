@@ -55,6 +55,8 @@ import {
   type BoxSide,
 } from "@studio3d/document";
 import { checkBinaryStl } from "./stl-check";
+import { crc32, stlTo3mf } from "./threemf";
+import { crc32 as nodeCrc32 } from "node:zlib";
 import { makeBaseBox, measureVolume } from "replicad";
 
 const require = createRequire(import.meta.url);
@@ -1438,5 +1440,84 @@ describe("print checks on the exported file", () => {
     const hollow = designed(part(shape("box", { wall: 2 })));
     expect(hollow.measurements.solids).toBe(1);
     expect(checkBinaryStl(await exportStl(hollow.shape)).bodies).toBe(1);
+  });
+});
+
+/** Reads a ZIP of stored entries back, checking each entry's CRC with Node's own zlib (not our code). */
+function unzipStored(zip: Uint8Array): Map<string, string> {
+  const v = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  const files = new Map<string, string>();
+  let at = 0;
+  while (v.getUint32(at, true) === 0x04034b50) {
+    expect(v.getUint16(at + 8, true)).toBe(0); // stored
+    const size = v.getUint32(at + 18, true);
+    const nameLength = v.getUint16(at + 26, true);
+    const name = new TextDecoder().decode(zip.subarray(at + 30, at + 30 + nameLength));
+    const data = zip.subarray(at + 30 + nameLength, at + 30 + nameLength + size);
+    expect(v.getUint32(at + 14, true)).toBe(nodeCrc32(data));
+    files.set(name, new TextDecoder().decode(data));
+    at += 30 + nameLength + size;
+  }
+  expect(v.getUint32(zip.length - 22, true)).toBe(0x06054b50); // end of central directory
+  expect(v.getUint16(zip.length - 22 + 10, true)).toBe(files.size);
+  return files;
+}
+
+describe("3MF export", () => {
+  it("our CRC-32 matches zlib's", () => {
+    const bytes = new TextEncoder().encode("Studio 3D <3MF> & more");
+    expect(crc32(bytes)).toBe(nodeCrc32(bytes));
+    expect(crc32(new Uint8Array())).toBe(0);
+  });
+
+  it("holds the same closed mesh as the STL, in millimetres, named, and placed on the printer's plate", async () => {
+    const b = box({ width: 80, depth: 40, height: 30, wall: 2 });
+    const stl = await exportStl(built(b).shape);
+    const report = checkBinaryStl(stl);
+    const file = stlTo3mf(stl, { name: "Tray <A&B>", offset: [128, 128, 0], application: "Studio 3D test" });
+    const parts = unzipStored(file);
+    expect([...parts.keys()]).toEqual(["[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"]);
+    expect(parts.get("_rels/.rels")).toContain('Target="/3D/3dmodel.model"');
+    const model = parts.get("3D/3dmodel.model")!;
+    expect(model).toContain('<model unit="millimeter"');
+    expect(model).toContain('<object id="1" name="Tray &lt;A&amp;B&gt;" type="model">');
+    expect(model).toContain('<item objectid="1" transform="1 0 0 0 1 0 0 0 1 128 128 0"/>');
+
+    // Rebuild the mesh from the XML: same triangle count, every edge shared twice, same volume and size.
+    const vertices = [...model.matchAll(/<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"\/>/g)].map((m) =>
+      [m[1], m[2], m[3]].map(Number),
+    );
+    const triangles = [...model.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"\/>/g)].map((m) =>
+      [m[1], m[2], m[3]].map(Number),
+    );
+    expect(triangles.length).toBe(report.triangles);
+    const edges = new Map<string, number>();
+    let volume = 0;
+    for (const t of triangles) {
+      const [a, b2, c] = t.map((i) => vertices[i]!) as [number[], number[], number[]];
+      volume +=
+        (a[0]! * (b2[1]! * c[2]! - b2[2]! * c[1]!) -
+          a[1]! * (b2[0]! * c[2]! - b2[2]! * c[0]!) +
+          a[2]! * (b2[0]! * c[1]! - b2[1]! * c[0]!)) /
+        6;
+      for (let e = 0; e < 3; e++) edges.set(`${t[e]}>${t[(e + 1) % 3]}`, 1);
+    }
+    for (const k of edges.keys()) {
+      const [from, to] = k.split(">");
+      expect(edges.has(`${to}>${from}`)).toBe(true);
+    }
+    expect(volume).toBeCloseTo(report.volume, 3);
+    for (const i of [0, 1, 2]) {
+      const along = vertices.map((p) => p[i]!);
+      expect(Math.max(...along) - Math.min(...along)).toBeCloseTo([80, 40, 30][i]!, 4);
+    }
+
+    // For the independent check with trimesh in CI (scripts/verify_stl.py).
+    mkdirSync(OUT, { recursive: true });
+    writeFileSync(`${OUT}tray.3mf`, file);
+    writeFileSync(
+      `${OUT}tray.3mf.expected.json`,
+      JSON.stringify({ volume: expectedBoxVolume(b), size: [80, 40, 30], name: "Tray <A&B>", min: [88, 108, 0] }),
+    );
   });
 });

@@ -1355,8 +1355,29 @@ input:focus-visible {
 .print-actions {
   flex: none;
   display: flex;
+  flex-direction: column;
   gap: 8px;
   margin: 0 12px 12px;
+}
+
+.print-actions .props-note,
+.print-actions .field {
+  margin: 0;
+}
+
+.print-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.print-buttons > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.print-buttons > button.narrow {
+  flex: none;
+  height: auto;
 }
 
 .print-actions button {
@@ -1374,7 +1395,7 @@ input:focus-visible {
 }
 
 .print-actions button.primary {
-  flex: 1;
+  flex: none;
   border: 0;
   background: linear-gradient(180deg, var(--button), var(--button-strong));
   color: var(--on-accent);

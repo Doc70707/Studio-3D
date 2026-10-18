@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Least privilege: window basics (title, full screen), native open/save/confirm dialogs, and our own project and export file commands (which only accept .s3d and .stl).",
+  "description": "Least privilege: window basics (title, full screen), native open/save/confirm dialogs, and our own project and export file commands (which only accept .s3d, .stl and .3mf), and opening a part in a slicer program the user installed or picked.",
   "windows": ["main"],
   "permissions": [
     "core:default",

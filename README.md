@@ -96,12 +96,17 @@ What works today:
   away, keeping the camera views, and brings the panel back while a piece is selected; Ctrl+B hides or shows the
   side panel on its own. Esc leaves either mode once it has nothing else to do. Nothing in the design, selection,
   camera or sketch changes.
-- Print Studio (the Design | Print Studio switch at the top right, or File > Prepare to print…): pick your printer
-  (Bambu Lab, Prusa, Creality and Elegoo models, build volumes from the makers' spec pages) and see the part on
-  its plate inside the build volume. Checks run on the exact STL that would go to your slicer: closed surface,
-  one piece, fits the printer, sits on the plate. Each says what to do when it isn't fine. The printer is saved
-  with the project but beside the design, so changing it never rebuilds the part. Export STL is here (and in
+- Print Studio (the Design | Print Studio switch at the left of the menu bar, or File > Prepare to print…): pick
+  your printer (Bambu Lab, Prusa, Creality and Elegoo models, build volumes from the makers' spec pages) and see
+  the part on its plate inside the build volume. Checks run on the exact STL that would go to your slicer: closed
+  surface, one piece, fits the printer, sits on the plate. Each says what to do when it isn't fine. The printer is
+  saved with the project but beside the design, so changing it never rebuilds the part. Export STL is here (and in
   the File menu).
+- Open in your slicer: Print Studio finds Bambu Studio, OrcaSlicer and PrusaSlicer where their installers put them
+  (or you locate any slicer's program once) and opens the checked part in it as a 3MF file. The slicer runs as its own
+  program; nothing of it is built into Studio 3D. Export 3MF saves the same file: in millimetres, named after the
+  project, and placed in the middle of the chosen printer's plate. Only the part's shape is sure to go across, so pick
+  your printer, filament and settings in the slicer. Tests check the 3MF independently with trimesh.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.
@@ -110,7 +115,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: print preparation.
+Not yet: slicing inside Studio 3D, and more than one part on the plate.
 
 ## Getting the Windows app (no setup needed)
 

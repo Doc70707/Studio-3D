@@ -17,6 +17,7 @@ import {
   pointsOfFaces,
   trianglesInPlane,
   checkBinaryStl,
+  stlTo3mf,
   type Measurements,
   type MeshData,
   type StlReport,
@@ -60,7 +61,7 @@ import { SketchEditor, type SketchDraft } from "./SketchEditor";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
-import { platform } from "./platform";
+import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { PrintPanel, type PrintState } from "./PrintPanel";
 import { escapeLeaves, focusPanelAfterSelection, type FocusPanel } from "./screen";
 import { APP_INFO, useProject, whenSaved } from "./useProject";
@@ -616,18 +617,46 @@ export function App() {
     : [];
   const draftIndex = draft ? shownDoc.features.findIndex((f) => f.id === draft.feature.id) : -1;
 
-  const exportStl = useCallback(
-    () =>
+  /** The part as a file for a slicer, made from exactly what's on screen. */
+  const meshFile = useCallback(
+    async (format: MeshFormat) => {
+      const client = geometryRef.current;
+      if (!client) throw new Error("The geometry engine isn't ready yet.");
+      const r = await client.rebuild(doc); // make sure the export matches exactly what's on screen
+      if (r.status !== "built") throw new Error("Fix the highlighted values before exporting.");
+      const stl = await client.exportStl();
+      if (format === "stl") return new Uint8Array(stl);
+      // Studio 3D's plate is centred on the origin; a printer's starts at its front-left corner.
+      const v = printerById(doc.print?.printer).volume;
+      return stlTo3mf(stl, {
+        name,
+        offset: [v[0] / 2, v[1] / 2, 0],
+        application: `${APP_INFO.name} ${APP_INFO.version}`,
+      });
+    },
+    [doc, name],
+  );
+  const exportMesh = useCallback(
+    (format: MeshFormat) =>
       run(async () => {
-        const client = geometryRef.current;
-        if (!client) return;
-        const r = await client.rebuild(doc); // make sure the export matches exactly what's on screen
-        if (r.status !== "built") throw new Error("Fix the highlighted values before exporting.");
-        const data = await client.exportStl();
-        const saved = await platform.exportStl(data, name);
+        const saved = await platform.exportMesh(await meshFile(format), name, format);
         if (saved) setNotice({ kind: "info", text: `Exported ${saved.name}.` });
       }),
-    [doc, name, run, setNotice],
+    [meshFile, name, run, setNotice],
+  );
+  const exportStl = useCallback(() => exportMesh("stl"), [exportMesh]);
+  const openInSlicer = useCallback(
+    (slicer: SlicerProgram) =>
+      run(async () => {
+        if (!platform.slicers) return;
+        const file = await platform.slicers.open(slicer, await meshFile("3mf"), name, "3mf");
+        const shown = file.split(/[\\/]/).pop();
+        setNotice({
+          kind: "info",
+          text: `Opened ${shown} in ${slicer.name}. Pick your printer, filament and settings there.`,
+        });
+      }),
+    [meshFile, name, run, setNotice],
   );
 
   // Keyboard: views, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, and Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N
@@ -813,6 +842,12 @@ export function App() {
         {
           label: "Export STL…",
           onSelect: () => void exportStl(),
+          disabled: busy || !exportable,
+          reason: empty ? "Add a shape to export" : "Fix the highlighted values to export",
+        },
+        {
+          label: "Export 3MF…",
+          onSelect: () => void exportMesh("3mf"),
           disabled: busy || !exportable,
           reason: empty ? "Add a shape to export" : "Fix the highlighted values to export",
         },
@@ -1213,7 +1248,8 @@ export function App() {
           state={printState}
           busy={busy}
           onPrinter={project.setPrinter}
-          onExportStl={() => void exportStl()}
+          onExport={(format) => void exportMesh(format)}
+          onOpenInSlicer={(slicer) => void openInSlicer(slicer)}
           onBackToDesign={() => setWorkspace("design")}
         />
       ) : (

@@ -14,13 +14,34 @@ export interface FileRef {
   path?: string;
 }
 
+/** A part file for a slicer: the mesh as STL, or as 3MF with its name, units and place on the printer's plate. */
+export type MeshFormat = "stl" | "3mf";
+
+/** A slicer program on this computer, found in its usual folder or located by the user. */
+export interface SlicerProgram {
+  name: string;
+  path: string;
+}
+
 export interface Platform {
   kind: "desktop" | "browser";
   capabilities: { saveInPlace: boolean };
   openProject(): Promise<{ file: FileRef; text: string } | null>;
   /** Saves to `target` if given (desktop only), otherwise asks where. Returns where it went, or null if cancelled. */
   saveProject(text: string, suggestedName: string, target?: FileRef): Promise<FileRef | null>;
-  exportStl(data: ArrayBuffer, suggestedName: string): Promise<FileRef | null>;
+  exportMesh(data: ArrayBuffer | Uint8Array, suggestedName: string, format: MeshFormat): Promise<FileRef | null>;
+  /**
+   * Opening a part in a slicer the user installed (desktop only): it runs as its own program with the file, the way
+   * double-clicking the file would. Absent in the browser, which can't start programs.
+   */
+  slicers?: {
+    /** Bambu Studio, OrcaSlicer and PrusaSlicer, where their installers put them. */
+    find(): Promise<SlicerProgram[]>;
+    /** Asks the user to point at a slicer's program file. */
+    locate(): Promise<SlicerProgram | null>;
+    /** Writes the part to the app's hand-off folder and opens it with the slicer. Returns the file's path. */
+    open(program: SlicerProgram, data: Uint8Array, name: string, format: MeshFormat): Promise<string>;
+  };
   /**
    * `hasUnsavedChanges` is read when the user tries to close the app. `onDiscard` runs when they choose to close
    * without saving (desktop only: a browser can't tell a deliberate close from a crash).
@@ -49,6 +70,20 @@ const RECOVERY_KEY = "studio3d.recovery";
 const PROJECT_FILTER = { name: "Studio 3D project", extensions: [FILE_EXTENSION] };
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const withExt = (name: string, ext: string) => (name.toLowerCase().endsWith(`.${ext}`) ? name : `${name}.${ext}`);
+const bytesOf = (data: ArrayBuffer | Uint8Array) => (data instanceof Uint8Array ? data : new Uint8Array(data));
+const MESH_FILTERS = {
+  stl: { name: "STL mesh", extensions: ["stl"] },
+  "3mf": { name: "3MF model", extensions: ["3mf"] },
+};
+const MESH_TYPES = { stl: "model/stl", "3mf": "model/3mf" };
+const KNOWN_SLICERS: [RegExp, string][] = [
+  [/bambu-studio/i, "Bambu Studio"],
+  [/orca-slicer/i, "OrcaSlicer"],
+  [/prusa-slicer/i, "PrusaSlicer"],
+];
+/** A located program's name: the slicer's own name if it's one we know, otherwise its file name. */
+export const slicerName = (path: string) =>
+  KNOWN_SLICERS.find(([re]) => re.test(baseName(path)))?.[1] ?? baseName(path).replace(/\.exe$/i, "");
 
 const desktop: Platform = {
   kind: "desktop",
@@ -72,12 +107,32 @@ const desktop: Platform = {
     return { name: baseName(path), path };
   },
 
-  async exportStl(data, suggestedName) {
-    const chosen = await save({ defaultPath: withExt(suggestedName, "stl"), filters: [{ name: "STL mesh", extensions: ["stl"] }] });
+  async exportMesh(data, suggestedName, format) {
+    const filter = MESH_FILTERS[format];
+    const chosen = await save({ defaultPath: withExt(suggestedName, format), filters: [filter] });
     if (!chosen) return null;
-    const path = withExt(chosen, "stl");
-    await invoke("write_export", { path, bytes: Array.from(new Uint8Array(data)) });
+    const path = withExt(chosen, format);
+    await invoke("write_export", { path, bytes: Array.from(bytesOf(data)) });
     return { name: baseName(path), path };
+  },
+
+  slicers: {
+    async find() {
+      return invoke<SlicerProgram[]>("find_slicers");
+    },
+    async locate() {
+      const path = await open({
+        multiple: false,
+        directory: false,
+        title: "Locate your slicer's program",
+        filters: [{ name: "Programs", extensions: ["exe"] }],
+      });
+      if (typeof path !== "string") return null;
+      return { name: slicerName(path), path };
+    },
+    open(program, data, name, format) {
+      return invoke<string>("open_in_slicer", { program: program.path, name, ext: format, bytes: Array.from(data) });
+    },
   },
 
   guardClose(hasUnsavedChanges, onDiscard) {
@@ -152,9 +207,9 @@ const browser: Platform = {
     return { name };
   },
 
-  async exportStl(data, suggestedName) {
-    const name = withExt(suggestedName, "stl");
-    download(new Blob([data], { type: "model/stl" }), name);
+  async exportMesh(data, suggestedName, format) {
+    const name = withExt(suggestedName, format);
+    download(new Blob([bytesOf(data) as Uint8Array<ArrayBuffer>], { type: MESH_TYPES[format] }), name);
     return { name };
   },
 
