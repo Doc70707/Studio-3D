@@ -9,9 +9,21 @@ const cm3 = (mm3: number) => `${(mm3 / 1000).toFixed(2)} cm³`;
 const canvas = (page: Page) => page.getByTestId("sketch-canvas");
 const profiles = (page: Page) => page.getByTestId("sketch-profile");
 
-/** Where a sketch point (in mm) is on screen. */
+/** Where a sketch point (in mm) is on screen, once the drawing has stopped sliding (it eases after a panel closes). */
 async function at(page: Page, u: number, v: number): Promise<[number, number]> {
   const c = canvas(page);
+  let last = "";
+  await expect
+    .poll(
+      async () => {
+        const now = `${await c.getAttribute("data-origin")} ${await c.getAttribute("data-scale")}`;
+        const still = now === last;
+        last = now;
+        return still;
+      },
+      { intervals: [150] },
+    )
+    .toBe(true);
   const box = (await c.boundingBox())!;
   const k = Number(await c.getAttribute("data-scale"));
   const [ox, oy] = (await c.getAttribute("data-origin"))!.split(",").map(Number) as [number, number];
@@ -117,6 +129,7 @@ test("object snaps: ends, middles, centres, crossings and square to a side, with
   await clickAt(page, 63, 10);
   await expect(profiles(page)).toHaveCount(2);
   await page.keyboard.press("Escape"); // deselect the circle, so its settings panel doesn't cover the drawing
+  await current(page); // the sketch's checks are back, so the bar under the drawing (and the drawing) stop moving
 
   await page.getByRole("button", { name: "Outline tool" }).click();
   const snapAt = async (u: number, v: number, kind: string) => {
