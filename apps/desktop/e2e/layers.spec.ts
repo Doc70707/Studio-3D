@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const OUT = new URL("../../../test-output/", import.meta.url).pathname;
 const host = (page: Page) => page.locator("main.viewport-host");
@@ -77,4 +78,57 @@ test("changing the design in Design and coming back slices the new part", async 
   await page.getByRole("button", { name: "Print Studio" }).click();
   await page.getByRole("button", { name: "Preview layers" }).click();
   await expect(host(page)).toHaveAttribute("data-layers", "50/50");
+});
+
+test("Export G-code writes the printer's file and checks it before saving", async ({ page }) => {
+  await page.getByRole("button", { name: "Preview layers" }).click();
+  await expect(host(page)).toHaveAttribute("data-layers", "150/150");
+  // The starting printer is a Bambu Lab A1: its G-code has to go inside Bambu's own 3MF, which isn't written yet.
+  await expect(page.getByTestId("gcode-blocked")).toContainText("Bambu printers take G-code packed in Bambu's own 3MF");
+  await expect(page.getByRole("button", { name: "Export G-code…" })).toBeDisabled();
+
+  await page.getByLabel("Printer").selectOption("creality-ender3-v3-se");
+  await expect(host(page)).toHaveAttribute("data-layers", "150/150");
+  await expect(page.getByTestId("gcode-blocked")).toHaveCount(0);
+  await expect(page.getByTestId("gcode-material")).toHaveText(
+    "G-code is for PLA: nozzle 215 °C on the first layer, then 210 °C; bed 60 °C; 1.75 mm filament. " +
+      "It's checked before it's saved.",
+  );
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export G-code…" }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe("Untitled.gcode");
+  const gcode = readFileSync(await file.path(), "utf8");
+  expect(gcode).toMatch(/^; Made by Studio 3D \d+\.\d+\.\d+'s own slicer for the Creality Ender-3 V3 SE\./);
+  expect(gcode).toContain("; layer 150 of 150, 29.8 to 30 mm");
+  expect(gcode.trimEnd().split("\n").slice(-4)).toEqual([
+    "M104 S0 ; nozzle off",
+    "M140 S0 ; bed off",
+    "M107 ; fan off",
+    "M84 ; motors off",
+  ]);
+  await expect(page.locator(".toast")).toContainText(
+    /^Exported Untitled\.gcode\. Checked: 150 layers, [\d.]+ m of PLA \(about \d+ g\), every line inside the part and the printer\./,
+  );
+  // The open box, 60 × 40 × 30 with 2 mm walls, is 15.6 cm³ solid (19 g of PLA); with 2 walls and 15% infill
+  // inside its walls and floor it takes less.
+  const grams = Number(/about (\d+) g/.exec((await page.locator(".toast").textContent())!)![1]);
+  expect(grams).toBeGreaterThan(15);
+  expect(grams).toBeLessThan(30);
+  // For the independent check in CI. The box sits in the middle of the 220 × 220 plate.
+  mkdirSync(OUT, { recursive: true });
+  writeFileSync(`${OUT}app-export.gcode`, gcode);
+  writeFileSync(
+    `${OUT}app-export.gcode.expected.json`,
+    JSON.stringify({
+      volume: [220, 220, 250],
+      footprint: [80, 90, 140, 130],
+      layers: 150,
+      partVolume: 60 * 40 * 30 - 56 * 36 * 28,
+      filamentDiameter: 1.75,
+      maxNozzleTemp: 260,
+      primeY: 5,
+      sparse: true,
+    }),
+  );
 });

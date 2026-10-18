@@ -59,6 +59,9 @@ import { crc32, stlTo3mf } from "./threemf";
 import { layerBounds, loopArea, sliceStl } from "./slice";
 import { slicePart } from "./slicer";
 import { linesLength } from "./infill";
+import { DEFAULT_RETRACT, DEFAULT_SPEEDS, PLA, PRIME_LINE, writeGcode, type GcodeOptions } from "./gcode";
+import { checkGcode, type GcodeExpectations } from "./gcodeCheck";
+import { layerPaths } from "./toolpath";
 import { crc32 as nodeCrc32 } from "node:zlib";
 import { makeBaseBox, measureVolume } from "replicad";
 
@@ -1725,5 +1728,153 @@ describe("skins and infill on real parts", () => {
     // Solid only on the right (the open ledge), sparse on the left (carried on by the upper block).
     expect(Math.min(...xs(under.solid))).toBeGreaterThan(-0.5);
     expect(Math.max(...xs(under.sparse))).toBeLessThan(0.5);
+  });
+});
+
+describe("G-code from Studio 3D's own slicer, read back and checked", () => {
+  const settings = { layerHeight: 0.2, walls: 2, lineWidth: 0.42, infillDensity: 0.15 };
+  // A 220 × 220 × 250 mm printer (an Ender-3 V3 SE's size), the part in the middle of the plate.
+  const printer = { volume: [220, 220, 250] as [number, number, number], maxNozzleTemp: 260, maxBedTemp: 100 };
+  const options = (over: Partial<GcodeOptions> = {}): GcodeOptions => ({
+    printerName: "test printer",
+    volume: printer.volume,
+    offset: [110, 110],
+    material: PLA,
+    speeds: DEFAULT_SPEEDS,
+    retract: DEFAULT_RETRACT,
+    application: "Studio 3D",
+    ...over,
+  });
+  const expectations = (part: ReturnType<typeof slicePart>, over: Partial<GcodeExpectations> = {}) => ({
+    part,
+    volume: printer.volume,
+    offset: [110, 110] as [number, number],
+    filamentDiameter: 1.75,
+    maxNozzleTemp: printer.maxNozzleTemp,
+    maxBedTemp: printer.maxBedTemp,
+    primeArea: [
+      PRIME_LINE.x - 0.01,
+      PRIME_LINE.y - 0.01,
+      PRIME_LINE.x + PRIME_LINE.length + 0.01,
+      PRIME_LINE.y + 0.01,
+    ] as [number, number, number, number],
+    ...over,
+  });
+  let block: ReturnType<typeof slicePart>;
+  beforeAll(async () => {
+    block = slicePart(await exportStl(built(box({ width: 20, depth: 20, height: 10, wall: 0 })).shape), settings);
+  });
+
+  it.each([
+    ["a block", design(box({ width: 20, depth: 20, height: 10, wall: 0 }))],
+    ["an open box", design(box({ width: 60, depth: 40, height: 30, wall: 2 }))],
+    ["a block with a hole", design(box({ width: 30, depth: 30, height: 10, wall: 0 }), hole({ diameter: 8 }))],
+    ["a cylinder", part(shape("cylinder", { diameter: 20, height: 10 }))],
+    ["a cone", part(shape("cone", { bottomDiameter: 20, topDiameter: 8, height: 15 }))],
+  ])("%s: every line stays in the part and its layer, and the filament adds up", async (_, doc) => {
+    const sliced = slicePart(await exportStl(designed(doc).shape), settings);
+    const gcode = writeGcode(sliced, options());
+    const report = checkGcode(gcode, expectations(sliced));
+    expect(report.problems).toEqual([]);
+    expect(report.ok).toBe(true);
+    expect(report.layers).toBe(sliced.layers.length);
+    expect(rel(report.filament, report.expectedFilament)).toBeLessThan(1e-4);
+  });
+
+  it("starts by homing and heating, and ends with the heaters off", () => {
+    const gcode = writeGcode(block, options());
+    const cmds = gcode
+      .split("\n")
+      .map((l) => l.replace(/;.*/, "").trim())
+      .filter(Boolean);
+    const first = (re: RegExp) => cmds.findIndex((c) => re.test(c));
+    expect(first(/^G21/)).toBeLessThan(first(/^G[01] /));
+    expect(first(/^G28/)).toBeLessThan(first(/^G[01] /));
+    expect(first(/^M190 S60/)).toBeLessThan(first(/^G1 X.* E/));
+    expect(first(/^M109 S215/)).toBeLessThan(first(/^G1 X.* E/));
+    expect(cmds.slice(-4)).toEqual(["M104 S0", "M140 S0", "M107", "M84"]);
+    expect(gcode).toContain("; prime line");
+    // The fan comes on, and the nozzle drops to 210 °C, from the second layer.
+    expect(gcode.indexOf("M106 S255")).toBeGreaterThan(gcode.indexOf("; layer 2 of 50"));
+    expect(gcode.indexOf("M104 S210")).toBeGreaterThan(gcode.indexOf("; layer 2 of 50"));
+  });
+
+  it("each layer draws its inner wall, then the outside wall, then the fill", () => {
+    const { paths } = layerPaths(block.layers[25]!, [0, 0]);
+    const roles = paths.map((p) => p.role);
+    expect(roles.slice(0, 2)).toEqual(["inner-wall", "outer-wall"]);
+    expect(new Set(roles.slice(2))).toEqual(new Set(["infill"]));
+    for (const p of paths.slice(0, 2)) expect(p.points.slice(-2)).toEqual(p.points.slice(0, 2)); // loops close
+    // The inner wall starts at its corner nearest the nozzle (at 0, 0 that's the middle: all four tie, any will do).
+    const fromCorner = layerPaths(block.layers[25]!, [-20, -20]).paths[0]!;
+    expect(fromCorner.points.slice(0, 2).map((v) => Math.round(v * 100) / 100)).toEqual([-9.37, -9.37]);
+  });
+
+  it("filled solid, the plastic in the file is the block's own volume", async () => {
+    const solid = slicePart(await exportStl(built(box({ width: 20, depth: 20, height: 10, wall: 0 })).shape), {
+      ...settings,
+      infillDensity: 1,
+    });
+    const gcode = writeGcode(solid, options());
+    const report = checkGcode(gcode, expectations(solid));
+    expect(report.ok).toBe(true);
+    expect(rel(report.plastic, 4000)).toBeLessThan(0.03);
+    // Saved for the independent check in CI (scripts/verify_gcode.py).
+    mkdirSync(OUT, { recursive: true });
+    writeFileSync(`${OUT}block-solid.gcode`, gcode);
+    writeFileSync(
+      `${OUT}block-solid.gcode.expected.json`,
+      JSON.stringify({
+        volume: printer.volume,
+        footprint: [100, 100, 120, 120],
+        layers: 50,
+        partVolume: 4000,
+        filamentDiameter: 1.75,
+        maxNozzleTemp: printer.maxNozzleTemp,
+        primeY: PRIME_LINE.y,
+      }),
+    );
+  });
+
+  it("the prime line is left out where the part comes close to the front of the plate", () => {
+    const front = writeGcode(block, options({ offset: [110, 12] }));
+    expect(front).not.toContain("; prime line");
+    expect(checkGcode(front, expectations(block, { offset: [110, 12] })).ok).toBe(true);
+  });
+
+  describe("the check catches a broken file", () => {
+    const good = () => writeGcode(block, options());
+    const problems = (gcode: string, over: Partial<GcodeExpectations> = {}) =>
+      checkGcode(gcode, expectations(block, over)).problems.join(" ");
+
+    it("a missing layer", () => {
+      const cut = good().replace(/; layer 7 of 50[\s\S]*?(?=; layer 8 of 50)/, "");
+      expect(problems(cut)).toContain("Layer 7 is missing.");
+    });
+    it("a line moved off the part", () => {
+      const lines = good().split("\n");
+      const i = lines.findIndex((l, k) => k > 40 && /^G1 X.* E/.test(l));
+      lines[i] = lines[i]!.replace(/X[\d.]+/, "X150");
+      expect(problems(lines.join("\n"))).toContain("Plastic goes outside the part");
+    });
+    it("too much filament", () => {
+      const lines = good().split("\n");
+      const i = lines.findIndex((l, k) => k > 40 && /^G1 X.* E/.test(l));
+      lines[i] = lines[i]!.replace(/E([\d.]+)/, (_, v) => `E${Number(v) + 5}`);
+      expect(problems(lines.join("\n"))).toMatch(/It uses [\d.]+ mm of filament where the layers need/);
+    });
+    it("a nozzle hotter than the printer goes", () => {
+      expect(problems(good(), { maxNozzleTemp: 200 })).toContain("hotter than this printer goes");
+    });
+    it("a part placed off the plate", () => {
+      const off = writeGcode(block, options({ offset: [215, 110] }));
+      expect(problems(off, { offset: [215, 110] })).toContain("A move goes outside the printer: X");
+    });
+    it("plastic between layers, relative moves, and no heaters off at the end", () => {
+      expect(problems(good().replace("G0 Z0.4 ", "G0 Z0.35 "))).toContain("isn't the top of any layer");
+      expect(problems(good().replace("G90 ;", "G91 ;"))).toContain("relative positions");
+      expect(problems(good().replace("M104 S0", "M104 S200"))).toContain("doesn't turn the heaters off");
+      expect(problems(good().replace("G28 ;", "M117 hi ;"))).toContain("It moves before homing.");
+    });
   });
 });

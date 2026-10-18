@@ -401,6 +401,55 @@ export function App() {
             thinLayers: sliced!.thinLayers,
           };
 
+  // G-code: written and read back in the slicer's worker, and saved only once that check passes.
+  const gcodeBlocked =
+    printer.maker === "Bambu Lab"
+      ? "Bambu printers take G-code packed in Bambu's own 3MF, which Studio 3D can't write yet. Use Open in Bambu " +
+        "Studio for now."
+      : !fitsPrinter
+        ? "The part doesn't fit this printer."
+        : sliced && sliced.openEnds > 0
+          ? "The part's surface has gaps, so its layers can't be trusted."
+          : null;
+  const exportGcode = useCallback(
+    () =>
+      run(async () => {
+        const client = slicerRef.current;
+        if (!sliced || !client || gcodeBlocked) return;
+        let job;
+        try {
+          job = await client.gcode(sliced, {
+            printerName: `${printer.maker} ${printer.name}`,
+            volume: printer.volume,
+            maxNozzleTemp: printer.maxNozzleTemp,
+            maxBedTemp: printer.maxBedTemp,
+            application: `${APP_INFO.name} ${APP_INFO.version}`,
+          });
+        } catch (e) {
+          if (e instanceof Error && e.message === "superseded") return; // a setting changed: slicing again
+          throw e;
+        }
+        const { report } = job;
+        if (!report.ok) {
+          setNotice({
+            kind: "error",
+            text: `The G-code didn't pass its check, so it wasn't saved. ${report.problems[0]}`,
+          });
+          return;
+        }
+        const saved = await platform.exportMesh(new TextEncoder().encode(job.gcode), name, "gcode");
+        if (saved)
+          setNotice({
+            kind: "info",
+            text:
+              `Exported ${saved.name}. Checked: ${report.layers} layers, ${(report.filament / 1000).toFixed(2)} m of ` +
+              `PLA (about ${Math.round(job.grams)} g), every line inside the part and the printer. ` +
+              "Not yet tried on a real printer, so watch the first layer.",
+          });
+      }),
+    [sliced, gcodeBlocked, printer, name, run, setNotice],
+  );
+
   // The plate under the part: the printer's own, with its build volume outlined, in Print Studio.
   useEffect(() => {
     const v = printer.volume;
@@ -1333,6 +1382,8 @@ export function App() {
           onLayerView={setLayerView}
           onLayer={setLayerAt}
           onExport={(format) => void exportMesh(format)}
+          gcodeBlocked={gcodeBlocked}
+          onExportGcode={() => void exportGcode()}
           onOpenInSlicer={(slicer) => void openInSlicer(slicer)}
           onBackToDesign={() => setWorkspace("design")}
         />

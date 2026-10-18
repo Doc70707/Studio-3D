@@ -119,7 +119,13 @@ What works today:
 - Skins and infill: inside the walls, the bottom 0.6 mm and top 0.8 mm of the part (and over or under any step) are
   filled solid, and the rest with infill lines at the chosen density (0 to 100%, saved beside the design), crossing at
   right angles from one layer to the next. Our own area operations (overlap, take away) find where the part carries
-  on above and below. Filled solid, the lines put down the part's own volume to within 3%. G-code comes next.
+  on above and below. Filled solid, the lines put down the part's own volume to within 3%.
+- G-code from Studio 3D's own slicer (Print Studio > Preview layers > Export G-code…): plain Marlin-style G-code for
+  PLA with our own start and end code, inner walls first, then the outside wall, then the fill. Before it's saved the
+  file is read back move by move: every line of plastic must sit inside the part at a real layer's height, every move
+  inside the printer, the filament must match the toolpaths, and the heaters must be off at the end. A second,
+  separate reader (`scripts/verify_gcode.py`) checks the files the tests write. Bambu printers need G-code inside
+  Bambu's own 3MF, which isn't written yet. Not yet tried on a real printer.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.
@@ -128,7 +134,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: G-code from Studio 3D's own slicer, and more than one part on the plate.
+Not yet: G-code for Bambu printers, material and speed settings, supports, and more than one part on the plate.
 
 ## Getting the Windows app (no setup needed)
 

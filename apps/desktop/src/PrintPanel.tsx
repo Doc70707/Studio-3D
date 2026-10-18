@@ -9,7 +9,7 @@ import {
   type PrintCheck,
   type Printer,
 } from "@studio3d/document";
-import type { SlicedLayer, SlicerSettings } from "@studio3d/geometry";
+import { PLA, type SlicedLayer, type SlicerSettings } from "@studio3d/geometry";
 import { Icon } from "./Icon";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { defaultSlicer, readSlicerMemory, slicerList, writeSlicerMemory, type SlicerMemory } from "./slicerChoice";
@@ -96,6 +96,9 @@ interface Props {
   state: PrintState;
   onPrinter: (id: string) => void;
   onExport: (format: MeshFormat) => void;
+  /** Why G-code can't be made for this printer or part, or null when it can. */
+  gcodeBlocked: string | null;
+  onExportGcode: () => void;
   onOpenInSlicer: (slicer: SlicerProgram) => void;
   onBackToDesign: () => void;
   busy: boolean;
@@ -300,8 +303,26 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
               </p>
             )}
             <p className="props-note">
-              Walls and infill from Studio 3D's own slicer, each line {settings.lineWidth} mm wide. G-code comes next.
+              Walls and infill from Studio 3D's own slicer, each line {settings.lineWidth} mm wide.
             </p>
+            <p className="props-note" data-testid="gcode-material">
+              G-code is for {PLA.name}: nozzle {PLA.firstLayerNozzleTemp} °C on the first layer, then {PLA.nozzleTemp}{" "}
+              °C; bed {PLA.bedTemp} °C; {PLA.filamentDiameter} mm filament. It's checked before it's saved.
+            </p>
+            {props.gcodeBlocked && (
+              <p className="issue warning" data-testid="gcode-blocked">
+                {props.gcodeBlocked}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={props.onExportGcode}
+              disabled={props.busy || !!props.gcodeBlocked}
+              title={props.gcodeBlocked ?? "Write the printer's G-code, check it by reading it back, then save it"}
+            >
+              <Icon name="export" />
+              Export G-code…
+            </button>
           </>
         )}
       </div>

@@ -25,7 +25,7 @@ fn write_project(path: PathBuf, text: String) -> Result<(), String> {
 
 #[tauri::command]
 fn write_export(path: PathBuf, bytes: Vec<u8>) -> Result<(), String> {
-    files::check_extension(&path, &["stl", "3mf"])?;
+    files::check_extension(&path, &["stl", "3mf", "gcode"])?;
     files::write_atomic(&path, &bytes)
 }
 

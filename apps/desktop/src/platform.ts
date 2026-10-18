@@ -16,6 +16,8 @@ export interface FileRef {
 
 /** A part file for a slicer: the mesh as STL, or as 3MF with its name, units and place on the printer's plate. */
 export type MeshFormat = "stl" | "3mf";
+/** What can be exported: the part as a mesh, or the printer's G-code from Studio 3D's own slicer. */
+export type ExportFormat = MeshFormat | "gcode";
 
 /** A slicer program on this computer, found in its usual folder or located by the user. */
 export interface SlicerProgram {
@@ -29,7 +31,7 @@ export interface Platform {
   openProject(): Promise<{ file: FileRef; text: string } | null>;
   /** Saves to `target` if given (desktop only), otherwise asks where. Returns where it went, or null if cancelled. */
   saveProject(text: string, suggestedName: string, target?: FileRef): Promise<FileRef | null>;
-  exportMesh(data: ArrayBuffer | Uint8Array, suggestedName: string, format: MeshFormat): Promise<FileRef | null>;
+  exportMesh(data: ArrayBuffer | Uint8Array, suggestedName: string, format: ExportFormat): Promise<FileRef | null>;
   /**
    * Opening a part in a slicer the user installed (desktop only): it runs as its own program with the file, the way
    * double-clicking the file would. Absent in the browser, which can't start programs.
@@ -74,8 +76,9 @@ const bytesOf = (data: ArrayBuffer | Uint8Array) => (data instanceof Uint8Array 
 const MESH_FILTERS = {
   stl: { name: "STL mesh", extensions: ["stl"] },
   "3mf": { name: "3MF model", extensions: ["3mf"] },
+  gcode: { name: "G-code for the printer", extensions: ["gcode"] },
 };
-const MESH_TYPES = { stl: "model/stl", "3mf": "model/3mf" };
+const MESH_TYPES = { stl: "model/stl", "3mf": "model/3mf", gcode: "text/x-gcode" };
 const KNOWN_SLICERS: [RegExp, string][] = [
   [/bambu-studio/i, "Bambu Studio"],
   [/orca-slicer/i, "OrcaSlicer"],

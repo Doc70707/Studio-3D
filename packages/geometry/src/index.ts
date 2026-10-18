@@ -9,3 +9,7 @@ export { offsetLoops } from "./offset";
 export { layerWalls, MISSED_TOLERANCE_MM2, type LayerWalls } from "./walls";
 export { slicePart, type SlicedLayer, type SlicedPart, type SlicerSettings } from "./slicer";
 export { SlicerClient } from "./slicerClient";
+export { layerPaths, pathLength, type PathRole, type ToolPath } from "./toolpath";
+export { PLA, writeGcode, type GcodeMaterial, type GcodeOptions } from "./gcode";
+export { checkGcode, expectedFilament, type GcodeReport } from "./gcodeCheck";
+export { makeGcode, type PrintJob, type PrintJobResult } from "./printJob";
