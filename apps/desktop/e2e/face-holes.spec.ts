@@ -9,13 +9,13 @@ const cm3 = (mm3: number) => `${(mm3 / 1000).toFixed(2)} cm³`;
 const cyl = (d: number, h: number) => Math.PI * (d / 2) ** 2 * h;
 const labels = (page: Page) => page.getByTestId("dimension");
 
-/** The middle of the part of the 3D view the panels don't cover. */
+/** The middle of the part of the 3D view the bars and palettes leave open, where the views centre the part. */
 async function middleOfView(page: Page): Promise<[number, number]> {
-  const panel = (await page.locator(".panel").boundingBox())!;
-  const top = (await page.locator(".topbar").boundingBox())!;
-  const status = (await page.locator(".statusbar").boundingBox())!;
-  const vp = page.viewportSize()!;
-  return [(panel.x + panel.width + vp.width) / 2, (top.y + top.height + status.y) / 2];
+  const view = (await page.locator("main.viewport-host").boundingBox())!;
+  const [top, left, bottom, right] = (await page.locator("main.viewport-host").getAttribute("data-safe-area"))!
+    .split(",")
+    .map(Number) as [number, number, number, number];
+  return [view.x + (left + view.width - right) / 2, view.y + (top + view.height - bottom) / 2];
 }
 
 test.beforeEach(async ({ page }) => {

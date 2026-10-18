@@ -17,6 +17,9 @@
   --text: #f4f6fb;
   --muted: #b7c0d6;
   --accent: #5ea8ff;
+  --chrome: #141a2b; /* docked bars and palettes: solid, like a CAD program's frame */
+  --chrome-2: #1a2136;
+  --chrome-edge: rgba(255, 255, 255, 0.09);
   --button: #3b82f6;
   --button-strong: #2563eb;
   --on-accent: #ffffff;
@@ -1150,8 +1153,8 @@ input:focus-visible {
 
 .pick-hint {
   position: absolute;
-  top: 88px;
-  left: 50%;
+  top: calc(var(--safe-top, 76px) + 12px);
+  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px)) / 2);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1186,8 +1189,8 @@ input:focus-visible {
 /* Unsaved work found from a session that closed without saving. */
 .recovery {
   position: absolute;
-  top: 88px;
-  left: 50%;
+  top: calc(var(--safe-top, 76px) + 12px);
+  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px)) / 2);
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 12px;
@@ -1429,7 +1432,8 @@ input:focus-visible {
 
 /* While sketching, the drawing screen takes over; the design panels step back. */
 .app.sketching .topbar,
-.app.sketching .panel,
+.app.sketching .ribbon,
+.app.sketching .dock,
 .app.sketching .statusbar {
   visibility: hidden;
 }
@@ -1845,14 +1849,13 @@ input:focus-visible {
 
 /* What is selected in the 3D view, floating at the top of the open space beside the panel. */
 .selection-bar {
-  --beside-panel: calc(var(--gap) + 316px);
   position: absolute;
-  top: 88px;
-  left: calc(var(--beside-panel) + (100% - var(--beside-panel)) / 2);
+  top: calc(var(--safe-top, 76px) + 12px);
+  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px)) / 2);
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: calc(100% - var(--beside-panel) - 2 * var(--gap));
+  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - 2 * var(--gap));
   padding: 8px 8px 8px 16px;
   border-radius: 16px;
   background: var(--glass-strong);
@@ -2045,4 +2048,447 @@ button.link:hover {
 }
 .reference-underlay {
   pointer-events: none;
+}
+
+/* ---------- Workspace: ribbon and docked palettes ---------- */
+
+/*
+ * The window is a grid: the bar with the menus, the ribbon, then the palettes either side of the open 3D view, and the
+ * status bar. The 3D view itself fills the whole window underneath, and is kept centred in the space left open.
+ */
+.app {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.app > .topbar,
+.app > .statusbar {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  grid-column: 1 / -1;
+}
+
+.app > .topbar {
+  grid-row: 1;
+}
+
+.app > .statusbar {
+  grid-row: 4;
+}
+
+.ribbon {
+  position: relative;
+  z-index: 5;
+  grid-row: 2;
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+}
+
+.dock {
+  position: relative;
+  z-index: 4;
+  grid-row: 3;
+  display: flex;
+  min-height: 0;
+}
+
+.dock-left {
+  grid-column: 1;
+}
+
+.dock-right {
+  grid-column: 3;
+}
+
+/* Ribbon */
+
+.ribbon-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 2px 10px 0;
+}
+
+.ribbon-tabs [role="tab"] {
+  padding: 6px 14px 7px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 560;
+  cursor: pointer;
+  transition: color 140ms var(--ease), background-color 140ms var(--ease);
+}
+
+.ribbon-tabs [role="tab"]:hover {
+  color: var(--text);
+}
+
+.ribbon-tabs [role="tab"][aria-selected="true"] {
+  color: var(--text);
+  background: var(--chrome-2);
+  box-shadow: 0 -2px 0 var(--accent) inset;
+}
+
+.ribbon-minimize {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 0 3px auto;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ribbon-minimize:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+.ribbon-panel {
+  display: flex;
+  padding: 6px 6px 3px;
+  overflow-x: auto;
+  background: var(--chrome-2);
+  border-bottom: 1px solid var(--chrome-edge);
+  scrollbar-width: thin;
+}
+
+/* Minimised, an opened tab drops over the 3D view instead of pushing it down. */
+.ribbon.minimized .ribbon-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  box-shadow: var(--shadow);
+  animation: ribbon-drop 160ms var(--ease);
+}
+
+@keyframes ribbon-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  border-right: 1px solid var(--chrome-edge);
+}
+
+.ribbon-group:last-child {
+  border-right: 0;
+}
+
+.ribbon-items {
+  display: flex;
+  gap: 2px;
+}
+
+.ribbon-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 58px;
+  padding: 7px 6px 5px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms var(--ease),
+    border-color 140ms var(--ease),
+    transform 100ms ease-out;
+}
+
+.ribbon-button .icon {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.ribbon-button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.ribbon-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.ribbon-button[aria-pressed="true"] {
+  background: rgba(94, 168, 255, 0.22);
+  border-color: rgba(94, 168, 255, 0.6);
+}
+
+.ribbon-button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.ribbon-group-label {
+  padding: 3px 0 1px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Palettes */
+
+.palette {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.palette-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px 7px 14px;
+  border-bottom: 1px solid var(--chrome-edge);
+  color: var(--muted);
+}
+
+.palette-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.palette-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.palette-body > .panel-scroll {
+  padding-top: 14px;
+}
+
+/* Print Studio's palette scrolls as one: its checks, layers and export buttons are read top to bottom. */
+.print-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.print-panel > .panel-scroll {
+  flex: none;
+  overflow: visible;
+}
+
+.print-panel button {
+  white-space: nowrap;
+}
+
+.palette .facts {
+  margin: 0 12px 12px;
+}
+
+.palette-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.palette.on-left .palette-resize {
+  right: -4px;
+}
+
+.palette.on-right .palette-resize {
+  left: -4px;
+}
+
+.palette-resize:hover,
+.palette-resize:focus-visible,
+.palette-resize:active {
+  outline: none;
+  background: linear-gradient(90deg, transparent 2px, var(--accent) 2px, var(--accent) 5px, transparent 5px);
+}
+
+.palette.collapsed {
+  width: 34px;
+}
+
+.palette-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 14px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  writing-mode: vertical-rl;
+  cursor: pointer;
+}
+
+.palette.on-left .palette-strip {
+  transform: rotate(180deg);
+}
+
+.palette-strip:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+
+/* Docked: solid bars and palettes against the window's edges, like a CAD program's frame. */
+
+.style-docked .topbar {
+  padding: 6px 10px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--chrome-edge);
+}
+
+.style-docked .topbar > .glass {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.style-docked .ribbon {
+  background: var(--chrome);
+}
+
+.style-docked .palette {
+  background: var(--chrome);
+}
+
+.style-docked .palette.on-left {
+  border-right: 1px solid var(--chrome-edge);
+}
+
+.style-docked .palette.on-right {
+  border-left: 1px solid var(--chrome-edge);
+}
+
+.style-docked .statusbar {
+  border-radius: 0;
+  background: var(--chrome);
+  border: 0;
+  border-top: 1px solid var(--chrome-edge);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.style-docked.focus .topbar {
+  background: transparent;
+  border-color: transparent;
+}
+
+.style-docked.focus .topbar > .glass {
+  background: var(--glass);
+  border-color: var(--glass-edge);
+  box-shadow: var(--shadow);
+}
+
+/* Floating: frosted glass over the 3D view, with the view showing between. */
+
+.style-floating {
+  gap: 12px var(--gap);
+  padding: var(--gap);
+}
+
+.style-floating .topbar {
+  padding: 0;
+}
+
+.style-floating .ribbon,
+.style-floating .palette {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-edge);
+  border-top-color: var(--glass-highlight);
+  box-shadow: var(--shadow);
+}
+
+.style-floating .ribbon {
+  border-radius: var(--radius-lg);
+  overflow: visible;
+}
+
+.style-floating .ribbon-panel {
+  background: transparent;
+  border-bottom: 0;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.style-floating .ribbon.minimized .ribbon-panel {
+  background: var(--glass-strong);
+  border-radius: var(--radius-lg);
+  margin-top: 6px;
+}
+
+.style-floating .palette {
+  border-radius: var(--radius-lg);
+}
+
+.style-floating .palette-header {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.style-floating .dock:empty {
+  display: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .style-floating .ribbon,
+  .style-floating .palette {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --chrome: #0d1220;
+    --chrome-2: #0d1220;
+    --chrome-edge: #8a96b3;
+  }
+}
+
+/* In the Properties palette the step's name is the first thing: no rule above it. */
+.palette-body .panel-scroll > .props:first-child {
+  padding-top: 0;
+  border-top: 0;
 }

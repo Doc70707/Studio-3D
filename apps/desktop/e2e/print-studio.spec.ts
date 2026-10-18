@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
 test("Prepare to print checks the real part on the chosen printer's plate", async ({ page }) => {
   await printStudio(page).click();
   await expect(page.getByRole("complementary", { name: "Print Studio" })).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "Design" })).toHaveCount(0);
+  await expect(page.getByRole("complementary", { name: "Browser" })).toHaveCount(0);
   // The default A1's plate and build volume, and the starting 60 × 40 × 30 box checked from its exported file.
   await expect(host(page)).toHaveAttribute("data-plate", "256,256,256");
   await expect(check(page, "closed")).toHaveAttribute("data-status", "ok");
@@ -105,9 +105,12 @@ test("the file exported from Print Studio is the one that was checked", async ({
 
 test("switching workspaces keeps the camera where it was", async ({ page }) => {
   const box = (await page.getByTestId("viewport-canvas").boundingBox())!;
-  await page.mouse.move(box.x + box.width - 120, box.y + box.height - 160);
+  // Inside the open part of the view, clear of the palettes.
+  const [, , bottom, right] = (await host(page).getAttribute("data-safe-area"))!.split(",").map(Number) as number[];
+  const [x, y] = [box.x + box.width - right! - 120, box.y + box.height - bottom! - 160];
+  await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width - 200, box.y + box.height - 190, { steps: 8 });
+  await page.mouse.move(x - 80, y - 30, { steps: 8 });
   await page.mouse.up();
   await settled(page);
   await expect(host(page)).toHaveAttribute("data-camera-view", "custom");

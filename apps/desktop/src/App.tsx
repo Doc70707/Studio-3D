@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   Viewport,
   isWebGLAvailable,
@@ -62,7 +62,18 @@ import {
   LINE_WIDTH,
 } from "@studio3d/document";
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
-import { DesignPanel, SHAPE_ORDER, copySource, placeNew } from "./DesignPanel";
+import { SHAPE_ORDER, copySource, placeNew, useDesignPanel } from "./DesignPanel";
+import { Palette } from "./Palette";
+import { Ribbon, type RibbonTab } from "./Ribbon";
+import {
+  DEFAULT_WORKSPACE,
+  readWorkspace,
+  sideOf,
+  writeWorkspace,
+  type PaletteId,
+  type PaletteLayout,
+  type Workspace,
+} from "./workspace";
 import { MenuBar, type Menu } from "./MenuBar";
 import { allows, interactionMode } from "./interaction";
 import { SketchEditor, type SketchDraft } from "./SketchEditor";
@@ -98,7 +109,9 @@ export function App() {
 
   const hostRef = useRef<HTMLDivElement>(null);
   const topbarRef = useRef<HTMLElement>(null);
-  const panelRef = useRef<HTMLElement>(null);
+  const ribbonRef = useRef<HTMLElement>(null);
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
   const statusRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<Viewport | null>(null);
   const geometryRef = useRef<GeometryClient | null>(null);
@@ -153,6 +166,24 @@ export function App() {
   const [panelOpen, setPanelOpen] = useState(true);
   const [focusPanel, setFocusPanel] = useState<FocusPanel>("closed");
   const panelShown = focus ? focusPanel !== "closed" : panelOpen;
+  /** How the user has arranged the workspace: kept on this computer, like a CAD program's workspace. */
+  const [layout, setLayout] = useState<Workspace>(readWorkspace);
+  const arrange = useCallback((change: (w: Workspace) => Workspace) => {
+    setLayout((w) => {
+      const next = change(w);
+      writeWorkspace(next);
+      return next;
+    });
+  }, []);
+  const layoutPalette = useCallback(
+    (id: PaletteId, patch: Partial<PaletteLayout>) => arrange((w) => ({ ...w, [id]: { ...w[id], ...patch } })),
+    [arrange],
+  );
+  const togglePalette = useCallback(
+    (id: PaletteId) =>
+      arrange((w) => ({ ...w, [id]: { ...w[id], shown: !(w[id].shown && !w[id].collapsed), collapsed: false } })),
+    [arrange],
+  );
   const togglePanel = useCallback(() => {
     if (focus) setFocusPanel((p) => (p === "closed" ? "open" : "closed"));
     else setPanelOpen((v) => !v);
@@ -190,33 +221,40 @@ export function App() {
     };
   }, []);
 
-  // The 3D view fills the window and the panels float over it, so keep the scene centred in the open space.
+  // The 3D view fills the window and the bars and palettes sit over its edges, so keep the scene centred in the space
+  // they leave open.
+  const [safeArea, setSafeArea] = useState("");
   useEffect(() => {
     const update = () => {
       const vp = viewportRef.current;
       const host = hostRef.current;
       if (!vp || !host) return;
       const h = host.getBoundingClientRect();
-      // A panel that is put away has no size, and covers nothing.
+      // Something put away has no size, and covers nothing.
       const rect = (el: HTMLElement | null) => {
         const r = el?.getBoundingClientRect();
         return r && r.width > 0 && r.height > 0 ? r : undefined;
       };
-      const top = rect(topbarRef.current);
-      const panel = rect(panelRef.current);
+      const top = Math.max(0, ...[topbarRef.current, ribbonRef.current].map((el) => (rect(el)?.bottom ?? 0) - h.top));
+      const left = rect(leftRef.current);
+      const right = rect(rightRef.current);
       const status = rect(statusRef.current);
-      vp.setSafeArea({
-        top: top ? top.bottom - h.top : 0,
-        left: panel ? panel.right - h.left : 0,
+      const area = {
+        top,
+        left: left ? left.right - h.left : 0,
         bottom: status ? h.bottom - status.top : 0,
-        right: 0,
-      });
+        right: right ? h.right - right.left : 0,
+      };
+      vp.setSafeArea(area);
+      setSafeArea([area.top, area.left, area.bottom, area.right].map(Math.round).join(","));
     };
     const ro = new ResizeObserver(update);
-    for (const el of [hostRef.current, topbarRef.current, panelRef.current, statusRef.current]) if (el) ro.observe(el);
+    for (const el of [hostRef.current, topbarRef.current, ribbonRef.current, leftRef.current, rightRef.current])
+      if (el) ro.observe(el);
+    if (statusRef.current) ro.observe(statusRef.current);
     update();
     return () => ro.disconnect();
-  }, [printing]); // each workspace has its own side panel
+  }, [printing, layout, panelShown, focus]);
 
   // Geometry engine
   useEffect(() => {
@@ -1024,7 +1062,23 @@ export function App() {
         },
         { label: "Show sizes", shortcut: "M", checked: showSizes, onSelect: () => setShowSizes((v) => !v) },
         "separator" as const,
-        { label: "Side panel", shortcut: "Ctrl+B", checked: panelShown, onSelect: togglePanel },
+        { label: "Palettes", shortcut: "Ctrl+B", checked: panelShown, onSelect: togglePanel },
+        {
+          label: "Browser",
+          checked: layout.browser.shown && !layout.browser.collapsed,
+          onSelect: () => togglePalette("browser"),
+        },
+        {
+          label: "Properties",
+          checked: layout.properties.shown && !layout.properties.collapsed,
+          onSelect: () => togglePalette("properties"),
+        },
+        {
+          label: "Minimise ribbon",
+          checked: layout.ribbonMinimized,
+          onSelect: () => arrange((w) => ({ ...w, ribbonMinimized: !w.ribbonMinimized })),
+        },
+        { label: "Reset workspace", onSelect: () => arrange(() => DEFAULT_WORKSPACE) },
         { label: "Focus canvas", shortcut: "Ctrl+0", checked: focus, onSelect: toggleFocus },
         { label: "Full screen", shortcut: "F11", checked: fullScreen, onSelect: toggleFullScreen },
       ],
@@ -1110,9 +1164,9 @@ export function App() {
       <button
         type="button"
         className="icon-only"
-        aria-label="Side panel"
+        aria-label="Palettes"
         aria-pressed={panelShown}
-        title={`${panelShown ? "Hide" : "Show"} the side panel (Ctrl+B)`}
+        title={`${panelShown ? "Hide" : "Show"} the palettes (Ctrl+B)`}
         onClick={togglePanel}
       >
         <Icon name="sidePanel" />
@@ -1146,6 +1200,141 @@ export function App() {
     </nav>
   );
 
+  const design = useDesignPanel({
+    doc,
+    issues,
+    measurements: built?.measurements ?? null,
+    builtDoc: built?.doc ?? null,
+    stale: !upToDate && built !== null,
+    onChange: project.updateFeature,
+    onAdd: project.addFeature,
+    onRemove: project.removeFeature,
+    onSketchOnFace: startPicking,
+    onPickHoleFace: startHolePicking,
+    onSketchOnPlate: sketchOnPlate,
+    onRevolve: startRevolve,
+    onEditSketch: editSketch,
+    picking,
+    onFocus: setFocusId,
+    selected: selection?.id ?? null,
+    onSelect: (id) => setSelection((s) => (id === null ? null : s?.id === id ? s : { id, face: null })),
+    onChangeReference: (id, patch) => project.updateReference(id, patch),
+    onRemoveReference: project.removeReference,
+    onCalibrate: setCalibrating,
+  });
+  /** The palette on one side of the window: Print Studio's settings, or the Browser or Properties. */
+  const docked = (side: "left" | "right") => {
+    if (printing)
+      return side === "left" ? (
+        <Palette
+          title="Print Studio"
+          icon="printer"
+          side="left"
+          layout={{ ...layout.properties, shown: true }}
+          onLayout={(patch) => layoutPalette("properties", patch)}
+        >
+          <PrintPanel
+            printer={printer}
+            state={printState}
+            busy={busy}
+            onPrinter={project.setPrinter}
+            settings={slicerSettings}
+            onSettings={project.setPrintSettings}
+            layers={layerPreview}
+            onLayerView={setLayerView}
+            onLayer={setLayerAt}
+            onExport={(format) => void exportMesh(format)}
+            gcodeBlocked={gcodeBlocked}
+            onExportGcode={() => void exportGcode()}
+            onOpenInSlicer={(slicer) => void openInSlicer(slicer)}
+            onBackToDesign={() => setWorkspace("design")}
+          />
+        </Palette>
+      ) : null;
+    const id: PaletteId = sideOf(layout, "browser") === side ? "browser" : "properties";
+    if (!layout[id].shown) return null;
+    return (
+      <Palette
+        title={id === "browser" ? "Browser" : "Properties"}
+        icon={id === "browser" ? "tree" : "properties"}
+        side={side}
+        layout={layout[id]}
+        onLayout={(patch) => layoutPalette(id, patch)}
+      >
+        {id === "browser" ? design.browser : design.properties}
+      </Palette>
+    );
+  };
+  const ribbonShown = !focus && !draft;
+  const viewTab: RibbonTab = {
+    id: "view",
+    label: "View",
+    groups: [
+      {
+        label: "Palettes",
+        items: [
+          {
+            icon: "tree",
+            label: "Browser",
+            name: "Show Browser",
+            title: "Show or hide the Browser: the part's steps",
+            pressed: layout.browser.shown && !layout.browser.collapsed,
+            onClick: () => togglePalette("browser"),
+          },
+          {
+            icon: "properties",
+            label: "Properties",
+            name: "Show Properties",
+            title: "Show or hide Properties: the sizes of the step being worked on",
+            pressed: layout.properties.shown && !layout.properties.collapsed,
+            onClick: () => togglePalette("properties"),
+          },
+          {
+            icon: "swap",
+            label: "Swap sides",
+            title: "Swap the Browser and Properties to the other sides of the window",
+            onClick: () => arrange((w) => ({ ...w, browserSide: w.browserSide === "left" ? "right" : "left" })),
+          },
+        ],
+      },
+      {
+        label: "Style",
+        items: [
+          {
+            icon: "sidePanel",
+            label: "Docked",
+            title: "Docked: solid palettes against the window's edges",
+            pressed: layout.style === "docked",
+            onClick: () => arrange((w) => ({ ...w, style: "docked" })),
+          },
+          {
+            icon: "floating",
+            label: "Floating",
+            title: "Floating: frosted-glass palettes over the 3D view",
+            pressed: layout.style === "floating",
+            onClick: () => arrange((w) => ({ ...w, style: "floating" })),
+          },
+        ],
+      },
+      {
+        label: "Workspace",
+        items: [
+          {
+            icon: "reset",
+            label: "Reset",
+            name: "Reset workspace",
+            title: "Put the ribbon and palettes back as they started",
+            onClick: () => arrange(() => DEFAULT_WORKSPACE),
+          },
+        ],
+      },
+    ],
+  };
+  // Print Studio has one palette of its own, so only the style and reset apply there.
+  const ribbonTabs: RibbonTab[] = printing
+    ? [{ ...viewTab, groups: viewTab.groups.filter((g) => g.label !== "Palettes") }]
+    : [{ id: "home", label: "Home", groups: design.ribbon }, viewTab];
+
   return (
     <div
       className={[
@@ -1155,10 +1344,12 @@ export function App() {
         focus && "focus",
         fullScreen && "full-screen",
         !panelShown && "panel-hidden",
+        `style-${layout.style}`,
       ]
         .filter(Boolean)
         .join(" ")}
       data-mode={mode}
+      style={safeAreaStyle(safeArea)}
     >
       <main
         className="viewport-host"
@@ -1173,6 +1364,7 @@ export function App() {
         data-camera-target={camera ? camera.target.join(",") : ""}
         data-references={shownPictures.length}
         data-plate={printing ? printer.volume.join(",") : "256,256"}
+        data-safe-area={safeArea}
         data-layers={sliced ? `${layer + 1}/${layerCount}` : layerPreview ? layerPreview.status : undefined}
         data-geometry={
           engine === "ready" ? (empty ? "empty" : shownCurrent ? "current" : building ? "building" : "stale") : engine
@@ -1369,49 +1561,21 @@ export function App() {
         {focus && screenModes}
       </header>
 
-      {printing ? (
-        <PrintPanel
-          ref={panelRef}
-          printer={printer}
-          state={printState}
-          busy={busy}
-          onPrinter={project.setPrinter}
-          settings={slicerSettings}
-          onSettings={project.setPrintSettings}
-          layers={layerPreview}
-          onLayerView={setLayerView}
-          onLayer={setLayerAt}
-          onExport={(format) => void exportMesh(format)}
-          gcodeBlocked={gcodeBlocked}
-          onExportGcode={() => void exportGcode()}
-          onOpenInSlicer={(slicer) => void openInSlicer(slicer)}
-          onBackToDesign={() => setWorkspace("design")}
-        />
-      ) : (
-        <DesignPanel
-          ref={panelRef}
-          doc={doc}
-          issues={issues}
-          measurements={built?.measurements ?? null}
-          builtDoc={built?.doc ?? null}
-          stale={!upToDate && built !== null}
-          onChange={project.updateFeature}
-          onAdd={project.addFeature}
-          onRemove={project.removeFeature}
-          onSketchOnFace={startPicking}
-          onPickHoleFace={startHolePicking}
-          onSketchOnPlate={sketchOnPlate}
-          onRevolve={startRevolve}
-          onEditSketch={editSketch}
-          picking={picking}
-          onFocus={setFocusId}
-          selected={selection?.id ?? null}
-          onSelect={(id) => setSelection((s) => (id === null ? null : s?.id === id ? s : { id, face: null }))}
-          onChangeReference={(id, patch) => project.updateReference(id, patch)}
-          onRemoveReference={project.removeReference}
-          onCalibrate={setCalibrating}
+      {ribbonShown && (
+        <Ribbon
+          ref={ribbonRef}
+          tabs={ribbonTabs}
+          minimized={layout.ribbonMinimized}
+          onMinimized={(ribbonMinimized) => arrange((w) => ({ ...w, ribbonMinimized }))}
         />
       )}
+
+      <div className="dock dock-left" ref={leftRef}>
+        {panelShown && docked("left")}
+      </div>
+      <div className="dock dock-right" ref={rightRef}>
+        {panelShown && docked("right")}
+      </div>
 
       {draft && (
         <SketchEditor
@@ -1489,7 +1653,7 @@ const SHORTCUTS: [string, string][] = [
   ["Menus", "Alt, or Alt + the menu's first letter"],
   ["Full screen on or off", "F11 (Esc also leaves it)"],
   ["Focus canvas (put the panels away)", "Ctrl+0 (Esc also leaves it)"],
-  ["Show or hide the side panel", "Ctrl+B"],
+  ["Show or hide the palettes", "Ctrl+B"],
   ["Sketch: Select / Rectangle / Circle / Outline", "V / R / C / L"],
   ["Sketch: type a size while drawing", "Type the number, Tab to the next box, Enter"],
   ["Sketch: close an outline", "Enter, or click its first corner"],
@@ -1653,4 +1817,11 @@ function SelectionBar(props: {
       </button>
     </div>
   );
+}
+
+/** The open part of the 3D view as CSS variables, so bars that float over it sit below the ribbon, between palettes. */
+function safeAreaStyle(area: string): CSSProperties | undefined {
+  const [top, left, , right] = area.split(",").map(Number);
+  if (top === undefined || left === undefined || right === undefined || Number.isNaN(top)) return undefined;
+  return { "--safe-top": `${top}px`, "--safe-left": `${left}px`, "--safe-right": `${right}px` } as CSSProperties;
 }

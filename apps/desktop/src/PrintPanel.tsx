@@ -104,7 +104,7 @@ interface Props {
   busy: boolean;
 }
 
-export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(props, ref) {
+export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(props, ref) {
   const { printer, state, settings, layers } = props;
   const errors = state.kind === "checked" ? state.checks.filter((c) => c.status === "error").length : 0;
   const ready = !props.busy && state.kind === "checked";
@@ -140,9 +140,8 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
     if (picked) remember({ last: picked.path, located: picked });
   };
   return (
-    <aside className="panel glass print-panel" aria-label="Print Studio" ref={ref}>
+    <div className="print-panel" ref={ref}>
       <div className="panel-scroll">
-        <h2 className="panel-title">Print Studio</h2>
         <div className="field compact">
           <label htmlFor="printer">Printer</label>
           <div className="input-row select-row">
@@ -417,6 +416,6 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
           Back to design
         </button>
       </div>
-    </aside>
+    </div>
   );
 });

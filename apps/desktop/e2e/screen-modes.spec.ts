@@ -5,7 +5,7 @@ const host = (page: Page) => page.locator("main.viewport-host");
 const app = (page: Page) => page.locator(".app");
 const field = (page: Page, label: string) => page.getByLabel(label, { exact: true });
 const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
-const panel = (page: Page) => page.locator("aside.panel");
+const panel = (page: Page) => page.getByRole("complementary", { name: "Properties" });
 const screen = (page: Page) => page.getByRole("navigation", { name: "Screen" });
 const bar = (page: Page) => page.getByTestId("selection-bar");
 /** The view publishes its camera after drawing the next frame; wait for it so a read isn't one frame old. */
@@ -19,7 +19,9 @@ const camera = async (page: Page) => ({
 /** Orbits away from the standard views, so the camera is somewhere only the user put it. */
 async function orbit(page: Page) {
   const box = (await page.getByTestId("viewport-canvas").boundingBox())!;
-  const [x, y] = [box.x + box.width - 120, box.y + box.height - 160];
+  // Inside the open part of the view, clear of the palettes.
+  const [, , bottom, right] = (await host(page).getAttribute("data-safe-area"))!.split(",").map(Number) as number[];
+  const [x, y] = [box.x + box.width - right! - 120, box.y + box.height - bottom! - 160];
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x - 80, y - 30, { steps: 8 });
@@ -97,19 +99,19 @@ test("Ctrl+0 and Escape go in and out of Focus canvas, and the panel comes up fo
   await expect(field(page, "Diameter")).toHaveValue("24"); // the typed size was kept
 });
 
-test("the side panel hides and comes back with Ctrl+B, the screen button and the View menu", async ({ page }) => {
+test("the palettes hide and come back with Ctrl+B, the screen button and the View menu", async ({ page }) => {
   await page.keyboard.press("Control+b");
   await expect(panel(page)).toBeHidden();
-  await expect(screen(page).getByRole("button", { name: "Side panel" })).toHaveAttribute("aria-pressed", "false");
+  await expect(screen(page).getByRole("button", { name: "Palettes" })).toHaveAttribute("aria-pressed", "false");
   await canvasFillsView(page);
-  await screen(page).getByRole("button", { name: "Side panel" }).click();
+  await screen(page).getByRole("button", { name: "Palettes" }).click();
   await expect(panel(page)).toBeVisible();
   await page.getByRole("menubar").getByRole("menuitem", { name: "View", exact: true }).click();
-  await page.getByRole("menuitemcheckbox", { name: "Side panel" }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Palettes" }).click();
   await expect(panel(page)).toBeHidden();
   await page.getByRole("menubar").getByRole("menuitem", { name: "View", exact: true }).click();
-  await expect(page.getByRole("menuitemcheckbox", { name: "Side panel" })).toHaveAttribute("aria-checked", "false");
-  await page.getByRole("menuitemcheckbox", { name: "Side panel" }).click();
+  await expect(page.getByRole("menuitemcheckbox", { name: "Palettes" })).toHaveAttribute("aria-checked", "false");
+  await page.getByRole("menuitemcheckbox", { name: "Palettes" }).click();
   await expect(panel(page)).toBeVisible();
 });
 

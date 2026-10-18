@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ReferenceProps } from "./ReferencePanel";
 import {
   DEFAULT_FIT,
@@ -66,6 +66,7 @@ import {
 import type { Measurements } from "@studio3d/geometry";
 import { Icon, type IconName } from "./Icon";
 import { NumberField } from "./NumberField";
+import type { RibbonGroup } from "./Ribbon";
 
 /** Tooltips for shape sizes: shown on hover, so the panel itself stays short. */
 const HELP: Record<string, string> = {
@@ -119,29 +120,28 @@ const ROW_TEST_ID = (f: Feature) =>
   isShape(f) ? "shape" : isEdgeStep(f) ? "edge-step" : isCopyStep(f) ? "copy-step" : f.type;
 
 /**
- * The left panel, in three parts: a toolbar to add things, the steps of the part in the order they are built (one
- * line each), and the properties of the one step being worked on. The part's size and volume sit underneath.
+ * The design workspace's contents: the ribbon's commands for adding to the part, the Browser (the steps of the part in
+ * the order they are built, one line each, and any reference pictures), and Properties (the one step being worked on,
+ * with the part's size and volume underneath). A hook, so the two palettes can sit on either side of the window and
+ * still share which step is being worked on.
  */
-export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
-  {
-    doc,
-    issues,
-    measurements,
-    builtDoc,
-    stale,
-    onChange,
-    onAdd,
-    onRemove,
-    onFocus,
-    selected: picked,
-    onSelect,
-    onChangeReference,
-    onRemoveReference,
-    onCalibrate,
-    ...sketching
-  },
-  ref,
-) {
+export function useDesignPanel({
+  doc,
+  issues,
+  measurements,
+  builtDoc,
+  stale,
+  onChange,
+  onAdd,
+  onRemove,
+  onFocus,
+  selected: picked,
+  onSelect,
+  onChangeReference,
+  onRemoveReference,
+  onCalibrate,
+  ...sketching
+}: Props): { browser: ReactNode; properties: ReactNode; ribbon: RibbonGroup[] } {
   const features = doc.features;
   const references = doc.references ?? [];
   // The step whose properties are shown: the one picked, else the last one looked at, else the first. A reference
@@ -177,91 +177,95 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
     setLast(f.id);
     onSelect(f.id);
   };
-  const tools: (ToolButton | "gap" | "break")[] = [
-    ...SHAPE_ORDER.map((type) => ({
-      icon: type,
-      label: `Add ${SHAPES[type].label.toLowerCase()}`,
-      onClick: () => add(newShape(doc, type, where)),
-    })),
-    { icon: "hole", label: "Add hole", onClick: () => add(newHole(doc, where)) },
-    "break",
+  const ribbon: RibbonGroup[] = [
     {
-      icon: "face",
-      label: "Sketch on a face",
-      onClick: sketching.onSketchOnFace,
-      pressed: sketching.picking,
-      disabled: !measurements,
-      reason: "Add a shape first",
-    },
-    { icon: "pencil", label: "Draw on the plate", onClick: sketching.onSketchOnPlate },
-    { icon: "revolve", label: "Revolve", onClick: sketching.onRevolve },
-    "gap",
-    {
-      icon: "hollow",
-      label: "Hollow out",
-      onClick: () => add(newHollow(doc)),
-      disabled: hasHollow || !measurements,
-      reason: hasHollow ? "The part is already hollowed" : "Add a shape first",
+      label: "Shapes",
+      items: [
+        ...SHAPE_ORDER.map((type) => ({
+          icon: type as IconName,
+          label: SHAPES[type].label,
+          name: `Add ${SHAPES[type].label.toLowerCase()}`,
+          title: `Add a ${SHAPES[type].label.toLowerCase()}`,
+          onClick: () => add(newShape(doc, type, where)),
+        })),
+        { icon: "hole", label: "Hole", name: "Add hole", title: "Add a hole", onClick: () => add(newHole(doc, where)) },
+      ],
     },
     {
-      icon: "fillet",
-      label: "Fillet",
-      title: "Fillet: round edges",
-      onClick: () => add(newEdgeStep(doc, "fillet")),
-      disabled: !measurements,
-      reason: "Add a shape first",
+      label: "Sketch",
+      items: [
+        {
+          icon: "face",
+          label: "On a face",
+          name: "Sketch on a face",
+          title: "Sketch on a face: click a flat face, then draw",
+          onClick: sketching.onSketchOnFace,
+          pressed: sketching.picking,
+          disabled: !measurements,
+          reason: "Add a shape first",
+        },
+        {
+          icon: "pencil",
+          label: "On the plate",
+          name: "Draw on the plate",
+          title: "Draw on the plate",
+          onClick: sketching.onSketchOnPlate,
+        },
+        { icon: "revolve", label: "Revolve", title: "Revolve: spin an outline round a line", onClick: sketching.onRevolve },
+      ],
     },
     {
-      icon: "chamfer",
-      label: "Chamfer",
-      title: "Chamfer: bevel edges",
-      onClick: () => add(newEdgeStep(doc, "chamfer")),
-      disabled: !measurements,
-      reason: "Add a shape first",
-    },
-    {
-      icon: "pattern",
-      label: "Pattern",
-      title: source ? `Pattern: repeat ${source.name}` : "Pattern",
-      onClick: () => source && add(newPattern(doc, source.id, placeNew(measurements))),
-      disabled: !source,
-      reason: "Add a shape, hole or sketch first",
-    },
-    {
-      icon: "mirror",
-      label: "Mirror",
-      title: source ? `Mirror: copy ${source.name} to the other side` : "Mirror",
-      onClick: () => source && add(newMirror(doc, source.id, placeNew(measurements).x)),
-      disabled: !source,
-      reason: "Add a shape, hole or sketch first",
+      label: "Modify",
+      items: [
+        {
+          icon: "hollow",
+          label: "Hollow",
+          name: "Hollow out",
+          title: "Hollow out: leave walls of a chosen thickness",
+          onClick: () => add(newHollow(doc)),
+          disabled: hasHollow || !measurements,
+          reason: hasHollow ? "The part is already hollowed" : "Add a shape first",
+        },
+        {
+          icon: "fillet",
+          label: "Fillet",
+          title: "Fillet: round edges",
+          onClick: () => add(newEdgeStep(doc, "fillet")),
+          disabled: !measurements,
+          reason: "Add a shape first",
+        },
+        {
+          icon: "chamfer",
+          label: "Chamfer",
+          title: "Chamfer: bevel edges",
+          onClick: () => add(newEdgeStep(doc, "chamfer")),
+          disabled: !measurements,
+          reason: "Add a shape first",
+        },
+        {
+          icon: "pattern",
+          label: "Pattern",
+          title: source ? `Pattern: repeat ${source.name}` : "Pattern",
+          onClick: () => source && add(newPattern(doc, source.id, placeNew(measurements))),
+          disabled: !source,
+          reason: "Add a shape, hole or sketch first",
+        },
+        {
+          icon: "mirror",
+          label: "Mirror",
+          title: source ? `Mirror: copy ${source.name} to the other side` : "Mirror",
+          onClick: () => source && add(newMirror(doc, source.id, placeNew(measurements).x)),
+          disabled: !source,
+          reason: "Add a shape, hole or sketch first",
+        },
+      ],
     },
   ];
 
   const issuesOf = (id: string) => issues.filter((i) => i.featureId === id);
-  return (
-    <aside className="panel glass" aria-label="Design" ref={ref}>
-      <div className="panel-tools" role="toolbar" aria-label="Add to the part">
-        {tools.map((t, i) =>
-          t === "gap" || t === "break" ? (
-            <span key={`${t}${i}`} className={`tool-${t}`} aria-hidden="true" />
-          ) : (
-            <button
-              key={t.label}
-              type="button"
-              className="tool"
-              aria-label={t.label}
-              aria-pressed={t.pressed}
-              title={t.disabled ? `${t.title ?? t.label} (${t.reason})` : (t.title ?? t.label)}
-              disabled={t.disabled}
-              onClick={t.onClick}
-            >
-              <Icon name={t.icon} />
-            </button>
-          ),
-        )}
-      </div>
-      <div className="panel-scroll" ref={scroller}>
-        <h2 className="panel-title">Steps</h2>
+  const browser = (
+    <div className="panel-scroll" ref={scroller} data-testid="browser">
+        <h3 className="panel-title">Steps</h3>
         {features.length === 0 ? (
           <p className="empty" data-testid="empty-plate">
             Empty plate. Add a shape to start.
@@ -287,7 +291,7 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
         )}
         {references.length > 0 && (
           <>
-            <h2 className="panel-title">Reference pictures</h2>
+            <h3 className="panel-title">Reference pictures</h3>
             <ol className="steps" aria-label="Reference pictures">
               {references.map((r) => (
                 <li
@@ -345,6 +349,11 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
             </ol>
           </>
         )}
+    </div>
+  );
+  const properties = (
+    <>
+      <div className="panel-scroll">
         {general.map((i) => (
           <p key={i.message} className={`issue ${i.severity}`} role="alert">
             {i.message}
@@ -398,19 +407,11 @@ export const DesignPanel = forwardRef<HTMLElement, Props>(function DesignPanel(
         )}
       </div>
       {builtDoc && <Facts box={singleBox(builtDoc)} measurements={measurements} />}
-    </aside>
+    </>
   );
-});
-
-interface ToolButton {
-  icon: IconName;
-  label: string;
-  title?: string;
-  onClick: () => void;
-  pressed?: boolean;
-  disabled?: boolean;
-  reason?: string;
+  return { browser, properties, ribbon };
 }
+
 
 const iconOf = (f: Feature): IconName =>
   isShape(f) ? f.type : f.type === "sketch" ? (f.revolve !== undefined ? "revolve" : "pencil") : f.type;

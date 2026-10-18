@@ -50,6 +50,15 @@ describe("text contrast on glass", () => {
     }
   }
 
+  // Docked palettes and bars are solid, so nothing behind them changes how they read.
+  for (const surface of ["chrome", "chrome-2"]) {
+    for (const text of ["text", "muted", "accent", "error", "warning", "success"]) {
+      it(`${text} on the docked ${surface} is at least 4.5:1`, () => {
+        expect(contrast(variable(text).rgb, variable(surface).rgb)).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  }
+
   it("the measured volume (accent) is readable on the panel", () => {
     expect(contrast(variable("accent").rgb, over(variable("glass-strong"), MODEL_BLUE))).toBeGreaterThanOrEqual(4.5);
   });

@@ -38,6 +38,16 @@ const PATHS = {
   focus: "M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M9 12h6",
   sidePanel: "M4 5h16v14H4zM9 5v14",
   printer: "M5 4h14v4H5zM3 8h18v8H3zM7 16h10v4H7zM10 12h4M8 20v-4M16 20v-4",
+  chevronUp: "M6 15l6-6 6 6",
+  chevronDown: "M6 9l6 6 6-6",
+  chevronLeft: "M15 6l-6 6 6 6",
+  chevronRight: "M9 6l6 6-6 6",
+  swap: "M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4",
+  tree: "M5 4h5v4H5zM9 6h3v12h2M12 12h2M14 10h5v4h-5zM14 16h5v4h-5z",
+  properties: "M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0M14 4v4M6 10v4M16 16v4",
+  layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
+  reset: "M4 4v6h6M4.5 10A8 8 0 1 1 6 17.5",
+  floating: "M4 6h7v12H4zM14 6h6v6h-6z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

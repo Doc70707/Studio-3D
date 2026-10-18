@@ -48,14 +48,14 @@ test("a hole shows its diameter and distance from the edges when it's being edit
 
 test("the status bar says where the pointer is on the part", async ({ page }) => {
   await page.getByRole("button", { name: "Top", exact: true }).click();
-  const panel = (await page.locator(".panel").boundingBox())!;
-  const top = (await page.locator(".topbar").boundingBox())!;
-  const status = (await page.locator(".statusbar").boundingBox())!;
-  const vp = page.viewportSize()!;
-  await page.mouse.move((panel.x + panel.width + vp.width) / 2, (top.y + top.height + status.y) / 2);
+  const view = (await page.locator("main.viewport-host").boundingBox())!;
+  const [top, left, bottom, right] = (await page.locator("main.viewport-host").getAttribute("data-safe-area"))!
+    .split(",")
+    .map(Number) as [number, number, number, number];
+  await page.mouse.move(view.x + (left + view.width - right) / 2, view.y + (top + view.height - bottom) / 2);
   // Looking down into the open box, the pointer is on its floor, 2 mm up.
   await expect(page.getByTestId("pointer-readout")).toContainText("left/right 0.0 · front/back 0.0 · height 2.0 mm");
-  await page.mouse.move(vp.width - 40, top.y + top.height + 40); // over empty plate
+  await page.mouse.move(view.x + left + 40, view.y + top + 40); // over empty plate
   await expect(page.getByTestId("pointer-readout")).toHaveText("");
 });
 

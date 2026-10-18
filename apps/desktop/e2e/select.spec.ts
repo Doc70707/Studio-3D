@@ -7,16 +7,16 @@ const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometr
 const card = (page: Page, name: string) => page.getByTestId("shape").filter({ hasText: name });
 const bar = (page: Page) => page.getByTestId("selection-bar");
 
-/** The middle of the part of the 3D view the panels don't cover, where the views centre the part. */
+/** The middle of the part of the 3D view the bars and palettes leave open, where the views centre the part. */
 async function middle(page: Page) {
-  const panel = (await page.locator("aside.panel").boundingBox())!;
-  const top = (await page.locator("header.topbar").boundingBox())!;
-  const status = (await page.locator("footer.statusbar").boundingBox())!;
   const view = (await host(page).boundingBox())!;
-  return {
-    x: (panel.x + panel.width + view.x + view.width) / 2,
-    y: (top.y + top.height + status.y) / 2,
-  };
+  const [top, left, bottom, right] = (await host(page).getAttribute("data-safe-area"))!.split(",").map(Number) as [
+    number,
+    number,
+    number,
+    number,
+  ];
+  return { x: view.x + (left + view.width - right) / 2, y: view.y + (top + view.height - bottom) / 2 };
 }
 
 test.beforeEach(async ({ page }) => {

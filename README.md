@@ -129,10 +129,16 @@ What works today:
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.
-- A clean frosted-glass interface: the 3D view fills the window and the controls float over it. Text contrast is
-  checked by a test, and the app respects Windows' reduced motion, reduced transparency and high contrast settings.
+- A workspace you can arrange, in the style of Autodesk apps: a ribbon with Home (shapes, sketch, modify) and View
+  tabs that minimises to its tab names (double-click a tab, as in Civil 3D); a Browser palette with the part's steps
+  and a Properties palette with the sizes of the step being worked on. Palettes fold to a strip, resize from their
+  inner edge (drag or arrow keys), swap sides and hide; View > Reset workspace puts everything back. Docked (solid,
+  against the edges) or Floating (frosted glass over the view). The layout is remembered on this computer, and the
+  part stays centred in the space the palettes leave open.
+- Text contrast is checked by a test, and the app respects Windows' reduced motion, reduced transparency and high
+  contrast settings.
 
-![Studio 3D](docs/ui/glass-default.png)
+![Studio 3D](docs/ui/workspace-docked.png)
 
 Not yet: G-code for Bambu printers, material and speed settings, supports, and more than one part on the plate.
 
