@@ -9,14 +9,16 @@ const cm3 = (mm3: number) => `${(mm3 / 1000).toFixed(2)} cm³`;
 const canvas = (page: Page) => page.getByTestId("sketch-canvas");
 const profiles = (page: Page) => page.getByTestId("sketch-profile");
 
-/** Where a sketch point (in mm) is on screen, once the drawing has stopped sliding (it eases after a panel closes). */
+/** Where a sketch point (in mm) is on screen, once the drawing and its canvas have stopped moving (they ease after a
+ * panel closes, and the canvas can still be laying out when the sketch opens). */
 async function at(page: Page, u: number, v: number): Promise<[number, number]> {
   const c = canvas(page);
   let last = "";
   await expect
     .poll(
       async () => {
-        const now = `${await c.getAttribute("data-origin")} ${await c.getAttribute("data-scale")}`;
+        const box = JSON.stringify(await c.boundingBox());
+        const now = `${box} ${await c.getAttribute("data-origin")} ${await c.getAttribute("data-scale")}`;
         const still = now === last;
         last = now;
         return still;
