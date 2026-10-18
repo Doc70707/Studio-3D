@@ -367,7 +367,7 @@ button {
 }
 
 .segmented button {
-  min-width: 62px;
+  min-width: 56px;
   justify-content: center;
   color: var(--muted);
 }
@@ -1292,13 +1292,93 @@ input:focus-visible {
 }
 
 .app.focus .topbar > .bar:first-child,
-.app.focus .topbar > .primary,
+.app.focus .topbar > .workspaces,
 .app.focus .statusbar {
   display: none;
 }
 
 .app.focus .panel {
   bottom: var(--gap);
+}
+
+/* ---------- Print Studio ---------- */
+
+.workspaces button {
+  min-width: 0;
+}
+
+.workspaces button[aria-pressed="false"] {
+  color: var(--text);
+}
+
+.print-panel [data-testid="build-volume"] {
+  margin: 8px 0 18px;
+}
+
+.print-checks {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.print-check {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.print-check .icon {
+  margin-top: 2px;
+}
+
+.print-check.ok .icon {
+  color: var(--success);
+}
+
+.print-check.warning .icon {
+  color: var(--warning);
+}
+
+.print-check.error {
+  color: var(--error);
+}
+
+.print-actions {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  margin: 0 12px 12px;
+}
+
+.print-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-md);
+  background: var(--fill);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.print-actions button.primary {
+  flex: 1;
+  border: 0;
+  background: linear-gradient(180deg, var(--button), var(--button-strong));
+  color: var(--on-accent);
+}
+
+.print-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* While sketching, the drawing screen takes over; the design panels step back. */

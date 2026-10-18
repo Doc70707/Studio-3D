@@ -218,6 +218,7 @@ test("a bracket drawn on the plate, saved and exported as a watertight STL", asy
   await page.screenshot({ path: `${OUT}sketch-bracket.png` });
 
   const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await page.getByRole("button", { name: "Export STL" }).click();
   const file = `${OUT}app-export-sketch.stl`;
   mkdirSync(OUT, { recursive: true });

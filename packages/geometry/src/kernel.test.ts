@@ -1426,3 +1426,17 @@ describe("clearance, tapped, counterbored and countersunk holes", { timeout: 120
     expect(rel(r.measurements.volume, 72000 - 3 * (cyl(4, 27) + cyl(8, 3)))).toBeLessThan(1e-7);
   });
 });
+
+describe("print checks on the exported file", () => {
+  it("counts separate pieces in the solid and in the STL, and a hollow box is still one piece", async () => {
+    const apart = designed(part(shape("box", { wall: 0 }), shape("cylinder", { x: 80, z: 0 })));
+    expect(apart.measurements.solids).toBe(2);
+    expect(checkBinaryStl(await exportStl(apart.shape)).bodies).toBe(2);
+    const touching = designed(part(shape("box", { wall: 0 }), shape("cylinder", { z: 20 }))); // on its 20 mm top
+    expect(touching.measurements.solids).toBe(1);
+    expect(checkBinaryStl(await exportStl(touching.shape)).bodies).toBe(1);
+    const hollow = designed(part(shape("box", { wall: 2 })));
+    expect(hollow.measurements.solids).toBe(1);
+    expect(checkBinaryStl(await exportStl(hollow.shape)).bodies).toBe(1);
+  });
+});

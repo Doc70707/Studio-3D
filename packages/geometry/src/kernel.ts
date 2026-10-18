@@ -4,6 +4,7 @@ import {
   setOC,
   getOC,
   asPnt,
+  iterTopo,
   draw,
   drawCircle,
   drawRectangle,
@@ -938,6 +939,7 @@ export function measure(shape: Shape3D): Measurements {
     size: [bb.width, bb.height, bb.depth],
     min: [min[0], min[1], min[2]],
     max: [max[0], max[1], max[2]],
+    solids: [...iterTopo(shape.wrapped, "solid")].length,
   };
 }
 

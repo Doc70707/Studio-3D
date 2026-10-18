@@ -108,7 +108,10 @@ test("every shape can be removed, even the first one, leaving an empty plate", a
   await expect(host(page)).toHaveAttribute("data-geometry", "empty");
   await expect(page.getByTestId("shape")).toHaveCount(0);
   await expect(page.getByTestId("empty-plate")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Export/ })).toBeDisabled();
+  await page.getByRole("button", { name: "Print Studio" }).click();
+  await expect(page.getByTestId("print-blocked")).toContainText("nothing to print");
+  await expect(page.getByRole("button", { name: "Export STL" })).toBeDisabled();
+  await page.getByRole("button", { name: "Back to design" }).click();
   // A new part can be started from the empty plate, and undo brings the old one back.
   await page.getByRole("button", { name: "Add cylinder" }).click();
   await current(page);

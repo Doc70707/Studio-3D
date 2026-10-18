@@ -20,6 +20,8 @@ export interface Measurements {
   size: [number, number, number];
   min: [number, number, number];
   max: [number, number, number];
+  /** Separate solid pieces; more than one means parts that don't touch. */
+  solids: number;
 }
 
 export type Request = { id: number; kind: "rebuild"; document: ProjectDocument } | { id: number; kind: "exportStl" };

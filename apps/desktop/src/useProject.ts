@@ -25,7 +25,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.24.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.25.0" };
 
 /** How long after the last edit the unsaved work is backed up. */
 export const BACKUP_DELAY_MS = 2000;
@@ -135,6 +135,12 @@ export function useProject() {
         const { references: _, ...rest } = d;
         return references.length ? { ...rest, references } : rest;
       }, null),
+    [edit],
+  );
+
+  /** Print Studio's printer. Saved with the project and undoable, but beside the design, so it never rebuilds. */
+  const setPrinter = useCallback(
+    (printer: string) => edit((d) => ({ ...d, print: { ...d.print, printer } }), null),
     [edit],
   );
 
@@ -366,6 +372,7 @@ export function useProject() {
       addReference,
       updateReference,
       removeReference,
+      setPrinter,
       undo,
       redo,
       canUndo: undoable,
@@ -395,6 +402,7 @@ export function useProject() {
       addReference,
       updateReference,
       removeReference,
+      setPrinter,
       undo,
       redo,
       undoable,

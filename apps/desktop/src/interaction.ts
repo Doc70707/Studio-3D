@@ -9,9 +9,17 @@ export type InteractionMode =
   /** The sketch screen is open and handles its own pointer and keys. */
   | "sketch"
   /** A move arrow is being dragged. */
-  | "move";
+  | "move"
+  /** Print Studio: the part is looked at on the printer's plate; the design isn't edited here. */
+  | "print";
 
-export function interactionMode(s: { sketching: boolean; picking: boolean; moving: boolean }): InteractionMode {
+export function interactionMode(s: {
+  sketching: boolean;
+  picking: boolean;
+  moving: boolean;
+  printing?: boolean;
+}): InteractionMode {
+  if (s.printing) return "print";
   if (s.sketching) return "sketch";
   if (s.picking) return "pick-face";
   if (s.moving) return "move";
@@ -37,6 +45,7 @@ const ALLOWED: Record<InteractionMode, readonly Action[]> = {
   "pick-face": ["pick-face", "view-keys", "file-keys"],
   sketch: [],
   move: [],
+  print: ["view-keys", "file-keys"],
 };
 
 export const allows = (mode: InteractionMode, action: Action) => ALLOWED[mode].includes(action);

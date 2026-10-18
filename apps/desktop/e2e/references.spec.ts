@@ -61,8 +61,11 @@ async function clickPixel(page: Page, x: number, y: number) {
 
 async function exportedStl(page: Page): Promise<Buffer> {
   const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await page.getByRole("button", { name: "Export STL" }).click();
-  return readFileSync((await (await download).path())!);
+  const bytes = readFileSync((await (await download).path())!);
+  await page.getByRole("button", { name: "Back to design" }).click();
+  return bytes;
 }
 
 test.beforeEach(async ({ page }) => {

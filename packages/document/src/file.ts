@@ -4,6 +4,7 @@
 import { EDGE_SETS, OPEN_SIDES, SIZE_FIELDS, type Feature, type ProjectDocument } from "./model";
 import { CLEARANCE_SERIES, isScrewSize, isThreadSize } from "./threads";
 import { referenceProblem, type ReferenceImage } from "./reference";
+import { printSetupProblem, type PrintSetup } from "./print";
 
 export const FILE_FORMAT = "studio3d-project";
 export const FILE_FORMAT_VERSION = 2;
@@ -50,13 +51,14 @@ export function serializeProject(doc: ProjectDocument, app: AppInfo, preserved: 
         ...f,
       })),
       ...(doc.references?.length && { references: doc.references }),
+      ...(doc.print && { print: doc.print }),
     },
   };
   return JSON.stringify(file, null, 2) + "\n";
 }
 
 const KNOWN_FILE_KEYS = new Set(["format", "formatVersion", "app", "document"]);
-const KNOWN_DOC_KEYS = new Set(["units", "features", "references"]);
+const KNOWN_DOC_KEYS = new Set(["units", "features", "references", "print"]);
 /** The numbers each kind of step stores. */
 const NUMBERS: Record<Feature["type"], readonly string[]> = {
   box: ["x", "y", "z", ...SIZE_FIELDS.box],
@@ -401,9 +403,16 @@ export function parseProject(text: string): ParseResult {
     }
   }
 
+  let print: PrintSetup | undefined;
+  if (docRaw.print !== undefined) {
+    const problem = printSetupProblem(docRaw.print);
+    if (problem) return { ok: false, error: `This project file is damaged: its print setup ${problem}.` };
+    print = { ...(docRaw.print as PrintSetup) }; // settings from a newer version ride along, unused
+  }
+
   return {
     ok: true,
-    document: { units: "mm", features, ...(references.length && { references }) },
+    document: { units: "mm", features, ...(references.length && { references }), ...(print && { print }) },
     preserved,
     warnings,
   };

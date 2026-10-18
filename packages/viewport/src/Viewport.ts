@@ -93,6 +93,7 @@ export class Viewport {
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private plateBounds: Bounds;
+  private plate: THREE.Group;
   /** What the standard views frame: the part with room around it for its measurements, or the plate when empty. */
   private framed: Bounds | null = null;
   private partBounds: Bounds | null = null;
@@ -154,7 +155,8 @@ export class Viewport {
     const sun = new THREE.DirectionalLight(0xffffff, 1.5);
     sun.position.set(200, -300, 400);
     this.scene.add(sun);
-    this.scene.add(buildPlate(w, d));
+    this.plate = buildPlate(w, d);
+    this.scene.add(this.plate);
 
     // Dragging a move arrow comes before orbiting: registered first, on the capture phase, so the orbit never sees it.
     const canvas = this.renderer.domElement;
@@ -661,6 +663,20 @@ export class Viewport {
     if (!fits) this.setView(this.view);
   }
 
+  /**
+   * Swaps the build plate for one of this size, centred on the origin. With a height, the printer's whole build
+   * volume is outlined too: in the accent colour when the part fits, red when it doesn't. The camera stays put.
+   */
+  setPlate(width: number, depth: number, volume?: { height: number; fits: boolean }): void {
+    this.scene.remove(this.plate);
+    disposeObject(this.plate);
+    this.plate = buildPlate(width, depth);
+    if (volume) this.plate.add(buildVolume(width, depth, volume.height, volume.fits));
+    this.scene.add(this.plate);
+    this.plateBounds = { min: [-width / 2, -depth / 2, 0], max: [width / 2, depth / 2, volume?.height ?? 0] };
+    this.requestRender();
+  }
+
   /** Keeps the scene centred in the part of the view that floating panels don't cover. */
   setSafeArea(area: SafeArea): void {
     const same = (Object.keys(area) as (keyof SafeArea)[]).every(
@@ -857,6 +873,18 @@ function disposeObject(root: THREE.Object3D): void {
       (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
     }
   });
+}
+
+/** The outline of a printer's build volume: a box of thin lines from the plate up to the most it can print. */
+function buildVolume(width: number, depth: number, height: number, fits: boolean): THREE.LineSegments {
+  const box = new THREE.EdgesGeometry(new THREE.BoxGeometry(width, depth, height));
+  box.translate(0, 0, height / 2);
+  const lines = new THREE.LineSegments(
+    box,
+    new THREE.LineBasicMaterial({ color: fits ? 0x5ea8ff : 0xff6b6b, transparent: true, opacity: fits ? 0.45 : 0.85 }),
+  );
+  lines.name = "build-volume";
+  return lines;
 }
 
 /** Build plate: a flat surface with 10 mm and 50 mm grid lines and X/Y axis lines through the origin. */

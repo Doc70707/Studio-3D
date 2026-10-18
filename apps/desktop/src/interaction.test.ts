@@ -25,4 +25,11 @@ describe("one interaction mode at a time", () => {
       expect(allows("move", a)).toBe(false);
     }
   });
+
+  it("Print Studio changes views and takes file shortcuts, but never selects, nudges or picks", () => {
+    expect(interactionMode({ sketching: false, picking: false, moving: false, printing: true })).toBe("print");
+    expect(allows("print", "view-keys")).toBe(true);
+    expect(allows("print", "file-keys")).toBe(true);
+    for (const a of ["select", "hover", "pick-face", "edit-keys"] as const) expect(allows("print", a)).toBe(false);
+  });
 });

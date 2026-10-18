@@ -96,6 +96,12 @@ What works today:
   away, keeping the camera views, and brings the panel back while a piece is selected; Ctrl+B hides or shows the
   side panel on its own. Esc leaves either mode once it has nothing else to do. Nothing in the design, selection,
   camera or sketch changes.
+- Print Studio (the Design | Print Studio switch at the top right, or File > Prepare to print…): pick your printer
+  (Bambu Lab, Prusa, Creality and Elegoo models, build volumes from the makers' spec pages) and see the part on
+  its plate inside the build volume. Checks run on the exact STL that would go to your slicer: closed surface,
+  one piece, fits the printer, sits on the plate. Each says what to do when it isn't fine. The printer is saved
+  with the project but beside the design, so changing it never rebuilds the part. Export STL is here (and in
+  the File menu).
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

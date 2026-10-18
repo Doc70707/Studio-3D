@@ -14,6 +14,7 @@ import {
 } from "./sketch";
 import { currentFace, faceEdgeIssues, type HoleFace } from "./holeFace";
 import type { ReferenceImage } from "./reference";
+import type { PrintSetup } from "./print";
 import {
   CLEARANCE,
   CLEARANCE_SERIES,
@@ -243,6 +244,8 @@ export interface ProjectDocument {
   features: Feature[];
   /** Pictures to model over, at their real size. Shown in the views, never built or exported. */
   references?: ReferenceImage[];
+  /** Print Studio's settings (which printer). Kept beside the design: changing them never rebuilds the part. */
+  print?: PrintSetup;
 }
 
 export const LIMITS = {

@@ -16,8 +16,10 @@ import {
   outlineOfFace,
   pointsOfFaces,
   trianglesInPlane,
+  checkBinaryStl,
   type Measurements,
   type MeshData,
+  type StlReport,
 } from "@studio3d/geometry";
 import {
   PLATE_PLANE,
@@ -47,6 +49,8 @@ import {
   referenceCorners,
   validateReference,
   type SketchFeature,
+  printChecks,
+  printerById,
 } from "@studio3d/document";
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { DesignPanel, SHAPE_ORDER, copySource, placeNew } from "./DesignPanel";
@@ -57,6 +61,7 @@ import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
 import { platform } from "./platform";
+import { PrintPanel, type PrintState } from "./PrintPanel";
 import { escapeLeaves, focusPanelAfterSelection, type FocusPanel } from "./screen";
 import { APP_INFO, useProject, whenSaved } from "./useProject";
 
@@ -123,7 +128,10 @@ export function App() {
   const [selection, setSelection] = useState<{ id: string; face: number | null } | null>(null);
   /** How far the selected piece has been dragged so far, while its move arrows are held. */
   const [moveBy, setMoveBy] = useState<[number, number, number] | null>(null);
-  const mode = interactionMode({ sketching: !!draft, picking, moving: moveBy !== null });
+  /** The workspace: Design (build the part) or Print Studio (check it and get it ready for a printer). */
+  const [workspace, setWorkspace] = useState<"design" | "print">("design");
+  const printing = workspace === "print";
+  const mode = interactionMode({ sketching: !!draft, picking, moving: moveBy !== null, printing });
   const hovered = useRef<string | null>(null);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
@@ -199,7 +207,7 @@ export function App() {
     for (const el of [hostRef.current, topbarRef.current, panelRef.current, statusRef.current]) if (el) ro.observe(el);
     update();
     return () => ro.disconnect();
-  }, []);
+  }, [printing]); // each workspace has its own side panel
 
   // Geometry engine
   useEffect(() => {
@@ -274,6 +282,57 @@ export function App() {
   const shownCurrent = inputOk && !building && !hasErrors(kernelIssues) && built?.doc === shownDoc;
   const upToDate = shownCurrent && shownDoc === modelDoc;
   const exportable = upToDate && !empty;
+
+  // Print Studio checks the exact STL that would go to a slicer, made from the design as it is now.
+  const printer = printerById(doc.print?.printer);
+  const [printFile, setPrintFile] = useState<
+    { doc: ProjectDocument; report: StlReport } | { doc: ProjectDocument; error: string } | null
+  >(null);
+  useEffect(() => {
+    const client = geometryRef.current;
+    if (!printing || !exportable || !built || !client || printFile?.doc === built.doc) return;
+    let live = true;
+    const from = built.doc;
+    client.exportStl().then(
+      (data) => live && setPrintFile({ doc: from, report: checkBinaryStl(data) }),
+      (e: Error) => live && setPrintFile({ doc: from, error: `The file couldn't be made: ${e.message}` }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [printing, exportable, built, printFile]);
+  const printState: PrintState = empty
+    ? { kind: "blocked", reason: "There's nothing to print yet. Add a shape in Design first." }
+    : !inputOk || hasErrors(kernelIssues)
+      ? { kind: "blocked", reason: "Fix the highlighted values in Design first, then come back to check the part." }
+      : !upToDate || !built || printFile?.doc !== built.doc
+        ? { kind: "checking" }
+        : "error" in printFile
+          ? { kind: "failed", reason: printFile.error }
+          : {
+              kind: "checked",
+              checks: printChecks({ ...printFile.report, bodies: built.measurements.solids }, printer),
+              size: [0, 1, 2].map((i) => printFile.report.max[i]! - printFile.report.min[i]!) as [
+                number,
+                number,
+                number,
+              ],
+              volume: built.measurements.volume,
+            };
+  const fitsPrinter = !(
+    printState.kind === "checked" && printState.checks.some((c) => c.id === "fits" && c.status === "error")
+  );
+  // The plate under the part: the printer's own, with its build volume outlined, in Print Studio.
+  useEffect(() => {
+    const v = printer.volume;
+    if (printing) viewportRef.current?.setPlate(v[0], v[1], { height: v[2], fits: fitsPrinter });
+    else viewportRef.current?.setPlate(256, 256);
+  }, [printing, printer, fitsPrinter]);
+  const openPrintStudio = useCallback(() => {
+    setSelection(null);
+    setPicking(false);
+    setWorkspace("print");
+  }, []);
 
   // Sketching: pick a face, draw, then add the sketch to the design.
   const startPicking = useCallback(() => {
@@ -750,6 +809,7 @@ export function App() {
           ? [{ label: "Save as…", shortcut: "Ctrl+Shift+S", onSelect: () => void project.save(true), disabled: busy }]
           : []),
         "separator",
+        { label: "Prepare to print…", onSelect: openPrintStudio },
         {
           label: "Export STL…",
           onSelect: () => void exportStl(),
@@ -950,6 +1010,7 @@ export function App() {
         data-camera-position={camera ? camera.position.join(",") : ""}
         data-camera-target={camera ? camera.target.join(",") : ""}
         data-references={shownPictures.length}
+        data-plate={printing ? printer.volume.join(",") : "256,256"}
         data-geometry={
           engine === "ready" ? (empty ? "empty" : shownCurrent ? "current" : building ? "building" : "stale") : engine
         }
@@ -1128,47 +1189,61 @@ export function App() {
         </nav>
 
         {focus && screenModes}
-        <button
-          type="button"
-          className="primary"
-          onClick={() => void exportStl()}
-          disabled={busy || !exportable}
-          title={
-            exportable
-              ? "Export a mesh for your slicer"
-              : empty
-                ? "Add a shape to export"
-                : "Fix the highlighted values to export"
-          }
-        >
-          <Icon name="export" />
-          Export STL
-        </button>
+        <nav className="glass bar segmented workspaces" aria-label="Workspace">
+          <button
+            type="button"
+            aria-pressed={!printing}
+            title="Design: build and change the part"
+            onClick={() => setWorkspace("design")}
+          >
+            Design
+          </button>
+          <button
+            type="button"
+            aria-pressed={printing}
+            title="Prepare to print: check the part on your printer's plate, then export it"
+            onClick={openPrintStudio}
+          >
+            Print Studio
+          </button>
+        </nav>
       </header>
 
-      <DesignPanel
-        ref={panelRef}
-        doc={doc}
-        issues={issues}
-        measurements={built?.measurements ?? null}
-        builtDoc={built?.doc ?? null}
-        stale={!upToDate && built !== null}
-        onChange={project.updateFeature}
-        onAdd={project.addFeature}
-        onRemove={project.removeFeature}
-        onSketchOnFace={startPicking}
-        onPickHoleFace={startHolePicking}
-        onSketchOnPlate={sketchOnPlate}
-        onRevolve={startRevolve}
-        onEditSketch={editSketch}
-        picking={picking}
-        onFocus={setFocusId}
-        selected={selection?.id ?? null}
-        onSelect={(id) => setSelection((s) => (id === null ? null : s?.id === id ? s : { id, face: null }))}
-        onChangeReference={(id, patch) => project.updateReference(id, patch)}
-        onRemoveReference={project.removeReference}
-        onCalibrate={setCalibrating}
-      />
+      {printing ? (
+        <PrintPanel
+          ref={panelRef}
+          printer={printer}
+          state={printState}
+          busy={busy}
+          onPrinter={project.setPrinter}
+          onExportStl={() => void exportStl()}
+          onBackToDesign={() => setWorkspace("design")}
+        />
+      ) : (
+        <DesignPanel
+          ref={panelRef}
+          doc={doc}
+          issues={issues}
+          measurements={built?.measurements ?? null}
+          builtDoc={built?.doc ?? null}
+          stale={!upToDate && built !== null}
+          onChange={project.updateFeature}
+          onAdd={project.addFeature}
+          onRemove={project.removeFeature}
+          onSketchOnFace={startPicking}
+          onPickHoleFace={startHolePicking}
+          onSketchOnPlate={sketchOnPlate}
+          onRevolve={startRevolve}
+          onEditSketch={editSketch}
+          picking={picking}
+          onFocus={setFocusId}
+          selected={selection?.id ?? null}
+          onSelect={(id) => setSelection((s) => (id === null ? null : s?.id === id ? s : { id, face: null }))}
+          onChangeReference={(id, patch) => project.updateReference(id, patch)}
+          onRemoveReference={project.removeReference}
+          onCalibrate={setCalibrating}
+        />
+      )}
 
       {draft && (
         <SketchEditor
@@ -1205,8 +1280,10 @@ export function App() {
         <span className="hint">
           <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
           <span className="hint-text">
-            Click to select · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom · Help › Keyboard and mouse
-            lists the rest
+            {printing
+              ? "Your part on the printer's plate · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom"
+              : "Click to select · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom · " +
+                "Help › Keyboard and mouse lists the rest"}
           </span>
         </span>
         {!focus && screenModes}

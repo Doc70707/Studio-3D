@@ -37,6 +37,7 @@ const PATHS = {
   exitFullScreen: "M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5",
   focus: "M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M9 12h6",
   sidePanel: "M4 5h16v14H4zM9 5v14",
+  printer: "M5 4h14v4H5zM3 8h18v8H3zM7 16h10v4H7zM10 12h4M8 20v-4M16 20v-4",
 } as const;
 
 export type IconName = keyof typeof PATHS;

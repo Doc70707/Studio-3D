@@ -41,7 +41,11 @@ test("invalid values are explained and the last valid model is kept", async ({ p
   await expect(field(page, "Wall thickness")).toHaveAttribute("aria-invalid", "true");
   await expect(host(page)).toHaveAttribute("data-geometry", "stale");
   await expect(volume(page)).toHaveText("15.55 cm³"); // still the last good box
+  // Print Studio holds the export, and says why it can't run yet.
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await expect(page.getByRole("button", { name: "Export STL" })).toBeDisabled();
+  await expect(page.getByTestId("print-blocked")).toContainText("Fix the highlighted values");
+  await page.getByRole("button", { name: "Back to design" }).click();
 
   await setField(page, "Height", "abc");
   await expect(page.getByText("Height needs to be a number")).toBeVisible();
@@ -51,7 +55,9 @@ test("invalid values are explained and the last valid model is kept", async ({ p
   await expect(host(page)).toHaveAttribute("data-geometry", "current");
   // 60·40·30 − 54·34·27
   await expect(volume(page)).toHaveText(`${((72000 - 54 * 34 * 27) / 1000).toFixed(2)} cm³`);
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await expect(page.getByRole("button", { name: "Export STL" })).toBeEnabled();
+  await page.getByRole("button", { name: "Back to design" }).click();
 });
 
 test("save, then reopen, restores the exact design", async ({ page }) => {
@@ -109,6 +115,7 @@ test("exported STL is a watertight mesh with the exact dimensions", async ({ pag
   await expect(host(page)).toHaveAttribute("data-geometry", "current");
 
   const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await page.getByRole("button", { name: "Export STL" }).click();
   const file = await download;
   expect(file.suggestedFilename()).toBe("Untitled.stl");

@@ -47,7 +47,11 @@ test("a hole off the edge is explained and the last good model is kept", async (
   await expect(field(page, "Hole 1 left / right position")).toHaveAttribute("aria-invalid", "true");
   await expect(host(page)).toHaveAttribute("data-geometry", "stale");
   await expect(volume(page)).toHaveText(good);
+  // Print Studio holds the export, and says why it can't run yet.
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await expect(page.getByRole("button", { name: "Export STL" })).toBeDisabled();
+  await expect(page.getByTestId("print-blocked")).toContainText("Fix the highlighted values");
+  await page.getByRole("button", { name: "Back to design" }).click();
 });
 
 test("a hole in the empty inside gets a plain warning", async ({ page }) => {
@@ -138,6 +142,7 @@ test("exported STL has the holes in it and is watertight", async ({ page }) => {
   await current(page);
 
   const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await page.getByRole("button", { name: "Export STL" }).click();
   const bytes = readFileSync(await (await download).path());
   const report = checkBinaryStl(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
