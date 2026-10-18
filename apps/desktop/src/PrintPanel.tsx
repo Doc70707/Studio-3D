@@ -1,7 +1,14 @@
 // Print Studio's side panel: the printer, the checks run on the exact file that would go to a slicer, and export or
 // opening it in a slicer the user installed. Nothing here changes the design; the printer is saved beside it.
 import { forwardRef, useEffect, useState } from "react";
-import { LAYER_HEIGHTS, WALL_COUNTS, PRINTERS, type PrintCheck, type Printer } from "@studio3d/document";
+import {
+  INFILL_DENSITIES,
+  LAYER_HEIGHTS,
+  WALL_COUNTS,
+  PRINTERS,
+  type PrintCheck,
+  type Printer,
+} from "@studio3d/document";
 import type { SlicedLayer, SlicerSettings } from "@studio3d/geometry";
 import { Icon } from "./Icon";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
@@ -56,12 +63,23 @@ function wallSummary(layer: SlicedLayer, wanted: number): string {
   return fit === 0 ? "Too thin for any wall." : `Room for ${fit} of ${wanted} walls in places.`;
 }
 
+/** What fills this layer inside its walls. */
+function fillSummary(layer: SlicedLayer, density: number): string {
+  const solid = layer.solidLines.length > 0;
+  const sparse = layer.sparseLines.length > 0;
+  const pct = `${Math.round(density * 100)}% infill`;
+  if (solid && sparse) return `Solid skin and ${pct}.`;
+  if (solid) return "Solid skin.";
+  if (sparse) return `${pct[0]!.toUpperCase()}${pct.slice(1)}.`;
+  return "Nothing to fill inside the walls.";
+}
+
 const mm = (n: number) => `${(Math.round(n * 100) / 100 + 0).toFixed(2)} mm`;
 
 interface Props {
   printer: Printer;
   settings: SlicerSettings;
-  onSettings: (patch: { layerHeight?: number; walls?: number }) => void;
+  onSettings: (patch: { layerHeight?: number; walls?: number; infill?: number }) => void;
   layers: LayerPreview | null;
   onLayerView: (on: boolean) => void;
   onLayer: (index: number) => void;
@@ -197,6 +215,26 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
             </select>
           </div>
         </div>
+        <div className="field compact">
+          <label htmlFor="infill">Infill</label>
+          <div className="input-row select-row">
+            <select
+              id="infill"
+              value={settings.infillDensity}
+              onChange={(e) => props.onSettings({ infill: Number(e.target.value) })}
+              title={
+                "How much of the inside is filled, in lines crossing at right angles from layer to layer. " +
+                "The top 0.8 mm and bottom 0.6 mm are always solid."
+              }
+            >
+              {withCurrent(INFILL_DENSITIES, settings.infillDensity).map((d) => (
+                <option key={d} value={d}>
+                  {Math.round(d * 100)}%
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
         <button
           type="button"
           className="layer-toggle"
@@ -235,7 +273,8 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
             {layers.layer && (
               <p className="props-note" data-testid="layer-info">
                 Layer {layers.index + 1} of {layers.count}: {mm(layers.layer.bottom)} to {mm(layers.layer.top)},{" "}
-                {Math.round(layers.layer.area * 10) / 10} mm² of material. {wallSummary(layers.layer, settings.walls)}
+                {Math.round(layers.layer.area * 10) / 10} mm² of material. {wallSummary(layers.layer, settings.walls)}{" "}
+                {fillSummary(layers.layer, settings.infillDensity)}
               </p>
             )}
             {layers.thinLayers.length > 0 && (
@@ -251,7 +290,7 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
               </p>
             )}
             <p className="props-note">
-              Walls from Studio 3D's own slicer, each line {settings.lineWidth} mm wide. Infill and G-code come next.
+              Walls and infill from Studio 3D's own slicer, each line {settings.lineWidth} mm wide. G-code comes next.
             </p>
           </>
         )}

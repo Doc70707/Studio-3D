@@ -16,14 +16,21 @@ test("Preview layers cuts the checked part into its real layers", async ({ page 
   // The starting part is a 60 × 40 × 30 open box with 2 mm walls and floor.
   await page.getByRole("button", { name: "Preview layers" }).click();
   await expect(host(page)).toHaveAttribute("data-layers", "150/150");
-  await expect(info(page)).toHaveText("Layer 150 of 150: 29.80 mm to 30.00 mm, 384 mm² of material. 2 walls.");
+  await expect(info(page)).toHaveText(/^Layer 150 of 150: 29\.80 mm to 30\.00 mm, 384 mm² of material\. 2 walls\./);
   await page.screenshot({ path: `${OUT}layers-top.png` });
 
   // Down in the floor every layer is the whole 60 × 40 rectangle.
   await page.getByLabel("Layer", { exact: true }).fill("5");
   await expect(host(page)).toHaveAttribute("data-layers", "5/150");
-  await expect(info(page)).toHaveText("Layer 5 of 150: 0.80 mm to 1.00 mm, 2400 mm² of material. 2 walls.");
+  // The floor's bottom 0.6 mm (layers 1–3) is solid; above that, 15% infill until the floor's top skin.
+  await expect(info(page)).toHaveText("Layer 5 of 150: 0.80 mm to 1.00 mm, 2400 mm² of material. 2 walls. 15% infill.");
   await page.screenshot({ path: `${OUT}layers-floor.png` });
+  await page.getByLabel("Layer", { exact: true }).fill("2");
+  await expect(info(page)).toContainText("2 walls. Solid skin.");
+  await page.screenshot({ path: `${OUT}layers-skin.png` });
+  await page.getByLabel("Infill").selectOption("0");
+  await page.getByLabel("Layer", { exact: true }).fill("5");
+  await expect(info(page)).toContainText("2 walls. Nothing to fill inside the walls.");
 
   await page.getByRole("button", { name: "Show the part" }).click();
   await expect(host(page)).not.toHaveAttribute("data-layers", /.*/);

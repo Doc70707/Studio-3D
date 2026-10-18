@@ -31,6 +31,31 @@ export function offsetLoops(loops: Loop[], distance: number): Loop[] {
   return keepCovered(raw);
 }
 
+/**
+ * Areas where outlines overlap, by the same rule as offsetting: the result bounds where at least `level` of the
+ * given areas lie on top of one another. Each input area must not overlap itself.
+ */
+function covered(groups: Loop[][], level: number): Loop[] {
+  const raw = groups.flatMap((g) => g.map((l) => [...withoutTinySides(l)])).filter((l) => l.length >= 6);
+  return keepCovered(raw, level);
+}
+
+const reversed = (l: Loop): Loop => {
+  const out = new Float64Array(l.length);
+  for (let i = 0; i < l.length; i += 2) {
+    out[l.length - 2 - i] = l[i]!;
+    out[l.length - 1 - i] = l[i + 1]!;
+  }
+  return out;
+};
+
+/** Everything covered by any of the areas. */
+export const unionLoops = (...areas: Loop[][]): Loop[] => covered(areas, 1);
+/** What all the areas cover (each area must not overlap itself). */
+export const intersectLoops = (...areas: Loop[][]): Loop[] => covered(areas, areas.length);
+/** What `a` covers and `b` doesn't. */
+export const subtractLoops = (a: Loop[], b: Loop[]): Loop[] => covered([a, b.map(reversed)], 1);
+
 /** Corners closer than this to the previous one are merged: far below what a printer can draw, and they only make
  * the moved edges cross in clusters of nearly equal points. */
 const MIN_SIDE = 1e-3;
@@ -101,7 +126,7 @@ interface Seg {
 }
 
 /** Splits the moved outlines where they cross and keeps the pieces that bound the covered area. */
-function keepCovered(raw: number[][]): Loop[] {
+function keepCovered(raw: number[][], level = 1): Loop[] {
   const segs: Seg[] = [];
   for (const pts of raw) {
     const n = pts.length / 2;
@@ -119,8 +144,15 @@ function keepCovered(raw: number[][]): Loop[] {
   segs.forEach((s, i) => {
     for (const j of grid.near(s)) {
       if (j <= i) continue;
-      const hit = cross(s, segs[j]!);
-      if (!hit) continue;
+      const o = segs[j]!;
+      const hit = cross(s, o);
+      if (!hit) {
+        // Segments along the same line (outlines of two layers that line up) are cut at each other's ends, so
+        // the overlapping stretch becomes the very same piece in both.
+        overlapCuts(s, o, cuts[i]!);
+        overlapCuts(o, s, cuts[j]!);
+        continue;
+      }
       const [t, u, x, y] = hit;
       if (t > 0 && t < 1) cuts[i]!.push({ t, x, y });
       if (u > 0 && u < 1) cuts[j]!.push({ t: u, x, y });
@@ -147,9 +179,41 @@ function keepCovered(raw: number[][]): Loop[] {
     const e = Math.min(1e-6, len * 1e-3);
     const mx = (p.ax + p.bx) / 2 + (dy / len) * e;
     const my = (p.ay + p.by) / 2 - (dx / len) * e;
-    if (grid.winding(mx, my) <= 0 && grid.winding(mx - (dy / len) * 2 * e, my + (dx / len) * 2 * e) > 0) kept.push(p);
+    if (grid.winding(mx, my) < level && grid.winding(mx - (dy / len) * 2 * e, my + (dx / len) * 2 * e) >= level)
+      kept.push(p);
   }
+  // A stretch where several outlines lie on top of each other is kept once.
+  const seen = new Set<string>();
+  const unique = kept.filter((p) => {
+    const k = `${p.ax},${p.ay},${p.bx},${p.by}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  kept.length = 0;
+  kept.push(...unique);
   return join(kept);
+}
+
+/** Where segment `o` ends inside segment `s` when both lie along one line: cuts for `s` at those ends. */
+function overlapCuts(s: Seg, o: Seg, out: { t: number; x: number; y: number }[]) {
+  const rx = s.bx - s.ax;
+  const ry = s.by - s.ay;
+  const len2 = rx * rx + ry * ry;
+  for (const [x, y] of [
+    [o.ax, o.ay],
+    [o.bx, o.by],
+  ] as const) {
+    // On the line: no further from it than a millionth of a millimetre.
+    if (Math.abs(rx * (y - s.ay) - ry * (x - s.ax)) > 1e-6 * Math.sqrt(len2)) return;
+  }
+  for (const [x, y] of [
+    [o.ax, o.ay],
+    [o.bx, o.by],
+  ] as const) {
+    const t = ((x - s.ax) * rx + (y - s.ay) * ry) / len2;
+    if (t > 1e-12 && t < 1 - 1e-12) out.push({ t, x, y });
+  }
 }
 
 /** Where two segments cross: the parameter along each, and the point. Parallel or touching-only segments don't. */

@@ -114,8 +114,11 @@ What works today:
 - Walls: each layer gets the chosen number of walls (1 to 4), 0.42 mm lines one inside the next, with the outside of
   the first line exactly on the part's surface. Walls are found by Studio 3D's own polygon offsetting (inside corners
   round, specks too small for a line left out), tested against hand-calculated areas. Places thinner than one line,
-  which can't print, are listed by layer. Slicing runs in the background so the window stays responsive. Infill and
-  G-code come next.
+  which can't print, are listed by layer. Slicing runs in the background so the window stays responsive.
+- Skins and infill: inside the walls, the bottom 0.6 mm and top 0.8 mm of the part (and over or under any step) are
+  filled solid, and the rest with infill lines at the chosen density (0 to 100%, saved beside the design), crossing at
+  right angles from one layer to the next. Our own area operations (overlap, take away) find where the part carries
+  on above and below. Filled solid, the lines put down the part's own volume to within 3%. G-code comes next.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.
@@ -124,7 +127,7 @@ What works today:
 
 ![Studio 3D](docs/ui/glass-default.png)
 
-Not yet: toolpaths and G-code from Studio 3D's own slicer, and more than one part on the plate.
+Not yet: G-code from Studio 3D's own slicer, and more than one part on the plate.
 
 ## Getting the Windows app (no setup needed)
 

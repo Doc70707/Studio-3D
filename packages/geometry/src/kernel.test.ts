@@ -58,6 +58,7 @@ import { checkBinaryStl } from "./stl-check";
 import { crc32, stlTo3mf } from "./threemf";
 import { layerBounds, loopArea, sliceStl } from "./slice";
 import { slicePart } from "./slicer";
+import { linesLength } from "./infill";
 import { crc32 as nodeCrc32 } from "node:zlib";
 import { makeBaseBox, measureVolume } from "replicad";
 
@@ -1627,7 +1628,7 @@ describe("slicing into layers", () => {
 });
 
 describe("walls on real parts", () => {
-  const settings = { layerHeight: 0.2, walls: 2, lineWidth: 0.42 };
+  const settings = { layerHeight: 0.2, walls: 2, lineWidth: 0.42, infillDensity: 0.15 };
   const area = (loops: Float64Array[]) => loops.reduce((s, l) => s + loopArea(l), 0);
 
   it.each([
@@ -1647,5 +1648,82 @@ describe("walls on real parts", () => {
       expect(l.walls[0]!.length).toBeGreaterThan(0);
       expect(area(l.inside)).toBeLessThan(area(l.walls[1]!.length ? l.walls[1]! : l.walls[0]!) + 1e-9);
     }
+  });
+});
+
+describe("skins and infill on real parts", () => {
+  const settings = { layerHeight: 0.2, walls: 2, lineWidth: 0.42, infillDensity: 0.15 };
+  const length = (l: { walls: Float64Array[][]; solidLines: Float64Array; sparseLines: Float64Array }) => {
+    let total = 0;
+    for (const wall of l.walls)
+      for (const loop of wall)
+        for (let i = 0, n = loop.length / 2; i < n; i++) {
+          const j = (i + 1) % n;
+          total += Math.hypot(loop[2 * j]! - loop[2 * i]!, loop[2 * j + 1]! - loop[2 * i + 1]!);
+        }
+    for (const lines of [l.solidLines, l.sparseLines])
+      for (let i = 0; i < lines.length; i += 4)
+        total += Math.hypot(lines[i + 2]! - lines[i]!, lines[i + 3]! - lines[i + 1]!);
+    return total;
+  };
+
+  it("a block is solid for its bottom 0.6 mm and top 0.8 mm, and sparse in between", async () => {
+    const stl = await exportStl(built(box({ width: 20, depth: 20, height: 10, wall: 0 })).shape);
+    const part = slicePart(stl, settings);
+    const solid = part.layers.map((l) => (l.sparse.length ? "sparse" : "solid"));
+    expect(solid).toEqual([...Array(3).fill("solid"), ...Array(43).fill("sparse"), ...Array(4).fill("solid")]);
+    // Sparse layers: lines 0.42 / 0.15 = 2.8 mm apart, so their length is the filled area over 2.8 (within the
+    // part-lines at the ends).
+    const mid = part.layers[25]!;
+    const inner = 20 - 4 * 0.42;
+    expect(mid.solidLines.length).toBe(0);
+    expect(linesLength(mid.sparseLines)).toBeGreaterThan((inner * inner) / 2.8 - 2 * inner);
+    expect(linesLength(mid.sparseLines)).toBeLessThan((inner * inner) / 2.8 + 2 * inner);
+    // Neighbouring layers cross at right angles.
+    const dir = (l: Float64Array) => Math.sign((l[2]! - l[0]!) * (l[3]! - l[1]!));
+    expect(dir(part.layers[25]!.sparseLines)).toBe(-dir(part.layers[26]!.sparseLines));
+  });
+
+  it("filled solid, the lines put down the part's own volume", async () => {
+    const stl = await exportStl(built(box({ width: 20, depth: 20, height: 10, wall: 0 })).shape);
+    const part = slicePart(stl, { ...settings, infillDensity: 1 });
+    const plastic = part.layers.reduce((s, l) => s + length(l) * 0.42 * (l.top - l.bottom), 0);
+    expect(rel(plastic, 4000)).toBeLessThan(0.03);
+  });
+
+  it("an open box: a floor with solid skins, and walls with nothing left to fill", async () => {
+    const stl = await exportStl(built(box({ width: 60, depth: 40, height: 30, wall: 2 })).shape);
+    const part = slicePart(stl, settings);
+    // The 2 mm floor is 10 layers: 3 solid underneath (0.6 mm), 4 solid on top (0.8 mm, the floor's top is open to
+    // the inside of the box; only the rim under the walls carries on), sparse between.
+    const floor = part.layers.filter((l) => l.z < 2);
+    const area = (loops: Float64Array[]) => loops.reduce((s, l) => s + loopArea(l), 0);
+    expect(floor.map((l) => (area(l.solid) > 0.9 * (area(l.solid) + area(l.sparse)) ? "solid" : "sparse"))).toEqual([
+      ...Array(3).fill("solid"),
+      ...Array(3).fill("sparse"),
+      ...Array(4).fill("solid"),
+    ]);
+    for (const l of floor) expect(l.solidLines.length + l.sparseLines.length).toBeGreaterThan(0);
+    // Above the floor the 2 mm walls take two walls each side (1.68 mm); the 0.32 mm left is narrower than a line,
+    // except in the four corners, where the round inner wall leaves room for a short line or two each.
+    for (const l of part.layers.filter((l) => l.z > 2)) {
+      const lines = [l.solidLines, l.sparseLines].flatMap((x) => [...x]);
+      expect(lines.length / 4).toBeLessThanOrEqual(8);
+      expect(linesLength(Float64Array.from(lines))).toBeLessThan(8);
+    }
+  });
+
+  it("a step: the layers under a ledge's top get a solid skin only where the ledge is", async () => {
+    // A 20 × 20 × 5 block with a 10 × 10 × 5 block on its left half.
+    const doc = part(
+      shape("box", { width: 20, depth: 20, height: 5 }),
+      shape("box", { width: 10, depth: 20, height: 5, x: -5, z: 5 }),
+    );
+    const sliced = slicePart(await exportStl(designed(doc).shape), settings);
+    const under = sliced.layers.find((l) => l.z > 4.3 && l.z < 4.5)!; // just under the ledge's top surface
+    const xs = (loops: Float64Array[]) => loops.flatMap((l) => [...l].filter((_, i) => i % 2 === 0));
+    // Solid only on the right (the open ledge), sparse on the left (carried on by the upper block).
+    expect(Math.min(...xs(under.solid))).toBeGreaterThan(-0.5);
+    expect(Math.max(...xs(under.sparse))).toBeLessThan(0.5);
   });
 });

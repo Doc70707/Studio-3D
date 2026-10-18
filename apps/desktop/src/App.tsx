@@ -58,6 +58,7 @@ import {
   printerById,
   DEFAULT_LAYER_HEIGHT,
   DEFAULT_WALLS,
+  DEFAULT_INFILL,
   LINE_WIDTH,
 } from "@studio3d/document";
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
@@ -336,8 +337,9 @@ export function App() {
       layerHeight: doc.print?.layerHeight ?? DEFAULT_LAYER_HEIGHT,
       walls: doc.print?.walls ?? DEFAULT_WALLS,
       lineWidth: LINE_WIDTH,
+      infillDensity: doc.print?.infill ?? DEFAULT_INFILL,
     }),
-    [doc.print?.layerHeight, doc.print?.walls],
+    [doc.print?.layerHeight, doc.print?.walls, doc.print?.infill],
   );
   const [layerView, setLayerView] = useState(false);
   const [layerAt, setLayerAt] = useState<number | null>(null);
@@ -375,6 +377,7 @@ export function App() {
     vp.setLayers({
       below: layerLines(sliced.layers.slice(0, layer).map((l) => ({ z: l.z, loops: l.loops }))),
       current: layerLines(shown.walls.map((loops) => ({ z: shown.z, loops }))),
+      infill: fillLines3d(shown.z, shown.solidLines, shown.sparseLines),
       fill: { z: shown.z, loops: shown.loops },
     });
   }, [sliced, layer]);
@@ -1490,6 +1493,18 @@ function HelpDialog({ kind, onClose }: { kind: "shortcuts" | "about"; onClose: (
 }
 
 /** The design with a sketch that's being drawn: added at the end, or in place of the one being edited. */
+/** Fill lines (x1 y1 x2 y2 each) as line pairs at height z for the viewport. */
+function fillLines3d(z: number, ...sets: Float64Array[]): Float32Array {
+  const out = new Float32Array(sets.reduce((n, l) => n + (l.length / 4) * 6, 0));
+  let o = 0;
+  for (const l of sets)
+    for (let i = 0; i < l.length; i += 4) {
+      out.set([l[i]!, l[i + 1]!, z, l[i + 2]!, l[i + 3]!, z], o);
+      o += 6;
+    }
+  return out;
+}
+
 /** Outlines as line pairs for the viewport, each at its layer's cut height. */
 function layerLines(layers: { z: number; loops: Float64Array[] }[]): Float32Array {
   let n = 0;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { offsetLoops } from "./offset";
+import { intersectLoops, offsetLoops, subtractLoops, unionLoops } from "./offset";
 import { loopArea } from "./slice";
 
 const rect = (x0: number, y0: number, x1: number, y1: number, hole = false) =>
@@ -92,10 +92,37 @@ describe("offsetting outlines", () => {
     }
   });
 
-  it("is quick enough for every wall of every layer", () => {
+  // Timings depend on the machine (a shared CI runner was 40% slower), so like perf.test.ts this runs with PERF=1.
+  (process.env.PERF === "1" ? it : it.skip)("is quick enough for every wall of every layer", () => {
     const loops = [circle(0, 0, 40, 2000), circle(0, 0, 30, 2000, true), circle(20, 0, 3, 200, true)];
     const t = performance.now();
     for (let i = 0; i < 20; i++) offsetLoops(loops, 0.42);
     expect((performance.now() - t) / 20).toBeLessThan(100);
+  });
+});
+
+describe("adding, overlapping and taking away areas", () => {
+  const a = [rect(0, 0, 10, 10)];
+  const b = [rect(5, 5, 15, 15)];
+  it("union, intersection and difference of two overlapping squares", () => {
+    expect(total(unionLoops(a, b))).toBeCloseTo(175, 9);
+    expect(bounds(intersectLoops(a, b))).toEqual([5, 5, 10, 10]);
+    expect(total(intersectLoops(a, b))).toBeCloseTo(25, 9);
+    expect(total(subtractLoops(a, b))).toBeCloseTo(75, 9);
+    expect(subtractLoops(a, b)).toHaveLength(1);
+  });
+
+  it("taking away a smaller area inside leaves a hole; areas that don't touch don't overlap", () => {
+    const framed = subtractLoops(a, [rect(2, 2, 8, 8)]);
+    expect(framed.map(loopArea).sort((x, y) => x - y)).toEqual([-36, 100].map((v) => expect.closeTo(v, 9)));
+    expect(intersectLoops(a, [rect(20, 0, 30, 10)])).toEqual([]);
+    expect(subtractLoops(a, a)).toEqual([]);
+  });
+
+  it("works with holes in the inputs", () => {
+    const ring = [rect(0, 0, 10, 10), rect(3, 3, 7, 7, true)];
+    // A bar across the ring: only the parts over material count.
+    expect(total(intersectLoops(ring, [rect(-1, 4, 11, 6)]))).toBeCloseTo(2 * 3 * 2, 9);
+    expect(total(subtractLoops(ring, [rect(-1, 4, 11, 6)]))).toBeCloseTo(84 - 12, 9);
   });
 });

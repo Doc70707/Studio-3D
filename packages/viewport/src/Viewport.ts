@@ -496,11 +496,16 @@ export class Viewport {
 
   /**
    * Shows the part's sliced layers in its place, as outlines (x, y, z line pairs): the layers below the current one
-   * faint, the current one bright and filled (`fill`: its outlines, x, y pairs, counter-clockwise outsides and clockwise
-   * holes, at height z). Null shows the part again.
+   * faint, and the current one's walls bright, its infill lines (`infill`) orange, over its filled area (`fill`: its
+   * outlines, x, y pairs, counter-clockwise outsides and clockwise holes, at height z). Null shows the part again.
    */
   setLayers(
-    layers: { below: Float32Array; current: Float32Array; fill?: { z: number; loops: Float64Array[] } } | null,
+    layers: {
+      below: Float32Array;
+      current: Float32Array;
+      infill?: Float32Array;
+      fill?: { z: number; loops: Float64Array[] };
+    } | null,
   ): void {
     if (this.layers) {
       this.scene.remove(this.layers);
@@ -518,6 +523,7 @@ export class Viewport {
       };
       if (layers.below.length) group.add(lines(layers.below, 0x6cb4ff, 0.35));
       if (layers.current.length) group.add(lines(layers.current, 0xffc94d, 1));
+      if (layers.infill?.length) group.add(lines(layers.infill, 0xff9a5c, 1));
       if (layers.fill) {
         const fill = new THREE.Mesh(
           layerFill(layers.fill.loops),
