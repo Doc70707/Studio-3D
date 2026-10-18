@@ -18,10 +18,11 @@ import {
   trianglesInPlane,
   checkBinaryStl,
   stlTo3mf,
-  sliceStl,
+  SlicerClient,
+  createSlicerWorker,
   type Measurements,
-  type Layer,
-  type SliceResult,
+  type SlicedPart,
+  type SlicerSettings,
   type MeshData,
   type StlReport,
 } from "@studio3d/geometry";
@@ -56,6 +57,8 @@ import {
   printChecks,
   printerById,
   DEFAULT_LAYER_HEIGHT,
+  DEFAULT_WALLS,
+  LINE_WIDTH,
 } from "@studio3d/document";
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { DesignPanel, SHAPE_ORDER, copySource, placeNew } from "./DesignPanel";
@@ -66,7 +69,7 @@ import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
-import { PrintPanel, type PrintState } from "./PrintPanel";
+import { PrintPanel, type LayerPreview, type PrintState } from "./PrintPanel";
 import { escapeLeaves, focusPanelAfterSelection, type FocusPanel } from "./screen";
 import { APP_INFO, useProject, whenSaved } from "./useProject";
 
@@ -327,15 +330,41 @@ export function App() {
   const fitsPrinter = !(
     printState.kind === "checked" && printState.checks.some((c) => c.id === "fits" && c.status === "error")
   );
-  // Layers: the checked file cut at the chosen layer height, shown in place of the part while previewing.
-  const layerHeight = doc.print?.layerHeight ?? DEFAULT_LAYER_HEIGHT;
+  // Layers: Studio 3D's own slicer cuts the checked file, in its own worker, while previewing.
+  const slicerSettings: SlicerSettings = useMemo(
+    () => ({
+      layerHeight: doc.print?.layerHeight ?? DEFAULT_LAYER_HEIGHT,
+      walls: doc.print?.walls ?? DEFAULT_WALLS,
+      lineWidth: LINE_WIDTH,
+    }),
+    [doc.print?.layerHeight, doc.print?.walls],
+  );
   const [layerView, setLayerView] = useState(false);
   const [layerAt, setLayerAt] = useState<number | null>(null);
   const checkedStl = printState.kind === "checked" && printFile && "stl" in printFile ? printFile.stl : null;
-  const sliced: SliceResult | null = useMemo(
-    () => (printing && layerView && checkedStl ? sliceStl(checkedStl, { layerHeight }) : null),
-    [printing, layerView, checkedStl, layerHeight],
-  );
+  const slicerRef = useRef<SlicerClient | null>(null);
+  useEffect(() => {
+    const client = new SlicerClient(createSlicerWorker);
+    slicerRef.current = client;
+    return () => client.dispose();
+  }, []);
+  const [slice, setSlice] = useState<{
+    stl: ArrayBuffer;
+    settings: SlicerSettings;
+    result: { part: SlicedPart } | { error: string };
+  } | null>(null);
+  const wanted = printing && layerView && checkedStl ? { stl: checkedStl, settings: slicerSettings } : null;
+  const sliceCurrent = !!wanted && slice?.stl === wanted.stl && slice.settings === wanted.settings;
+  useEffect(() => {
+    if (!wanted || sliceCurrent || !slicerRef.current) return;
+    const { stl, settings } = wanted;
+    slicerRef.current.slice(stl, settings).then(
+      (part) => setSlice({ stl, settings, result: { part } }),
+      (e: Error) => e.message !== "superseded" && setSlice({ stl, settings, result: { error: e.message } }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted?.stl, wanted?.settings, sliceCurrent]);
+  const sliced = sliceCurrent && "part" in slice!.result ? slice!.result.part : null;
   const layerCount = sliced?.layers.length ?? 0;
   const layer = sliced ? Math.min(layerAt ?? layerCount - 1, layerCount - 1) : -1;
   useEffect(() => {
@@ -344,16 +373,30 @@ export function App() {
     if (!sliced || layer < 0) return vp.setLayers(null);
     const shown = sliced.layers[layer]!;
     vp.setLayers({
-      below: layerLines(sliced.layers.slice(0, layer)),
-      current: layerLines([shown]),
+      below: layerLines(sliced.layers.slice(0, layer).map((l) => ({ z: l.z, loops: l.loops }))),
+      current: layerLines(shown.walls.map((loops) => ({ z: shown.z, loops }))),
       fill: { z: shown.z, loops: shown.loops },
     });
   }, [sliced, layer]);
-  // A new slice (another height, a changed part) starts at the top layer again.
-  useEffect(() => setLayerAt(null), [checkedStl, layerHeight]);
+  // A new slice (another part or setting) starts at the top layer again.
+  useEffect(() => setLayerAt(null), [checkedStl, slicerSettings]);
   useEffect(() => {
     if (!printing) setLayerView(false);
   }, [printing]);
+  const layerPreview: LayerPreview | null = !wanted
+    ? null
+    : !sliceCurrent
+      ? { status: "slicing" }
+      : "error" in slice!.result
+        ? { status: "failed", error: slice!.result.error }
+        : {
+            status: "sliced",
+            count: layerCount,
+            index: layer,
+            layer: sliced!.layers[layer] ?? null,
+            openEnds: sliced!.openEnds,
+            thinLayers: sliced!.thinLayers,
+          };
 
   // The plate under the part: the printer's own, with its build volume outlined, in Print Studio.
   useEffect(() => {
@@ -1078,7 +1121,7 @@ export function App() {
         data-camera-target={camera ? camera.target.join(",") : ""}
         data-references={shownPictures.length}
         data-plate={printing ? printer.volume.join(",") : "256,256"}
-        data-layers={sliced ? `${layer + 1}/${layerCount}` : undefined}
+        data-layers={sliced ? `${layer + 1}/${layerCount}` : layerPreview ? layerPreview.status : undefined}
         data-geometry={
           engine === "ready" ? (empty ? "empty" : shownCurrent ? "current" : building ? "building" : "stale") : engine
         }
@@ -1281,13 +1324,9 @@ export function App() {
           state={printState}
           busy={busy}
           onPrinter={project.setPrinter}
-          layerHeight={layerHeight}
-          onLayerHeight={project.setLayerHeight}
-          layers={
-            sliced
-              ? { count: layerCount, index: layer, layer: sliced.layers[layer] ?? null, openEnds: sliced.openEnds }
-              : null
-          }
+          settings={slicerSettings}
+          onSettings={project.setPrintSettings}
+          layers={layerPreview}
           onLayerView={setLayerView}
           onLayer={setLayerAt}
           onExport={(format) => void exportMesh(format)}
@@ -1451,8 +1490,8 @@ function HelpDialog({ kind, onClose }: { kind: "shortcuts" | "about"; onClose: (
 }
 
 /** The design with a sketch that's being drawn: added at the end, or in place of the one being edited. */
-/** Layer outlines as line pairs for the viewport, each at its layer's cut height. */
-function layerLines(layers: Layer[]): Float32Array {
+/** Outlines as line pairs for the viewport, each at its layer's cut height. */
+function layerLines(layers: { z: number; loops: Float64Array[] }[]): Float32Array {
   let n = 0;
   for (const l of layers) for (const loop of l.loops) n += loop.length * 3;
   const out = new Float32Array(n);

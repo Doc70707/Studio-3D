@@ -57,6 +57,7 @@ import {
 import { checkBinaryStl } from "./stl-check";
 import { crc32, stlTo3mf } from "./threemf";
 import { layerBounds, loopArea, sliceStl } from "./slice";
+import { slicePart } from "./slicer";
 import { crc32 as nodeCrc32 } from "node:zlib";
 import { makeBaseBox, measureVolume } from "replicad";
 
@@ -1622,5 +1623,29 @@ describe("slicing into layers", () => {
     broken.set(new Uint8Array(stl, 84 + (side + 1) * 50), 84 + side * 50);
     new DataView(broken.buffer).setUint32(80, n - 1, true);
     expect(sliceStl(broken.buffer, { layerHeight: 1 }).openEnds).toBeGreaterThan(0);
+  });
+});
+
+describe("walls on real parts", () => {
+  const settings = { layerHeight: 0.2, walls: 2, lineWidth: 0.42 };
+  const area = (loops: Float64Array[]) => loops.reduce((s, l) => s + loopArea(l), 0);
+
+  it.each([
+    ["an open box", design(box({ width: 60, depth: 40, height: 30, wall: 2 }))],
+    ["a block with a hole", design(box({ width: 30, depth: 30, height: 10, wall: 0 }), hole({ diameter: 8 }))],
+    ["a cylinder", part(shape("cylinder", { diameter: 20, height: 10 }))],
+    ["a sphere", part(shape("sphere", { diameter: 20 }))],
+    ["a tube", part(shape("tube", { outerDiameter: 30, innerDiameter: 22.5, height: 9 }))],
+    ["a cone", part(shape("cone", { bottomDiameter: 20, topDiameter: 8, height: 15 }))],
+  ])("%s: every layer gets its walls inside the material, with nothing too thin", async (_, doc) => {
+    const sliced = slicePart(await exportStl(designed(doc).shape), settings);
+    expect(sliced.openEnds).toBe(0);
+    expect(sliced.thinLayers).toEqual([]);
+    for (const l of sliced.layers) {
+      // Each wall path, grown by half a line, stays within the layer's material; walls step inwards.
+      for (const w of l.walls) expect(area(w)).toBeLessThan(l.area);
+      expect(l.walls[0]!.length).toBeGreaterThan(0);
+      expect(area(l.inside)).toBeLessThan(area(l.walls[1]!.length ? l.walls[1]! : l.walls[0]!) + 1e-9);
+    }
   });
 });

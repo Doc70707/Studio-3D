@@ -110,8 +110,12 @@ What works today:
 - Studio 3D's own slicer, step one (written for Studio 3D, no other slicer's code): Preview layers cuts the checked
   part into its printed layers at the chosen layer height (0.08 to 0.28 mm, saved beside the design) and shows them
   on the plate, with a slider to go up and down through them. Each layer's area is checked against the exact cross
-  section of boxes, containers, cylinders, spheres and holed blocks, and a gap in the surface is reported. Walls,
-  infill and G-code come next.
+  section of boxes, containers, cylinders, spheres and holed blocks, and a gap in the surface is reported.
+- Walls: each layer gets the chosen number of walls (1 to 4), 0.42 mm lines one inside the next, with the outside of
+  the first line exactly on the part's surface. Walls are found by Studio 3D's own polygon offsetting (inside corners
+  round, specks too small for a line left out), tested against hand-calculated areas. Places thinner than one line,
+  which can't print, are listed by layer. Slicing runs in the background so the window stays responsive. Infill and
+  G-code come next.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

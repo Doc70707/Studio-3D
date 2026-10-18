@@ -1,8 +1,8 @@
 // Print Studio's side panel: the printer, the checks run on the exact file that would go to a slicer, and export or
 // opening it in a slicer the user installed. Nothing here changes the design; the printer is saved beside it.
 import { forwardRef, useEffect, useState } from "react";
-import { LAYER_HEIGHTS, PRINTERS, type PrintCheck, type Printer } from "@studio3d/document";
-import type { Layer } from "@studio3d/geometry";
+import { LAYER_HEIGHTS, WALL_COUNTS, PRINTERS, type PrintCheck, type Printer } from "@studio3d/document";
+import type { SlicedLayer, SlicerSettings } from "@studio3d/geometry";
 import { Icon } from "./Icon";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { defaultSlicer, readSlicerMemory, slicerList, writeSlicerMemory, type SlicerMemory } from "./slicerChoice";
@@ -18,21 +18,50 @@ export type PrintState =
   | { kind: "checked"; checks: PrintCheck[]; size: [number, number, number]; volume: number }
   | { kind: "failed"; reason: string };
 
-/** The sliced layers being previewed, and which one is shown on top. */
-export interface LayerPreview {
-  count: number;
-  index: number;
-  layer: Layer | null;
-  /** Cut lines that didn't close into outlines (a gap in the surface). */
-  openEnds: number;
+/** The layer preview: slicing, failed, or the sliced layers and which one is shown on top. */
+export type LayerPreview =
+  | { status: "slicing" }
+  | { status: "failed"; error: string }
+  | {
+      status: "sliced";
+      count: number;
+      index: number;
+      layer: SlicedLayer | null;
+      /** Cut lines that didn't close into outlines (a gap in the surface). */
+      openEnds: number;
+      /** Layers with places thinner than one line. */
+      thinLayers: number[];
+    };
+
+/** The offered values, plus the current one if a file holds another. */
+const withCurrent = (values: number[], current: number) =>
+  (values.includes(current) ? values : [...values, current]).sort((a, b) => a - b);
+
+/** "1–3, 7, 9–10" for layer numbers (from 0). */
+function spans(layers: number[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < layers.length; ) {
+    let j = i;
+    while (j + 1 < layers.length && layers[j + 1] === layers[j]! + 1) j++;
+    out.push(i === j ? `${layers[i]! + 1}` : `${layers[i]! + 1}–${layers[j]! + 1}`);
+    i = j + 1;
+  }
+  return out.join(", ");
+}
+
+/** How many of the walls fit on this layer. */
+function wallSummary(layer: SlicedLayer, wanted: number): string {
+  const fit = layer.walls.filter((w) => w.length > 0).length;
+  if (fit === wanted) return `${wanted} ${wanted === 1 ? "wall" : "walls"}.`;
+  return fit === 0 ? "Too thin for any wall." : `Room for ${fit} of ${wanted} walls in places.`;
 }
 
 const mm = (n: number) => `${(Math.round(n * 100) / 100 + 0).toFixed(2)} mm`;
 
 interface Props {
   printer: Printer;
-  layerHeight: number;
-  onLayerHeight: (h: number) => void;
+  settings: SlicerSettings;
+  onSettings: (patch: { layerHeight?: number; walls?: number }) => void;
   layers: LayerPreview | null;
   onLayerView: (on: boolean) => void;
   onLayer: (index: number) => void;
@@ -45,7 +74,7 @@ interface Props {
 }
 
 export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(props, ref) {
-  const { printer, state } = props;
+  const { printer, state, settings, layers } = props;
   const errors = state.kind === "checked" ? state.checks.filter((c) => c.status === "error").length : 0;
   const ready = !props.busy && state.kind === "checked";
   const why =
@@ -139,31 +168,56 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
           <div className="input-row select-row">
             <select
               id="layer-height"
-              value={props.layerHeight}
-              onChange={(e) => props.onLayerHeight(Number(e.target.value))}
+              value={settings.layerHeight}
+              onChange={(e) => props.onSettings({ layerHeight: Number(e.target.value) })}
               title="Thinner layers show less of the steps on curves and slopes, and take longer to print"
             >
-              {(LAYER_HEIGHTS.includes(props.layerHeight) ? LAYER_HEIGHTS : [...LAYER_HEIGHTS, props.layerHeight])
-                .sort((a, b) => a - b)
-                .map((h) => (
-                  <option key={h} value={h}>
-                    {mm(h)}
-                  </option>
-                ))}
+              {withCurrent(LAYER_HEIGHTS, settings.layerHeight).map((h) => (
+                <option key={h} value={h}>
+                  {mm(h)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="field compact">
+          <label htmlFor="walls">Walls</label>
+          <div className="input-row select-row">
+            <select
+              id="walls"
+              value={settings.walls}
+              onChange={(e) => props.onSettings({ walls: Number(e.target.value) })}
+              title={`Lines round every outline, each ${settings.lineWidth} mm wide. More walls make a stronger part.`}
+            >
+              {withCurrent(WALL_COUNTS, settings.walls).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
             </select>
           </div>
         </div>
         <button
           type="button"
           className="layer-toggle"
-          aria-pressed={!!props.layers}
-          disabled={!props.layers && state.kind !== "checked"}
-          onClick={() => props.onLayerView(!props.layers)}
+          aria-pressed={!!layers}
+          disabled={!layers && state.kind !== "checked"}
+          onClick={() => props.onLayerView(!layers)}
           title={state.kind !== "checked" ? "The checks need to finish first" : "Cut the part into its printed layers"}
         >
-          {props.layers ? "Show the part" : "Preview layers"}
+          {layers ? "Show the part" : "Preview layers"}
         </button>
-        {props.layers && (
+        {layers?.status === "slicing" && (
+          <p className="props-note" role="status" data-testid="slicing">
+            Slicing…
+          </p>
+        )}
+        {layers?.status === "failed" && (
+          <p className="issue error" role="alert">
+            The part couldn't be sliced: {layers.error}
+          </p>
+        )}
+        {layers?.status === "sliced" && (
           <>
             <div className="field compact">
               <label htmlFor="layer">Layer</label>
@@ -172,24 +226,33 @@ export const PrintPanel = forwardRef<HTMLElement, Props>(function PrintPanel(pro
                   id="layer"
                   type="range"
                   min={1}
-                  max={props.layers.count}
-                  value={props.layers.index + 1}
+                  max={layers.count}
+                  value={layers.index + 1}
                   onChange={(e) => props.onLayer(Number(e.target.value) - 1)}
                 />
               </div>
             </div>
-            {props.layers.layer && (
+            {layers.layer && (
               <p className="props-note" data-testid="layer-info">
-                Layer {props.layers.index + 1} of {props.layers.count}: {mm(props.layers.layer.bottom)} to{" "}
-                {mm(props.layers.layer.top)}, {Math.round(props.layers.layer.area * 10) / 10} mm² of material.
+                Layer {layers.index + 1} of {layers.count}: {mm(layers.layer.bottom)} to {mm(layers.layer.top)},{" "}
+                {Math.round(layers.layer.area * 10) / 10} mm² of material. {wallSummary(layers.layer, settings.walls)}
               </p>
             )}
-            {props.layers.openEnds > 0 && (
+            {layers.thinLayers.length > 0 && (
+              <p className="issue warning" role="alert" data-testid="thin-warning">
+                {layers.thinLayers.length === 1 ? "Layer" : "Layers"} {spans(layers.thinLayers)}{" "}
+                {layers.thinLayers.length === 1 ? "has" : "have"} places thinner than one {settings.lineWidth} mm line.
+                They won't print; make them thicker in Design.
+              </p>
+            )}
+            {layers.openEnds > 0 && (
               <p className="issue warning" role="alert">
                 Some layers have outlines that don't close: the surface has a gap there.
               </p>
             )}
-            <p className="props-note">Outlines from Studio 3D's own slicer. Walls, infill and G-code come next.</p>
+            <p className="props-note">
+              Walls from Studio 3D's own slicer, each line {settings.lineWidth} mm wide. Infill and G-code come next.
+            </p>
           </>
         )}
       </div>

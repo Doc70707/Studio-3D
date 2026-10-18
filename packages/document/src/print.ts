@@ -113,11 +113,17 @@ export interface PrintSetup {
   printer: string;
   /** Height of each printed layer, mm. Absent means the default. */
   layerHeight?: number;
+  /** Walls round every outline. Absent means the default. */
+  walls?: number;
 }
 
 /** Layer heights offered for a 0.4 mm nozzle, the size every listed printer ships with: fine detail to fast drafts. */
 export const LAYER_HEIGHTS = [0.08, 0.12, 0.16, 0.2, 0.24, 0.28];
 export const DEFAULT_LAYER_HEIGHT = 0.2;
+export const WALL_COUNTS = [1, 2, 3, 4];
+export const DEFAULT_WALLS = 2;
+/** Width of one printed line from a 0.4 mm nozzle: a little wider than the nozzle, so lines press into each other. */
+export const LINE_WIDTH = 0.42;
 
 export const printerById = (id: string | undefined): Printer =>
   PRINTERS.find((p) => p.id === id) ?? PRINTERS.find((p) => p.id === DEFAULT_PRINTER)!;
@@ -128,6 +134,9 @@ export function printSetupProblem(p: unknown): string | null {
   if (typeof (p as Record<string, unknown>).printer !== "string") return "doesn't say which printer";
   const h = (p as Record<string, unknown>).layerHeight;
   if (h !== undefined && !(typeof h === "number" && h > 0 && h <= 1)) return "has a layer height that isn't 0 to 1 mm";
+  const w = (p as Record<string, unknown>).walls;
+  if (w !== undefined && !(Number.isInteger(w) && (w as number) >= 1 && (w as number) <= 20))
+    return "has a wall count that isn't a whole number from 1 to 20";
   return null;
 }
 

@@ -20,13 +20,14 @@ import {
   undo as undoStep,
   type Feature,
   type Preserved,
+  type PrintSetup,
   type ProjectDocument,
   type ReferenceImage,
   type RecoveryResult,
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.27.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.28.0" };
 
 /** How long after the last edit the unsaved work is backed up. */
 export const BACKUP_DELAY_MS = 2000;
@@ -144,9 +145,10 @@ export function useProject() {
     (printer: string) => edit((d) => ({ ...d, print: { ...d.print, printer } }), null),
     [edit],
   );
-  const setLayerHeight = useCallback(
-    (layerHeight: number) =>
-      edit((d) => ({ ...d, print: { printer: d.print?.printer ?? DEFAULT_PRINTER, ...d.print, layerHeight } }), null),
+  /** Changes print settings (not the printer). Each change is one undo step and never rebuilds the part. */
+  const setPrintSettings = useCallback(
+    (settings: Partial<Omit<PrintSetup, "printer">>) =>
+      edit((d) => ({ ...d, print: { printer: d.print?.printer ?? DEFAULT_PRINTER, ...d.print, ...settings } }), null),
     [edit],
   );
 
@@ -379,7 +381,7 @@ export function useProject() {
       updateReference,
       removeReference,
       setPrinter,
-      setLayerHeight,
+      setPrintSettings,
       undo,
       redo,
       canUndo: undoable,
@@ -410,7 +412,7 @@ export function useProject() {
       updateReference,
       removeReference,
       setPrinter,
-      setLayerHeight,
+      setPrintSettings,
       undo,
       redo,
       undoable,

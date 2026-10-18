@@ -11,7 +11,7 @@ export interface SliceOptions {
 }
 
 /** One closed outline: x, y pairs in order. Counter-clockwise (seen from above) for an outside edge, clockwise for a hole. */
-export type Loop = Float64Array;
+export type Loop = Float64Array<ArrayBufferLike>;
 
 export interface Layer {
   /** Bottom and top of the layer, mm above the plate. */
