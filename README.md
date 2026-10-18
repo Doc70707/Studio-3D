@@ -91,6 +91,11 @@ What works today:
   typing that distance (or type its real width), then move, turn or fade it. A sketch facing the same way shows the
   picture underneath at its real size, to trace over. Pictures are saved in the project but never built or exported:
   a test checks the STL is byte for byte the same with one.
+- Screen modes (buttons at the right of the status bar, or the View menu): Full screen (F11) covers the whole screen
+  with no title bar; Focus canvas (Ctrl+0, like AutoCAD's Clean Screen) puts the menus, side panel and status bar
+  away, keeping the camera views, and brings the panel back while a piece is selected; Ctrl+B hides or shows the
+  side panel on its own. Esc leaves either mode once it has nothing else to do. Nothing in the design, selection,
+  camera or sketch changes.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.

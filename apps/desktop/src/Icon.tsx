@@ -33,6 +33,10 @@ const PATHS = {
   picture: "M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15 8.5a1.2 1.2 0 1 0 0 2.4a1.2 1.2 0 1 0 0-2.4",
   eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6",
   eyeOff: "M2 12s4-7 10-7c2 0 3.7.7 5.1 1.7M22 12s-4 7-10 7c-2 0-3.7-.7-5.1-1.7M4 20L20 4",
+  fullScreen: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
+  exitFullScreen: "M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5",
+  focus: "M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M9 12h6",
+  sidePanel: "M4 5h16v14H4zM9 5v14",
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -25,7 +25,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.23.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.24.0" };
 
 /** How long after the last edit the unsaved work is backed up. */
 export const BACKUP_DELAY_MS = 2000;

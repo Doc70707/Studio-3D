@@ -57,6 +57,7 @@ import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
 import { platform } from "./platform";
+import { escapeLeaves, focusPanelAfterSelection, type FocusPanel } from "./screen";
 import { APP_INFO, useProject, whenSaved } from "./useProject";
 
 /** Views on the view bar and in the View menu. Shift with a number key looks from the opposite side. */
@@ -128,6 +129,32 @@ export function App() {
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
   /** The reference picture being calibrated, if any. */
   const [calibrating, setCalibrating] = useState<string | null>(null);
+  /** Full screen (the window covers the screen) and Focus canvas (most panels step aside): independent screen modes. */
+  const [fullScreen, setFullScreen] = useState(false);
+  const [focus, setFocus] = useState(false);
+  /** Whether the side panel is open outside Focus canvas, and inside it. */
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [focusPanel, setFocusPanel] = useState<FocusPanel>("closed");
+  const panelShown = focus ? focusPanel !== "closed" : panelOpen;
+  const togglePanel = useCallback(() => {
+    if (focus) setFocusPanel((p) => (p === "closed" ? "open" : "closed"));
+    else setPanelOpen((v) => !v);
+  }, [focus]);
+  const toggleFocus = useCallback(() => {
+    setFocus((f) => !f);
+    setFocusPanel("closed");
+  }, []);
+  const toggleFullScreen = useCallback(() => {
+    platform.fullScreen.set(!fullScreen).catch((e: Error) => {
+      setNotice({ kind: "error", text: `Couldn't change full screen: ${e.message ?? e}` });
+    });
+  }, [fullScreen, setNotice]);
+  useEffect(() => platform.fullScreen.onChange(setFullScreen), []);
+  const pickedId = selection?.id ?? null;
+  // In Focus canvas the panel comes up when a piece is selected, so its sizes can be typed, and goes when let go.
+  useEffect(() => {
+    if (focus) setFocusPanel((p) => focusPanelAfterSelection(p, pickedId !== null));
+  }, [focus, pickedId]);
 
   // Viewport
   useEffect(() => {
@@ -153,9 +180,14 @@ export function App() {
       const host = hostRef.current;
       if (!vp || !host) return;
       const h = host.getBoundingClientRect();
-      const top = topbarRef.current?.getBoundingClientRect();
-      const panel = panelRef.current?.getBoundingClientRect();
-      const status = statusRef.current?.getBoundingClientRect();
+      // A panel that is put away has no size, and covers nothing.
+      const rect = (el: HTMLElement | null) => {
+        const r = el?.getBoundingClientRect();
+        return r && r.width > 0 && r.height > 0 ? r : undefined;
+      };
+      const top = rect(topbarRef.current);
+      const panel = rect(panelRef.current);
+      const status = rect(statusRef.current);
       vp.setSafeArea({
         top: top ? top.bottom - h.top : 0,
         left: panel ? panel.right - h.left : 0,
@@ -542,6 +574,12 @@ export function App() {
   // Keyboard: views, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, and Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // F11 works everywhere, sketching and typing included: it only changes how much of the screen the app has.
+      if (e.key === "F11" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleFullScreen();
+        return;
+      }
       if (mode === "pick-face" && e.key === "Escape") {
         stopPicking();
         return;
@@ -574,6 +612,17 @@ export function App() {
       if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
         void project.newProject();
+        return;
+      }
+      // Ctrl+0 is AutoCAD's Clean Screen; here it is Focus canvas. Ctrl+B shows or hides the side panel.
+      if (mod && !e.shiftKey && !e.altKey && (e.code === "Digit0" || e.code === "Numpad0")) {
+        e.preventDefault();
+        toggleFocus();
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && key === "b") {
+        e.preventDefault();
+        togglePanel();
         return;
       }
       const typing =
@@ -624,10 +673,31 @@ export function App() {
         setShowSizes((v) => !v);
         return;
       }
+      // With nothing else for Escape to do, it leaves full screen, then Focus canvas (dialogs handle their own).
+      if (e.key === "Escape" && !dialog && !calibrating && !e.shiftKey) {
+        const leave = escapeLeaves({ fullScreen, focus });
+        if (leave === "full-screen") toggleFullScreen();
+        else if (leave === "focus") toggleFocus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [project, mode, stopPicking, selection, selected, doc, toggleProjection]);
+  }, [
+    project,
+    mode,
+    stopPicking,
+    selection,
+    selected,
+    doc,
+    toggleProjection,
+    toggleFullScreen,
+    toggleFocus,
+    togglePanel,
+    dialog,
+    calibrating,
+    fullScreen,
+    focus,
+  ]);
 
   // Window title and close guard
   // The title is only set once the geometry engine has loaded, so it also tells (and CI checks) that the kernel started.
@@ -731,6 +801,10 @@ export function App() {
           reason: noView,
         },
         { label: "Show sizes", shortcut: "M", checked: showSizes, onSelect: () => setShowSizes((v) => !v) },
+        "separator" as const,
+        { label: "Side panel", shortcut: "Ctrl+B", checked: panelShown, onSelect: togglePanel },
+        { label: "Focus canvas", shortcut: "Ctrl+0", checked: focus, onSelect: toggleFocus },
+        { label: "Full screen", shortcut: "F11", checked: fullScreen, onSelect: toggleFullScreen },
       ],
     },
     {
@@ -807,8 +881,63 @@ export function App() {
     },
   ];
 
+  // The screen buttons sit at the right of the status bar, where AutoCAD keeps Clean Screen; in Focus canvas, where
+  // the status bar is put away, they move up beside the camera views.
+  const screenModes = (
+    <nav className={`bar screen-modes${focus ? " glass" : ""}`} aria-label="Screen">
+      <button
+        type="button"
+        className="icon-only"
+        aria-label="Side panel"
+        aria-pressed={panelShown}
+        title={`${panelShown ? "Hide" : "Show"} the side panel (Ctrl+B)`}
+        onClick={togglePanel}
+      >
+        <Icon name="sidePanel" />
+      </button>
+      <button
+        type="button"
+        className={focus ? "exit" : "icon-only"}
+        aria-label={focus ? "Exit focus canvas" : "Focus canvas"}
+        aria-pressed={focus}
+        title={
+          focus
+            ? "Bring the panels back (Ctrl+0 or Esc)"
+            : "Focus canvas: put the panels away to give the part the room (Ctrl+0)"
+        }
+        onClick={toggleFocus}
+      >
+        <Icon name="focus" />
+        {focus && "Exit focus"}
+      </button>
+      <button
+        type="button"
+        className={fullScreen ? "exit" : "icon-only"}
+        aria-label={fullScreen ? "Exit full screen" : "Full screen"}
+        aria-pressed={fullScreen}
+        title={fullScreen ? "Leave full screen (F11 or Esc)" : "Full screen: use the whole screen (F11)"}
+        onClick={toggleFullScreen}
+      >
+        <Icon name={fullScreen ? "exitFullScreen" : "fullScreen"} />
+        {fullScreen && "Exit full screen"}
+      </button>
+    </nav>
+  );
+
   return (
-    <div className={`app${draft ? " sketching" : ""}${picking ? " picking" : ""}`} data-mode={mode}>
+    <div
+      className={[
+        "app",
+        draft && "sketching",
+        picking && "picking",
+        focus && "focus",
+        fullScreen && "full-screen",
+        !panelShown && "panel-hidden",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-mode={mode}
+    >
       <main
         className="viewport-host"
         ref={hostRef}
@@ -998,6 +1127,7 @@ export function App() {
           </button>
         </nav>
 
+        {focus && screenModes}
         <button
           type="button"
           className="primary"
@@ -1079,6 +1209,7 @@ export function App() {
             lists the rest
           </span>
         </span>
+        {!focus && screenModes}
       </footer>
 
       {dialog && <HelpDialog kind={dialog} onClose={() => setDialog(null)} />}
@@ -1111,6 +1242,9 @@ const SHORTCUTS: [string, string][] = [
   ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
   ["New / Open / Save / Save as", "Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S"],
   ["Menus", "Alt, or Alt + the menu's first letter"],
+  ["Full screen on or off", "F11 (Esc also leaves it)"],
+  ["Focus canvas (put the panels away)", "Ctrl+0 (Esc also leaves it)"],
+  ["Show or hide the side panel", "Ctrl+B"],
   ["Sketch: Select / Rectangle / Circle / Outline", "V / R / C / L"],
   ["Sketch: type a size while drawing", "Type the number, Tab to the next box, Enter"],
   ["Sketch: close an outline", "Enter, or click its first corner"],

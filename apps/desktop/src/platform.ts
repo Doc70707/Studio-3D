@@ -35,6 +35,14 @@ export interface Platform {
   /** Asks before throwing away unsaved work. */
   confirmDiscard(message: string): Promise<boolean>;
   setTitle(title: string): void;
+  /**
+   * Full screen: the window covers the whole screen with no title bar or taskbar. `onChange` reports the real state
+   * whenever it changes, including when something other than the app (the browser's own Escape) ends it.
+   */
+  fullScreen: {
+    set(on: boolean): Promise<void>;
+    onChange(listener: (on: boolean) => void): () => void;
+  };
 }
 
 const RECOVERY_KEY = "studio3d.recovery";
@@ -101,6 +109,20 @@ const desktop: Platform = {
 
   setTitle(title) {
     void getCurrentWindow().setTitle(title);
+  },
+
+  fullScreen: {
+    async set(on) {
+      await getCurrentWindow().setFullscreen(on);
+    },
+    onChange(listener) {
+      const win = getCurrentWindow();
+      // Going in or out of full screen resizes the window, so the resize event is when to ask.
+      const check = () => void win.isFullscreen().then(listener, () => {});
+      const off = win.onResized(check);
+      check();
+      return () => void off.then((f) => f());
+    },
   },
 };
 
@@ -171,6 +193,19 @@ const browser: Platform = {
 
   setTitle(title) {
     document.title = title;
+  },
+
+  fullScreen: {
+    async set(on) {
+      if (on && !document.fullscreenElement) await document.documentElement.requestFullscreen();
+      else if (!on && document.fullscreenElement) await document.exitFullscreen();
+    },
+    onChange(listener) {
+      const check = () => listener(!!document.fullscreenElement);
+      document.addEventListener("fullscreenchange", check);
+      check();
+      return () => document.removeEventListener("fullscreenchange", check);
+    },
   },
 };
 

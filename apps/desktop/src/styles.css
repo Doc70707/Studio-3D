@@ -1245,6 +1245,62 @@ input:focus-visible {
   filter: brightness(1.08);
 }
 
+/* ---------- Screen modes: Full screen, Focus canvas, and putting the side panel away ---------- */
+
+.screen-modes {
+  gap: 2px;
+}
+
+/* In the status bar they are small, like the rest of it. */
+.statusbar .screen-modes {
+  margin: -4px -8px -4px 0;
+  padding: 0;
+}
+
+.statusbar .screen-modes button {
+  height: 26px;
+  padding: 0 9px;
+}
+
+.statusbar .screen-modes button.icon-only {
+  width: 28px;
+}
+
+.screen-modes button[aria-pressed="true"].icon-only {
+  background: var(--fill);
+  color: var(--accent);
+}
+
+/* The way out of a screen mode is a labelled button, not just an icon. */
+.screen-modes button.exit {
+  background: rgba(94, 168, 255, 0.2);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+  font-weight: 600;
+}
+
+.screen-modes button.exit:hover:not(:disabled) {
+  background: rgba(94, 168, 255, 0.32);
+}
+
+.app.panel-hidden .panel {
+  display: none;
+}
+
+/* Focus canvas: only the camera views and the screen buttons stay; the panel comes back when a piece is picked. */
+.app.focus .topbar {
+  justify-content: center;
+}
+
+.app.focus .topbar > .bar:first-child,
+.app.focus .topbar > .primary,
+.app.focus .statusbar {
+  display: none;
+}
+
+.app.focus .panel {
+  bottom: var(--gap);
+}
+
 /* While sketching, the drawing screen takes over; the design panels step back. */
 .app.sketching .topbar,
 .app.sketching .panel,
