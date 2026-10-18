@@ -19,7 +19,36 @@ async function at(page: Page, u: number, v: number): Promise<[number, number]> {
   const [ox, oy] = (await c.getAttribute("data-origin"))!.split(",").map(Number) as [number, number];
   return [box.x + ox + u * k, box.y + oy - v * k];
 }
-const clickAt = async (page: Page, u: number, v: number) => page.mouse.click(...(await at(page, u, v)));
+/**
+ * Waits until the drawing area has stopped moving. On a busy machine the panel beside it can still be laying out
+ * when the sketch opens, which shifts the drawing between reading where a point is and clicking it.
+ */
+async function steady(page: Page) {
+  const where = async () => {
+    const c = canvas(page);
+    return JSON.stringify([
+      await c.boundingBox(),
+      await c.getAttribute("data-scale"),
+      await c.getAttribute("data-origin"),
+    ]);
+  };
+  let last = "";
+  await expect
+    .poll(
+      async () => {
+        const now = await where();
+        const same = now === last;
+        last = now;
+        return same;
+      },
+      { intervals: [100] },
+    )
+    .toBe(true);
+}
+const clickAt = async (page: Page, u: number, v: number) => {
+  await steady(page);
+  await page.mouse.click(...(await at(page, u, v)));
+};
 
 /** Draws a rectangle by its first corner and typed width and height. */
 async function typedRectangle(page: Page, u: number, v: number, w: string, h: string) {
