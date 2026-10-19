@@ -11,9 +11,21 @@ const cyl = (d: number, h: number) => Math.PI * (d / 2) ** 2 * h;
 const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
 const canvas = (page: Page) => page.getByTestId("sketch-canvas");
 
-/** Where a sketch point (in mm) is on screen. */
+/** Where a sketch point (in mm) is on screen, once the drawing and its canvas have stopped moving. */
 async function at(page: Page, u: number, v: number): Promise<[number, number]> {
   const c = canvas(page);
+  let last = "";
+  await expect
+    .poll(
+      async () => {
+        const now = `${JSON.stringify(await c.boundingBox())} ${await c.getAttribute("data-origin")} ${await c.getAttribute("data-scale")}`;
+        const still = now === last;
+        last = now;
+        return still;
+      },
+      { intervals: [150] },
+    )
+    .toBe(true);
   const box = (await c.boundingBox())!;
   const k = Number(await c.getAttribute("data-scale"));
   const [ox, oy] = (await c.getAttribute("data-origin"))!.split(",").map(Number) as [number, number];

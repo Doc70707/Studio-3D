@@ -3173,7 +3173,7 @@ button.link:hover {
 }
 .slice-figures {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -3181,7 +3181,14 @@ button.link:hover {
   display: grid;
   gap: 2px;
 }
+.slice-figures span:first-child {
+  grid-column: 1 / -1;
+}
+.slice-figures span:first-child strong {
+  font-size: 22px;
+}
 .slice-figures strong {
+  white-space: nowrap;
   font-size: 17px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;

@@ -148,7 +148,7 @@ function SliceResult({ summary }: { summary: SliceSummary }) {
       <div className="slice-figures">
         <span>
           <strong data-testid="slice-time">{duration(summary.seconds)}</strong>
-          <small>printing</small>
+          <small>printing, roughly</small>
         </span>
         <span>
           <strong data-testid="slice-filament">{Math.round(summary.grams)} g</strong>
@@ -390,7 +390,7 @@ export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(
             <button
               type="button"
               onClick={props.onExportGcode}
-              disabled={props.busy || !!props.gcodeBlocked}
+              disabled={props.busy || !!props.gcodeBlocked || props.summary?.status !== "ready"}
               title={props.gcodeBlocked ?? "Write the printer's G-code, check it by reading it back, then save it"}
             >
               <Icon name="export" />

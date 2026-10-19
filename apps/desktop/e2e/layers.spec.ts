@@ -33,7 +33,7 @@ test("Slice cuts the checked part into its real layers", async ({ page }) => {
   await page.getByLabel("Layer", { exact: true }).fill("5");
   await expect(info(page)).toContainText("2 walls. Nothing to fill inside the walls.");
 
-  await page.getByRole("button", { name: "Show the part" }).click();
+  await page.getByRole("button", { name: "Show the part", exact: true }).click();
   await expect(host(page)).not.toHaveAttribute("data-layers", /.*/);
 });
 

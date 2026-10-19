@@ -126,6 +126,10 @@ What works today:
   inside the printer, the filament must match the toolpaths, and the heaters must be off at the end. A second,
   separate reader (`scripts/verify_gcode.py`) checks the files the tests write. Bambu printers need G-code inside
   Bambu's own 3MF, which isn't written yet. Not yet tried on a real printer.
+- One-click Slice (Print Studio panel, or the Print tab of the ribbon): cuts the part into its layers, writes the
+  G-code and checks it, then shows the print at a glance: roughly how long (at Studio 3D's own 20 to 60 mm/s, with
+  speeding up, slowing down and corners counted, heating not), grams and metres of PLA, and the number of layers.
+  This works for every printer that fits the part; saving the G-code still needs a non-Bambu printer for now.
 - A menu bar like other desktop CAD apps: File, Edit, View, Create, Modify and Help, each item with its shortcut.
   Alt (or Alt + a menu's first letter) reaches it from the keyboard. Items that can't run right now are greyed out
   with the reason. Help lists every keyboard and mouse control. Common commands also sit on a small quick-access bar.
