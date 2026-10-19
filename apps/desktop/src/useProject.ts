@@ -27,7 +27,7 @@ import {
 } from "@studio3d/document";
 import { platform, type FileRef } from "./platform";
 
-export const APP_INFO = { name: "Studio 3D", version: "0.33.0" };
+export const APP_INFO = { name: "Studio 3D", version: "0.34.0" };
 
 /** How long after the last edit the unsaved work is backed up. */
 export const BACKUP_DELAY_MS = 2000;
@@ -103,6 +103,12 @@ export function useProject() {
           features: [...d.features.slice(0, at), feature, ...d.features.slice(at)],
         };
       }, null),
+    [edit],
+  );
+
+  /** Steps that aren't shapes (a sketch and the holes drawn with it), added at the end as one undo step. */
+  const addSteps = useCallback(
+    (features: Feature[]) => edit((d) => ({ ...d, features: [...d.features, ...features] }), null),
     [edit],
   );
 
@@ -375,6 +381,7 @@ export function useProject() {
       run,
       updateFeature,
       addFeature,
+      addSteps,
       removeFeature,
       moveFeature,
       addReference,
@@ -406,6 +413,7 @@ export function useProject() {
       run,
       updateFeature,
       addFeature,
+      addSteps,
       removeFeature,
       moveFeature,
       addReference,

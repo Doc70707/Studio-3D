@@ -97,7 +97,8 @@ export function typedPoint(kind: DrawKind, from: Point2, pointer: Point2 | null,
     if (d === null) return p;
     const [ux, uy] = pointer && dist > 1e-9 ? [dx / dist, dy / dist] : [1, 0];
     const r = Math.abs(d) / 2;
-    return [round(from[0] + ux * r), round(from[1] + uy * r)];
+    // Kept to 6 decimals: rounding the edge point to 2 would turn a typed 6 into 5.99 at a slant.
+    return [exact(from[0] + ux * r), exact(from[1] + uy * r)];
   }
   if (t?.point !== undefined) return parsePoint(t.point, from) ?? p;
   const len = v(0) ?? dist;

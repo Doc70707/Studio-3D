@@ -1,6 +1,7 @@
 // The ribbon: tabs of labelled buttons in named groups, like Autodesk's. Minimised, only the tab names show and a
 // tab opens over the 3D view when clicked; double-clicking a tab name minimises or restores it, as in Civil 3D.
 import { forwardRef, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./Icon";
 
 export interface RibbonItem {
@@ -34,9 +35,11 @@ interface Props {
   tabs: RibbonTab[];
   minimized: boolean;
   onMinimized: (minimized: boolean) => void;
+  /** Where the tab names go: in the top bar, so the ribbon takes one row less of the screen. */
+  tabsHost?: HTMLElement | null;
 }
 
-export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, minimized, onMinimized }, ref) {
+export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, minimized, onMinimized, tabsHost }, ref) {
   const [active, setActive] = useState(tabs[0]?.id ?? "");
   // Minimised, a tab opens over the view until something is used or the pointer clicks elsewhere.
   const [open, setOpen] = useState(false);
@@ -47,8 +50,8 @@ export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, min
   useEffect(() => {
     if (!open) return;
     const close = (e: PointerEvent) => {
-      const root = panelRef.current?.closest(".ribbon");
-      if (root && !root.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Element;
+      if (!panelRef.current?.contains(t) && !t.closest?.(".ribbon-tabs")) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     window.addEventListener("pointerdown", close, true);
@@ -66,6 +69,44 @@ export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, min
   }, [tabSet]);
 
   if (!tab) return null;
+  const tablist = (
+    <div className="ribbon-tabs" role="tablist" aria-label="Ribbon tabs">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          id={`ribbon-tab-${t.id}`}
+          aria-selected={showPanel && t.id === tab.id}
+          aria-controls="ribbon-panel"
+          title={minimized ? "Click to open; double-click to keep the ribbon open" : "Double-click to minimise"}
+          onClick={() => {
+            setActive(t.id);
+            if (minimized) setOpen((o) => !(o && t.id === tab.id));
+          }}
+          onDoubleClick={() => {
+            setOpen(false);
+            onMinimized(!minimized);
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+      <button
+        type="button"
+        className="ribbon-minimize"
+        aria-label={minimized ? "Show the ribbon" : "Minimise the ribbon"}
+        aria-pressed={minimized}
+        title={minimized ? "Show the ribbon" : "Minimise the ribbon to its tab names"}
+        onClick={() => {
+          setOpen(false);
+          onMinimized(!minimized);
+        }}
+      >
+        <Icon name={minimized ? "chevronDown" : "chevronUp"} />
+      </button>
+    </div>
+  );
   return (
     <section
       className={`ribbon${minimized ? " minimized" : ""}${open ? " open" : ""}`}
@@ -73,42 +114,7 @@ export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, min
       ref={ref}
       data-testid="ribbon"
     >
-      <div className="ribbon-tabs" role="tablist" aria-label="Ribbon tabs">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            id={`ribbon-tab-${t.id}`}
-            aria-selected={showPanel && t.id === tab.id}
-            aria-controls="ribbon-panel"
-            title={minimized ? "Click to open; double-click to keep the ribbon open" : "Double-click to minimise"}
-            onClick={() => {
-              setActive(t.id);
-              if (minimized) setOpen((o) => !(o && t.id === tab.id));
-            }}
-            onDoubleClick={() => {
-              setOpen(false);
-              onMinimized(!minimized);
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-        <button
-          type="button"
-          className="ribbon-minimize"
-          aria-label={minimized ? "Show the ribbon" : "Minimise the ribbon"}
-          aria-pressed={minimized}
-          title={minimized ? "Show the ribbon" : "Minimise the ribbon to its tab names"}
-          onClick={() => {
-            setOpen(false);
-            onMinimized(!minimized);
-          }}
-        >
-          <Icon name={minimized ? "chevronDown" : "chevronUp"} />
-        </button>
-      </div>
+      {tabsHost ? createPortal(tablist, tabsHost) : tablist}
       {showPanel && (
         <div
           className="ribbon-panel"
@@ -118,7 +124,7 @@ export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, min
           ref={panelRef}
         >
           {tab.groups.map((g) => (
-            <div className="ribbon-group" key={g.label} role="group" aria-label={g.label}>
+            <div className="ribbon-group" key={g.label} role="group" aria-label={g.label} title={g.label}>
               <div className="ribbon-items">
                 {g.items.map((item) => (
                   <button
@@ -139,7 +145,6 @@ export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, min
                   </button>
                 ))}
               </div>
-              <div className="ribbon-group-label">{g.label}</div>
             </div>
           ))}
         </div>

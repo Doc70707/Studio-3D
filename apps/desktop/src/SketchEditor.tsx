@@ -36,7 +36,15 @@ import {
   type Typed,
 } from "./dynamicInput";
 import {
+  DEFAULT_SNAPS,
+  SNAP_HINTS,
+  SNAP_KINDS,
   SNAP_LABELS,
+  midBetween,
+  along,
+  formatBearing,
+  parseDirection,
+  type SnapKind,
   boundaryEdges,
   constrain,
   editSide,
@@ -96,6 +104,24 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
 ];
 
 const SNAP_PX = 10;
+const SNAPS_KEY = "studio3d.snaps";
+/** The snaps turned on, and whether snapping is on at all (F3), kept on this computer like AutoCAD's OSNAP settings. */
+function readSnaps(): { on: boolean; kinds: SnapKind[] } {
+  try {
+    const r = JSON.parse(localStorage.getItem(SNAPS_KEY) ?? "null") as { on?: unknown; kinds?: unknown } | null;
+    const kinds = Array.isArray(r?.kinds) ? SNAP_KINDS.filter((k) => (r.kinds as unknown[]).includes(k)) : null;
+    return { on: typeof r?.on === "boolean" ? r.on : true, kinds: kinds ?? [...DEFAULT_SNAPS] };
+  } catch {
+    return { on: true, kinds: [...DEFAULT_SNAPS] };
+  }
+}
+function writeSnaps(v: { on: boolean; kinds: SnapKind[] }) {
+  try {
+    localStorage.setItem(SNAPS_KEY, JSON.stringify(v));
+  } catch {
+    // Storage can be refused; the settings then last until the app closes.
+  }
+}
 /** Angle steps the outline tool can click to, in degrees (0 = off). */
 const ANGLE_STEPS = [0, 15, 30, 45, 90];
 const round = (n: number) => Math.round(n * 100) / 100 + 0;
@@ -132,6 +158,17 @@ export function SketchEditor(props: {
   /** Ortho lock (F8): outline sides only go straight across or straight up. Shift flips it while held. */
   const [ortho, setOrtho] = useState(false);
   const [angleStep, setAngleStep] = useState(0);
+  const [snaps, setSnapsState] = useState(readSnaps);
+  const setSnaps = (v: { on: boolean; kinds: SnapKind[] }) => {
+    writeSnaps(v);
+    setSnapsState(v);
+  };
+  const [snapMenu, setSnapMenu] = useState(false);
+  /** Mid between 2 points: the next two clicks are averaged, and the drawing tool gets the point halfway. */
+  const [m2p, setM2p] = useState<{ first: Point2 | null } | null>(null);
+  /** The next outline side by length and direction (an angle or a bearing such as N 45° E). */
+  const [sideLength, setSideLength] = useState("10");
+  const [sideDirection, setSideDirection] = useState("0");
   /** What the pointer is held to right now: an object snap, or an angle from the last corner. */
   const [hold, setHold] = useState<{ snap: Snap | null; angle: number | null }>({ snap: null, angle: null });
   /** Sizes typed while drawing; they start empty for every new shape and every new outline corner. */
@@ -225,7 +262,7 @@ export function SketchEditor(props: {
       const free = { snap: null, angle: null };
       if (e.altKey) return { point: [round(raw[0]), round(raw[1])] as Point2, ...free };
       const last = drawing?.length ? drawing[drawing.length - 1]! : null;
-      const snapped = findSnap(scene, raw, last, SNAP_PX, toScreen);
+      const snapped = snaps.on ? findSnap(scene, raw, last, SNAP_PX, toScreen, snaps.kinds) : null;
       if (snapped) return { point: snapped.point, snap: snapped, angle: null };
       if (last) {
         const held = constrain(last, raw, { ortho: ortho !== e.shiftKey, step: angleStep }, step);
@@ -234,7 +271,7 @@ export function SketchEditor(props: {
       const point: Point2 = [round(Math.round(raw[0] / step) * step), round(Math.round(raw[1] / step) * step)];
       return { point, ...free };
     },
-    [fromScreen, toScreen, scene, drawing, ortho, angleStep, step],
+    [fromScreen, toScreen, scene, drawing, ortho, angleStep, step, snaps],
   );
   const snap = (e: Parameters<typeof locate>[0]) => locate(e).point;
 
@@ -292,6 +329,22 @@ export function SketchEditor(props: {
     else if (finishShape(pending.kind, pending.start, p)) setPending(null);
   };
 
+  /** Where the side typed in "Next side" starts and ends; an outline not started yet starts at the origin. */
+  const nextSide = (): { from: Point2; to: Point2 } | null => {
+    const length = Number(sideLength);
+    const angle = parseDirection(sideDirection);
+    if (!(length > 0) || angle === null) return null;
+    const start: Point2 =
+      pending?.kind === "polygon" && pending.points.length ? pending.points[pending.points.length - 1]! : [0, 0];
+    return { from: start, to: along(start, length, angle) };
+  };
+  const addSide = () => {
+    const side = nextSide();
+    if (!side) return;
+    if (pending?.kind === "polygon" && pending.points.length) addCorner(pending.points, side.to);
+    else setPending({ kind: "polygon", points: [side.from, side.to] });
+  };
+
   const hit = (q: Point2): number | null => {
     const tolerance = 6 / k;
     for (let i = s.profiles.length - 1; i >= 0; i--) {
@@ -320,7 +373,17 @@ export function SketchEditor(props: {
       return;
     }
     if (e.button !== 0) return;
-    const p = snap(e);
+    const at = snap(e);
+    if (m2p && tool !== "select") {
+      if (!m2p.first) return setM2p({ first: at });
+      setM2p(null);
+      return place(midBetween(m2p.first, at), false);
+    }
+    place(at, true);
+  };
+
+  /** A click at p with the current tool; `pressed` when the button is still down, so a drag can finish a shape. */
+  const place = (p: Point2, pressed: boolean) => {
     if (tool === "select") {
       const i = hit(p);
       setSelected(i);
@@ -342,7 +405,7 @@ export function SketchEditor(props: {
       if (finishShape(tool, pending.start, aim(pending, p))) setPending(null);
       return;
     }
-    setPending({ kind: tool, start: p, pressed: true });
+    setPending({ kind: tool, start: p, pressed });
   };
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -435,6 +498,11 @@ export function SketchEditor(props: {
         setOrtho((o) => !o);
         return;
       }
+      if (e.key === "F3") {
+        e.preventDefault();
+        setSnaps({ ...snaps, on: !snaps.on });
+        return;
+      }
       if (typing || mod || e.altKey) return;
       // An outline's first corner can be typed as a point straight away, before any click.
       if (tool === "polygon" && !pending && isPointKey(e.key) && e.key !== "," && e.key !== "<") {
@@ -462,7 +530,9 @@ export function SketchEditor(props: {
         }
       }
       if (e.key === "Escape") {
-        if (pending) setPending(null);
+        if (snapMenu) setSnapMenu(false);
+        else if (m2p) setM2p(null);
+        else if (pending) setPending(null);
         else if (selected !== null) setSelected(null);
         return;
       }
@@ -478,6 +548,10 @@ export function SketchEditor(props: {
         e.preventDefault();
         return;
       }
+      if (key === "m" && tool !== "select") {
+        setM2p({ first: null });
+        return;
+      }
       const t = TOOLS.find((x) => x.key === key);
       if (t) {
         setTool(t.tool);
@@ -491,9 +565,12 @@ export function SketchEditor(props: {
   const errors = hasErrors(props.issues);
   const across = onPlate ? "Left / right" : spun ? "Out from the line" : "Across";
   const up = onPlate ? "Front / back" : spun ? "Height" : "Up";
-  const hint =
-    (spun && tool !== "select" ? "Draw half of the part's outline, right of the spin line. " : "") +
-    TOOLS.find((t) => t.tool === tool)!.hint;
+  const hint = m2p
+    ? m2p.first
+      ? "Mid between 2 points: click the second point. The point halfway is used. Esc cancels."
+      : "Mid between 2 points: click the first point (snaps help). Esc cancels."
+    : (spun && tool !== "select" ? "Draw half of the part's outline, right of the spin line. " : "") +
+      TOOLS.find((t) => t.tool === tool)!.hint;
   const sel = selected !== null ? s.profiles[selected] : undefined;
   const depths = useMemo(() => nestingDepths(s.profiles), [s.profiles]);
   useEffect(() => setOffsetError(null), [selected]);
@@ -543,6 +620,45 @@ export function SketchEditor(props: {
         </div>
         <span className="divider" aria-hidden="true" />
         <div className="group" role="group" aria-label="Drafting aids">
+          <div className="snap-menu-anchor">
+            <button
+              type="button"
+              aria-pressed={snaps.on}
+              aria-expanded={snapMenu}
+              aria-label="Snaps"
+              title="Snaps: the pointer clicks onto ends, middles, centres and more (F3 turns them on or off)"
+              disabled={props.view === "3d"}
+              onClick={() => setSnapMenu((o) => !o)}
+            >
+              Snaps
+              <Icon name="chevronDown" />
+            </button>
+            {snapMenu && (
+              <SnapMenu
+                value={snaps}
+                onChange={setSnaps}
+                onClose={() => setSnapMenu(false)}
+                onMid={() => {
+                  setSnapMenu(false);
+                  if (tool === "select") setTool("polygon");
+                  setM2p({ first: null });
+                }}
+              />
+            )}
+          </div>
+          <button
+            type="button"
+            aria-pressed={m2p !== null}
+            title="Mid between 2 points (M): click two points and the drawing tool gets the point halfway between them"
+            disabled={props.view === "3d"}
+            onClick={() => {
+              if (m2p) return setM2p(null);
+              if (tool === "select") setTool("polygon");
+              setM2p({ first: null });
+            }}
+          >
+            Mid of 2
+          </button>
           <button
             type="button"
             aria-pressed={ortho}
@@ -659,6 +775,37 @@ export function SketchEditor(props: {
                 <AngleGuide from={from(pending)} angle={hold.angle} size={size} toScreen={toScreen} ortho={ortho} />
               )}
               {cursor && hold.snap && <SnapMarker snap={hold.snap} toScreen={toScreen} />}
+              {tool === "polygon" && nextSide() && (
+                <line
+                  className="side-preview"
+                  data-testid="side-preview"
+                  x1={toScreen(nextSide()!.from)[0]}
+                  y1={toScreen(nextSide()!.from)[1]}
+                  x2={toScreen(nextSide()!.to)[0]}
+                  y2={toScreen(nextSide()!.to)[1]}
+                />
+              )}
+              {m2p?.first && (
+                <g className="m2p-marker" data-testid="m2p-first">
+                  <circle cx={toScreen(m2p.first)[0]} cy={toScreen(m2p.first)[1]} r={5} />
+                  {cursor && (
+                    <>
+                      <line
+                        x1={toScreen(m2p.first)[0]}
+                        y1={toScreen(m2p.first)[1]}
+                        x2={toScreen(cursor)[0]}
+                        y2={toScreen(cursor)[1]}
+                      />
+                      <circle
+                        className="mid"
+                        cx={toScreen(midBetween(m2p.first, cursor))[0]}
+                        cy={toScreen(midBetween(m2p.first, cursor))[1]}
+                        r={4}
+                      />
+                    </>
+                  )}
+                </g>
+              )}
               {cursor && <circle className="cursor" cx={toScreen(cursor)[0]} cy={toScreen(cursor)[1]} r={4} />}
             </>
           )}
@@ -726,6 +873,59 @@ export function SketchEditor(props: {
               : `${s.profiles.length} shape${s.profiles.length === 1 ? "" : "s"} drawn`}
           </span>
         </div>
+        {tool === "polygon" && props.view === "2d" && (
+          <form
+            className="next-side"
+            aria-label="Next side"
+            onSubmit={(e) => {
+              e.preventDefault();
+              addSide();
+            }}
+          >
+            <span className="next-side-title">
+              Next side
+              <small>
+                {pending?.kind === "polygon" && pending.points.length ? "from the last corner" : "from the origin"}
+              </small>
+            </span>
+            <label>
+              <span>Length</span>
+              <span className="unit-box">
+                <input
+                  aria-label="Side length"
+                  inputMode="decimal"
+                  value={sideLength}
+                  onChange={(e) => setSideLength(e.target.value)}
+                />
+                <span>mm</span>
+              </span>
+            </label>
+            <label title="A bearing like N 45° E or S 30 W (N is up), or an angle in degrees: 0 is right, 90 is up">
+              <span>Bearing or angle</span>
+              <input
+                aria-label="Side direction"
+                aria-invalid={parseDirection(sideDirection) === null}
+                value={sideDirection}
+                onChange={(e) => setSideDirection(e.target.value)}
+              />
+            </label>
+            <span className="next-side-reads" data-testid="side-reads">
+              {parseDirection(sideDirection) === null
+                ? "Type N 45 E, S 30 W or 135"
+                : `${formatBearing(parseDirection(sideDirection)!)} · ${round(parseDirection(sideDirection)!)}°`}
+            </span>
+            <button type="submit" disabled={!nextSide()}>
+              Add side
+            </button>
+            <button
+              type="button"
+              disabled={!(pending?.kind === "polygon" && pending.points.length >= 3)}
+              onClick={() => pending?.kind === "polygon" && closePolygon(pending.points)}
+            >
+              Close outline
+            </button>
+          </form>
+        )}
         <div className="sketch-then">
           <div className="segmented-small" role="group" aria-label="What the sketch does">
             <button
@@ -1230,19 +1430,7 @@ function SideFields({ points, onChange }: { points: Point2[]; onChange: (points:
 /** The marker for an object snap: a square for an end, a triangle for a middle, a circle for a centre and so on. */
 function SnapMarker({ snap, toScreen }: { snap: Snap; toScreen: ToScreen }) {
   const [x, y] = toScreen(snap.point);
-  const r = 6;
-  const shape =
-    snap.kind === "end" ? (
-      <rect x={x - r} y={y - r} width={2 * r} height={2 * r} />
-    ) : snap.kind === "middle" ? (
-      <path d={`M${x},${y - r}L${x + r},${y + r}L${x - r},${y + r}Z`} />
-    ) : snap.kind === "centre" ? (
-      <circle cx={x} cy={y} r={r} />
-    ) : snap.kind === "intersection" ? (
-      <path d={`M${x - r},${y - r}L${x + r},${y + r}M${x - r},${y + r}L${x + r},${y - r}`} />
-    ) : (
-      <path d={`M${x - r},${y + r}H${x + r}M${x},${y + r}V${y - r}`} />
-    );
+  const shape = snapShape(snap.kind, x, y);
   return (
     <g className="snap-marker" data-testid="snap" data-snap={snap.kind}>
       {shape}
@@ -1348,5 +1536,95 @@ function Underlay(props: {
       preserveAspectRatio="none"
       transform={`translate(${cx} ${cy}) rotate(${-at.rotation})`}
     />
+  );
+}
+
+/** Which snaps are on, like AutoCAD's object snap settings, plus "mid between 2 points". */
+function SnapMenu(props: {
+  value: { on: boolean; kinds: SnapKind[] };
+  onChange: (v: { on: boolean; kinds: SnapKind[] }) => void;
+  onClose: () => void;
+  onMid: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { value, onChange, onClose } = props;
+  useEffect(() => {
+    const down = (e: PointerEvent) => {
+      const t = e.target as Element;
+      if (!ref.current?.parentElement?.contains(t)) onClose();
+    };
+    // Escape closes it even while one of its tick boxes has the focus.
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+  return (
+    <div className="snap-menu glass" role="dialog" aria-label="Snap settings" ref={ref}>
+      <label className="snap-on">
+        <input type="checkbox" checked={value.on} onChange={(e) => onChange({ ...value, on: e.target.checked })} />
+        <span>
+          Snaps on <kbd>F3</kbd>
+        </span>
+      </label>
+      <div className="snap-kinds" role="group" aria-label="Snap to">
+        {SNAP_KINDS.map((k) => (
+          <label key={k} title={SNAP_HINTS[k]}>
+            <input
+              type="checkbox"
+              checked={value.kinds.includes(k)}
+              disabled={!value.on}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  kinds: e.target.checked
+                    ? SNAP_KINDS.filter((x) => x === k || value.kinds.includes(x))
+                    : value.kinds.filter((x) => x !== k),
+                })
+              }
+            />
+            <SnapGlyph kind={k} />
+            <span>{SNAP_LABELS[k]}</span>
+            <small>{SNAP_HINTS[k]}</small>
+          </label>
+        ))}
+      </div>
+      <button type="button" className="snap-mid" onClick={props.onMid}>
+        Mid between 2 points <kbd>M</kbd>
+      </button>
+      <p className="help">Hold Alt while clicking to ignore snaps for one click.</p>
+    </div>
+  );
+}
+
+/** Each snap's mark: a square for an end, a triangle for a middle, a circle for a centre, a diamond for a quadrant. */
+function snapShape(kind: SnapKind, x: number, y: number, r = 6) {
+  switch (kind) {
+    case "end":
+      return <rect x={x - r} y={y - r} width={2 * r} height={2 * r} />;
+    case "middle":
+      return <path d={`M${x},${y - r}L${x + r},${y + r}L${x - r},${y + r}Z`} />;
+    case "centre":
+      return <circle cx={x} cy={y} r={r} />;
+    case "quadrant":
+      return <path d={`M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`} />;
+    case "intersection":
+      return <path d={`M${x - r},${y - r}L${x + r},${y + r}M${x - r},${y + r}L${x + r},${y - r}`} />;
+    case "perpendicular":
+      return <path d={`M${x - r},${y + r}H${x + r}M${x},${y + r}V${y - r}`} />;
+    case "nearest":
+      return <path d={`M${x - r},${y - r}L${x + r},${y + r}L${x - r},${y + r}L${x + r},${y - r}Z`} />;
+  }
+}
+
+/** The same marks the drawing shows for each snap, small, for the Snaps menu. */
+function SnapGlyph({ kind }: { kind: SnapKind }) {
+  return (
+    <svg className="snap-glyph" viewBox="-8 -8 16 16" width="16" height="16" aria-hidden="true">
+      {snapShape(kind, 0, 0)}
+    </svg>
   );
 }

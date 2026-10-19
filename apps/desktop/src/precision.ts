@@ -1,6 +1,6 @@
 // Precise drafting for outlines, like AutoCAD: typed coordinates (x,y  @dx,dy  @length<angle), ortho lock and angle
-// steps, object snaps (end, middle, centre, intersection, perpendicular) and editing one side of an outline so the
-// sides after it follow. Pure functions, so they are unit-tested without a screen.
+// steps, object snaps (end, middle, centre, quadrant, crossing, square to, on the line), sides by length and bearing,
+// and editing one side of an outline so the sides after it follow. Pure functions, so they are unit-tested without a screen.
 import type { Point2, Profile } from "@studio3d/document";
 
 /** Points worked out from typed lengths and angles keep 6 decimals, so a chain of sides doesn't drift. */
@@ -73,20 +73,35 @@ export function constrain(
   return { point: exactPoint([from[0] + len * Math.cos(a), from[1] + len * Math.sin(a)]), angle };
 }
 
-export type SnapKind = "end" | "middle" | "centre" | "intersection" | "perpendicular";
+export type SnapKind = "end" | "middle" | "centre" | "quadrant" | "intersection" | "perpendicular" | "nearest";
 export interface Snap {
   kind: SnapKind;
   point: Point2;
 }
 /** When two snaps are equally near, the first in this list wins. */
-const PRIORITY: SnapKind[] = ["end", "intersection", "middle", "centre", "perpendicular"];
+const PRIORITY: SnapKind[] = ["end", "intersection", "middle", "centre", "quadrant", "perpendicular", "nearest"];
 export const SNAP_LABELS: Record<SnapKind, string> = {
   end: "End",
   middle: "Middle",
   centre: "Centre",
+  quadrant: "Quadrant",
   intersection: "Crossing",
   perpendicular: "Square to",
+  nearest: "On the line",
 };
+/** What each snap does, for the Snaps menu. */
+export const SNAP_HINTS: Record<SnapKind, string> = {
+  end: "Corners and the ends of sides",
+  middle: "Halfway along a side",
+  centre: "The middle of a circle",
+  quadrant: "A circle's top, bottom, left and right",
+  intersection: "Where two sides cross",
+  perpendicular: "Square to a side, from the last corner",
+  nearest: "Anywhere on a side or a circle",
+};
+export const SNAP_KINDS = PRIORITY;
+/** On unless the user turns them off; "On the line" starts off, as in AutoCAD, since it grabs the pointer often. */
+export const DEFAULT_SNAPS: readonly SnapKind[] = PRIORITY.filter((k) => k !== "nearest");
 
 type Segment = [Point2, Point2];
 
@@ -154,8 +169,8 @@ export interface SnapScene {
   points: Point2[];
   /** Straight sides: their ends, middles and crossings are snap points. */
   sides: Segment[];
-  /** Circle centres. */
-  centres: Point2[];
+  /** Circles: centres, quadrants and points on them. */
+  circles: { centre: Point2; radius: number }[];
 }
 
 /** Everything in the sketch worth snapping to. */
@@ -165,13 +180,16 @@ export function snapScene(profiles: Profile[], faceEdges: Segment[], drawing: Po
   return {
     points: drawing.slice(0, 1),
     sides,
-    centres: profiles.flatMap((p) => (p.kind === "circle" ? [[p.x, p.y] as Point2] : [])),
+    circles: profiles.flatMap((p) =>
+      p.kind === "circle" ? [{ centre: [p.x, p.y] as Point2, radius: p.diameter / 2 }] : [],
+    ),
   };
 }
 
 /**
  * The snap nearest the pointer within `radius` (in screen pixels, measured with `toScreen`), or null. `from` is the
- * last corner placed: sides get a "square to" snap from it.
+ * last corner placed: sides get a "square to" snap from it. Only the kinds in `kinds` are used. "On the line" only
+ * applies when no other snap is near, so it never hides an end or a middle.
  */
 export function findSnap(
   scene: SnapScene,
@@ -179,12 +197,13 @@ export function findSnap(
   from: Point2 | null,
   radius: number,
   toScreen: (p: Point2) => Point2,
+  kinds: readonly SnapKind[] = DEFAULT_SNAPS,
 ): Snap | null {
   const [px, py] = toScreen(pointer);
   let best: Snap | null = null;
   let bestD = radius;
   const consider = (kind: SnapKind, point: Point2 | null) => {
-    if (!point) return;
+    if (!point || !kinds.includes(kind)) return;
     const [sx, sy] = toScreen(point);
     const d = Math.hypot(sx - px, sy - py);
     const better =
@@ -201,7 +220,16 @@ export function findSnap(
     consider("middle", [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
     if (from) consider("perpendicular", foot(from, [a, b]));
   }
-  for (const c of scene.centres) consider("centre", c);
+  for (const { centre: c, radius: r } of scene.circles) {
+    consider("centre", c);
+    for (const [dx, dy] of [
+      [r, 0],
+      [0, r],
+      [-r, 0],
+      [0, -r],
+    ] as const)
+      consider("quadrant", [c[0] + dx, c[1] + dy]);
+  }
   // Crossings: only of sides near the pointer, so a busy sketch stays quick.
   const reach = radius * 2;
   const near = scene.sides.filter(([a, b]) => {
@@ -213,6 +241,13 @@ export function findSnap(
   });
   for (let i = 0; i < near.length; i++)
     for (let j = i + 1; j < near.length; j++) consider("intersection", crossing(near[i]!, near[j]!));
+  if (!best) {
+    for (const side of near) consider("nearest", foot(pointer, side));
+    for (const { centre: c, radius: r } of scene.circles) {
+      const d = Math.hypot(pointer[0] - c[0], pointer[1] - c[1]);
+      if (d > 1e-9) consider("nearest", [c[0] + ((pointer[0] - c[0]) * r) / d, c[1] + ((pointer[1] - c[1]) * r) / d]);
+    }
+  }
   return best;
 }
 
@@ -241,3 +276,47 @@ export function editSide(points: Point2[], i: number, change: { length?: number;
   const dy = nb[1] - b[1];
   return points.map((p, j) => (j <= i ? p : exactPoint([p[0] + dx, p[1] + dy])));
 }
+
+/** Halfway between two points (AutoCAD's "mid between 2 points"). */
+export const midBetween = (a: Point2, b: Point2): Point2 => exactPoint([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+
+/**
+ * A direction typed as a surveyor's bearing (N 45° E, S12.5W, N 30 15 E for 30°15') or as a plain angle in degrees
+ * (0 = right, 90 = up, turning anticlockwise, as in AutoCAD). Returns the angle in degrees, 0 to 360, or null.
+ * On the sketch, up (+y) is north and right (+x) is east.
+ */
+export function parseDirection(text: string): number | null {
+  const t = text.toUpperCase().replace(/[°'"]/g, " ").replace(/\s+/g, " ").trim();
+  if (/^-?\d+(\.\d+)?$/.test(t)) {
+    const a = Number(t) % 360;
+    return exact(a < 0 ? a + 360 : a);
+  }
+  const m = /^([NS]) ?(\d+(?:\.\d+)?)(?: (\d+(?:\.\d+)?))?(?: (\d+(?:\.\d+)?))? ?([EW])$/.exec(t);
+  if (!m) return null;
+  const [min, sec] = [Number(m[3] ?? 0), Number(m[4] ?? 0)];
+  if (min >= 60 || sec >= 60) return null;
+  const theta = Number(m[2]) + min / 60 + sec / 3600;
+  if (theta > 90) return null;
+  const a = m[1] === "N" ? (m[5] === "E" ? 90 - theta : 90 + theta) : m[5] === "E" ? 270 + theta : 270 - theta;
+  return exact(((a % 360) + 360) % 360);
+}
+
+/** An angle (0 = right, anticlockwise) as a bearing, e.g. 30 → "N 60° E", to the nearest second. */
+export function formatBearing(angle: number): string {
+  const a = ((angle % 360) + 360) % 360;
+  const north = a <= 180;
+  const fromNS = north ? Math.abs(90 - a) : Math.abs(270 - a);
+  const east = north ? a < 90 : a > 270;
+  if (fromNS < 1e-9) return north ? "N" : "S";
+  if (Math.abs(fromNS - 90) < 1e-9) return east ? "E" : "W";
+  const total = Math.round(fromNS * 3600);
+  const [d, mi, s] = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60];
+  const dms = `${d}°${mi || s ? ` ${String(mi).padStart(2, "0")}'` : ""}${s ? ` ${String(s).padStart(2, "0")}"` : ""}`;
+  return `${north ? "N" : "S"} ${dms} ${east ? "E" : "W"}`;
+}
+
+/** The end of a side `length` long from `from` in the direction `angle` (degrees). */
+export const along = (from: Point2, length: number, angle: number): Point2 => {
+  const a = (angle * Math.PI) / 180;
+  return exactPoint([from[0] + length * Math.cos(a), from[1] + length * Math.sin(a)]);
+};

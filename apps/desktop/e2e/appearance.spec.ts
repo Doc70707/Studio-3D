@@ -84,7 +84,7 @@ test("Appearance changes the theme, the accent and the part's colour at once, an
 test("the colours can be picked from the keyboard, and Escape or a click outside closes the panel", async ({
   page,
 }) => {
-  await page.getByTestId("ribbon").getByRole("tab", { name: "View" }).click();
+  await page.getByRole("tab", { name: "View", exact: true }).click();
   await page.getByTestId("ribbon").getByRole("button", { name: "Appearance" }).click();
   await expect(panel(page)).toBeVisible();
   // The chosen theme has the focus; arrow keys move along the choices and pick as they go.

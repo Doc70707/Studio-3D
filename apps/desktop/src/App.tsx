@@ -173,6 +173,8 @@ export function App() {
   /** Theme, accent and part colour: kept on this computer. The page's colours were set before the first paint. */
   const [appearance, setAppearance] = useState<Appearance>(readAppearance);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  /** The ribbon's tab names sit in the top bar, so the ribbon is one row shorter. */
+  const [ribbonTabsHost, setRibbonTabsHost] = useState<HTMLElement | null>(null);
   const changeAppearance = useCallback((a: Appearance) => {
     applyAppearance(a);
     writeAppearance(a);
@@ -1551,6 +1553,8 @@ export function App() {
           </nav>
         </div>
 
+        <span className="ribbon-tabs-host" ref={setRibbonTabsHost} hidden={!ribbonShown} />
+
         <div className="glass bar topbar-end">
           <button
             type="button"
@@ -1610,6 +1614,7 @@ export function App() {
           ref={ribbonRef}
           tabs={ribbonTabs}
           minimized={layout.ribbonMinimized}
+          tabsHost={ribbonTabsHost}
           onMinimized={(ribbonMinimized) => arrange((w) => ({ ...w, ribbonMinimized }))}
         />
       )}

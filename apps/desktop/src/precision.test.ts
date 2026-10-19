@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { Point2 } from "@studio3d/document";
-import { boundaryEdges, constrain, crossing, editSide, findSnap, parsePoint, sideOf, snapScene } from "./precision";
+import {
+  DEFAULT_SNAPS,
+  SNAP_KINDS,
+  boundaryEdges,
+  constrain,
+  crossing,
+  editSide,
+  findSnap,
+  formatBearing,
+  midBetween,
+  parseDirection,
+  along,
+  parsePoint,
+  sideOf,
+  snapScene,
+} from "./precision";
 
 /** 10 screen pixels per mm, origin at the top-left, y up. */
 const toScreen = ([u, v]: Point2): Point2 => [u * 10, -v * 10];
@@ -69,6 +84,35 @@ describe("object snaps", () => {
     expect(findSnap(scene, [10.4, 0.2], null, 10, toScreen)).toEqual({ kind: "middle", point: [10, 0] });
     expect(findSnap(scene, [40.5, 9.5], null, 10, toScreen)).toEqual({ kind: "centre", point: [40, 10] });
     expect(findSnap(scene, [30, 30], null, 10, toScreen)).toBeNull();
+  });
+
+  it("snaps to a circle's quadrants: its top, bottom, left and right", () => {
+    expect(findSnap(scene, [42.8, 10.2], null, 10, toScreen)).toEqual({ kind: "quadrant", point: [43, 10] });
+    expect(findSnap(scene, [40.1, 7.2], null, 10, toScreen)).toEqual({ kind: "quadrant", point: [40, 7] });
+  });
+
+  it("only uses the snaps that are turned on", () => {
+    expect(findSnap(scene, [19.6, 0.3], null, 10, toScreen, ["middle"])).toBeNull();
+    expect(findSnap(scene, [10.4, 0.2], null, 10, toScreen, ["end"])).toBeNull();
+    expect(findSnap(scene, [42.8, 10.2], null, 10, toScreen, ["centre"])).toBeNull();
+  });
+
+  it("'on the line' lands on a side or circle only when nothing else is near", () => {
+    const all = SNAP_KINDS;
+    expect(findSnap(scene, [6.3, 0.4], null, 10, toScreen, all)).toEqual({ kind: "nearest", point: [6.3, 0] });
+    // Near the side's middle, the middle wins.
+    expect(findSnap(scene, [10.3, 0.4], null, 10, toScreen, all)).toEqual({ kind: "middle", point: [10, 0] });
+    const onCircle = findSnap(scene, [42.2, 12.2], null, 10, toScreen, all)!;
+    expect(onCircle.kind).toBe("nearest");
+    expect(Math.hypot(onCircle.point[0] - 40, onCircle.point[1] - 10)).toBeCloseTo(3, 5);
+    // Off by default, as in AutoCAD.
+    expect(DEFAULT_SNAPS).not.toContain("nearest");
+    expect(findSnap(scene, [6.3, 0.4], null, 10, toScreen)).toBeNull();
+  });
+
+  it("finds the point halfway between two others", () => {
+    expect(midBetween([0, 0], [20, 10])).toEqual([10, 5]);
+    expect(midBetween([1.1, 2.2], [3.3, 4.4])).toEqual([2.2, 3.3]);
   });
 
   it("snaps square to a side from the last corner", () => {
@@ -185,5 +229,47 @@ describe("editing one side of an outline", () => {
 
   it("the closing side can't be set directly", () => {
     expect(() => editSide(L, 5, { length: 3 })).toThrow();
+  });
+});
+
+describe("directions as bearings or angles", () => {
+  it("reads surveyor's bearings, with or without degree marks, minutes and seconds", () => {
+    expect(parseDirection("N45E")).toBe(45);
+    expect(parseDirection("N 45° E")).toBe(45);
+    expect(parseDirection("n30w")).toBe(120);
+    expect(parseDirection("S 60 E")).toBe(330);
+    expect(parseDirection("S10W")).toBe(260);
+    expect(parseDirection("N 30 30 E")).toBe(59.5);
+    expect(parseDirection(`N 12°15'36" E`)).toBeCloseTo(77.74, 9);
+    expect(parseDirection("N0E")).toBe(90);
+    expect(parseDirection("S90W")).toBe(180);
+  });
+
+  it("reads plain angles, anticlockwise from straight right", () => {
+    expect(parseDirection("30")).toBe(30);
+    expect(parseDirection("-90")).toBe(270);
+    expect(parseDirection("450")).toBe(90);
+  });
+
+  it("refuses anything that isn't a direction", () => {
+    for (const bad of ["", "N", "N95E", "E45N", "N45", "N 30 75 E", "abc"]) expect(parseDirection(bad), bad).toBeNull();
+  });
+
+  it("writes an angle back as a bearing", () => {
+    expect(formatBearing(45)).toBe("N 45° E");
+    expect(formatBearing(120)).toBe("N 30° W");
+    expect(formatBearing(330)).toBe("S 60° E");
+    expect(formatBearing(59.5)).toBe("N 30° 30' E");
+    expect(formatBearing(90)).toBe("N");
+    expect(formatBearing(0)).toBe("E");
+    expect(formatBearing(180)).toBe("W");
+    for (const a of [12.25, 200.5, 301.125]) expect(parseDirection(formatBearing(a))).toBeCloseTo(a, 9);
+  });
+
+  it("finds the end of a side from its length and direction", () => {
+    expect(along([0, 0], 10, 90)).toEqual([0, 10]);
+    expect(along([5, 5], 10, parseDirection("N 45 E")!)).toEqual(
+      [5 + 10 / Math.SQRT2, 5 + 10 / Math.SQRT2].map((v) => Math.round(v * 1e6) / 1e6),
+    );
   });
 });

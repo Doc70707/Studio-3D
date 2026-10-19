@@ -139,6 +139,14 @@ What works today:
   colour, so it looks like the filament it will be printed in. Changes show straight away and are remembered.
 - A calm frame: the camera views sit in a slim column in the corner of the 3D view, steps in the Browser show their
   sizes on a second line instead of cutting them off, and a picked piece shows only its own sizes.
+- A shorter top: the ribbon's tabs sit in the title bar beside the logo, and the ribbon is one compact row, so the
+  frame above the 3D view went from 181 to 102 px.
+- Snaps you can see and choose, like AutoCAD's object snaps: a Snaps menu while sketching ticks End, Middle, Centre,
+  Quadrant, Crossing, Square to and On the line (remembered), F3 turns snapping off and on, and Mid of 2 (M) puts the
+  next point halfway between two clicked points.
+- Next side by length and bearing, like Civil 3D's line by bearing: with the Outline tool, type a length and a
+  direction as a surveyor's bearing (`N 45 E`, `S 30 15 W` with minutes) or as an angle, see the side previewed, and
+  Add side (or Enter). Close outline finishes it.
 - Text contrast is checked by a test for every theme and accent, and the app respects Windows' reduced motion, reduced transparency and high
   contrast settings.
 

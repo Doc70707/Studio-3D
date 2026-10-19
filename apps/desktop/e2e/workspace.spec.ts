@@ -3,7 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 const host = (page: Page) => page.locator("main.viewport-host");
 const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
 const ribbon = (page: Page) => page.getByTestId("ribbon");
-const tab = (page: Page, name: string) => ribbon(page).getByRole("tab", { name, exact: true });
+const tab = (page: Page, name: string) =>
+  page.getByRole("tablist", { name: "Ribbon tabs" }).getByRole("tab", { name, exact: true });
 const palette = (page: Page, name: string) => page.getByRole("complementary", { name });
 const safeArea = async (page: Page) =>
   (await host(page).getAttribute("data-safe-area"))!.split(",").map(Number) as [number, number, number, number];
@@ -24,7 +25,7 @@ test("the ribbon's tabs hold the tools, and it minimises to its tab names and op
     await expect(ribbon(page).getByRole("group", { name: group })).toBeVisible();
   const [topOpen] = await safeArea(page);
 
-  await ribbon(page).getByRole("button", { name: "Minimise the ribbon" }).click();
+  await page.getByRole("button", { name: "Minimise the ribbon" }).click();
   await expect(ribbon(page).getByRole("tabpanel")).toHaveCount(0);
   // The view gets the room back, so the part re-centres lower down.
   await expect.poll(async () => (await safeArea(page))[0]).toBeLessThan(topOpen - 40);
@@ -94,7 +95,7 @@ test("the arranged workspace comes back after a restart, and Reset puts it back 
   await ribbon(page).getByRole("button", { name: "Floating" }).click();
   await expect(page.locator(".app")).toHaveClass(/style-floating/);
   await palette(page, "Properties").getByRole("button", { name: "Collapse Properties" }).click();
-  await ribbon(page).getByRole("button", { name: "Minimise the ribbon" }).click();
+  await page.getByRole("button", { name: "Minimise the ribbon" }).click();
 
   await page.reload();
   await current(page);
