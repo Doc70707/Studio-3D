@@ -8,6 +8,8 @@ export {
   type SafeArea,
   type ViewportOptions,
   type ReferencePicture,
+  type ViewportColors,
+  DEFAULT_VIEWPORT_COLORS,
 } from "./Viewport";
 export {
   STANDARD_VIEWS,

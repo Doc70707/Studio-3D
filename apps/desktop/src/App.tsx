@@ -64,6 +64,8 @@ import {
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { SHAPE_ORDER, copySource, placeNew, useDesignPanel } from "./DesignPanel";
 import { Palette } from "./Palette";
+import { AppearancePanel } from "./AppearancePanel";
+import { applyAppearance, readAppearance, viewportColors, writeAppearance, type Appearance } from "./appearance";
 import { Ribbon, type RibbonTab } from "./Ribbon";
 import {
   DEFAULT_WORKSPACE,
@@ -168,6 +170,14 @@ export function App() {
   const panelShown = focus ? focusPanel !== "closed" : panelOpen;
   /** How the user has arranged the workspace: kept on this computer, like a CAD program's workspace. */
   const [layout, setLayout] = useState<Workspace>(readWorkspace);
+  /** Theme, accent and part colour: kept on this computer. The page's colours were set before the first paint. */
+  const [appearance, setAppearance] = useState<Appearance>(readAppearance);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const changeAppearance = useCallback((a: Appearance) => {
+    applyAppearance(a);
+    writeAppearance(a);
+    setAppearance(a);
+  }, []);
   const arrange = useCallback((change: (w: Workspace) => Workspace) => {
     setLayout((w) => {
       const next = change(w);
@@ -212,6 +222,7 @@ export function App() {
       return;
     }
     const vp = new Viewport(hostRef.current);
+    vp.setColors(viewportColors(readAppearance()));
     viewportRef.current = vp;
     const off = vp.onCameraChange(setCamera);
     return () => {
@@ -617,6 +628,8 @@ export function App() {
     el.parentElement?.classList.toggle("showing-pointer", !!p);
   };
 
+  useEffect(() => viewportRef.current?.setColors(viewportColors(appearance)), [appearance]);
+
   // Measurement lines and labels in the 3D view.
   useEffect(() => {
     const vp = viewportRef.current;
@@ -624,7 +637,10 @@ export function App() {
     const m = built?.measurements;
     if (!showSizes || !m || draft) return vp.setDimensions([]);
     const focused = built.doc.features.find((f) => f.id === focusId);
-    vp.setDimensions([...partDimensions(m.min, m.max), ...(focused ? featureDimensions(focused, m, built.doc) : [])]);
+    // With a piece picked, its own sizes show without the part's overall ones (those stay in Properties), so the
+    // labels don't crowd each other.
+    const own = focused ? featureDimensions(focused, m, built.doc) : [];
+    vp.setDimensions(own.length ? own : partDimensions(m.min, m.max));
   }, [built, showSizes, focusId, draft]);
 
   // The selected piece: tinted, with move arrows in its middle. Redrawn with each new model.
@@ -1079,6 +1095,8 @@ export function App() {
           onSelect: () => arrange((w) => ({ ...w, ribbonMinimized: !w.ribbonMinimized })),
         },
         { label: "Reset workspace", onSelect: () => arrange(() => DEFAULT_WORKSPACE) },
+        { label: "Appearance…", onSelect: () => setAppearanceOpen(true) },
+        "separator" as const,
         { label: "Focus canvas", shortcut: "Ctrl+0", checked: focus, onSelect: toggleFocus },
         { label: "Full screen", shortcut: "F11", checked: fullScreen, onSelect: toggleFullScreen },
       ],
@@ -1326,6 +1344,14 @@ export function App() {
             title: "Put the ribbon and palettes back as they started",
             onClick: () => arrange(() => DEFAULT_WORKSPACE),
           },
+          {
+            icon: "palette",
+            label: "Colours",
+            name: "Appearance",
+            title: "Theme, accent colour and the part's colour",
+            pressed: appearanceOpen,
+            onClick: () => setAppearanceOpen((o) => !o),
+          },
         ],
       },
     ],
@@ -1445,6 +1471,10 @@ export function App() {
 
       <header className="topbar" ref={topbarRef}>
         <div className="glass bar">
+          <span className="brand" aria-label={APP_INFO.name}>
+            <span className="logo" aria-hidden="true" />
+            <span className="brand-name">{APP_INFO.name}</span>
+          </span>
           <nav className="segmented workspaces" aria-label="Workspace">
             <button
               type="button"
@@ -1521,45 +1551,59 @@ export function App() {
           </nav>
         </div>
 
-        <nav className="glass bar segmented" aria-label="Camera views">
-          {VIEW_BUTTONS.filter((b) => b.bar).map((b) => (
-            <button
-              key={b.view}
-              type="button"
-              aria-pressed={camera?.view === b.view}
-              title={`${b.label} view (key ${b.key}; Shift+${b.key} looks from the other side)`}
-              onClick={() => viewportRef.current?.setView(b.view)}
-              disabled={webglError}
-            >
-              {b.label}
-            </button>
-          ))}
-          <span className="divider" aria-hidden="true" />
+        <div className="glass bar topbar-end">
           <button
             type="button"
-            aria-pressed={projection === "orthographic"}
-            aria-label="Orthographic"
-            title={`Orthographic: no perspective, parallel edges stay parallel (key ${PROJECTION_KEY})`}
-            onClick={toggleProjection}
-            disabled={webglError}
+            className="appearance-button"
+            data-opens="appearance"
+            aria-pressed={appearanceOpen}
+            title="Appearance: theme, accent colour and the part's colour"
+            onClick={() => setAppearanceOpen((o) => !o)}
           >
-            Ortho
+            <Icon name="palette" />
+            Appearance
           </button>
-          <span className="divider" aria-hidden="true" />
-          <button
-            type="button"
-            aria-pressed={showSizes}
-            title="Show sizes in the 3D view (M)"
-            onClick={() => setShowSizes((v) => !v)}
-            disabled={webglError}
-          >
-            <Icon name="ruler" />
-            Sizes
-          </button>
-        </nav>
+        </div>
 
         {focus && screenModes}
       </header>
+
+      <nav className="glass view-bar" aria-label="Camera views">
+        {VIEW_BUTTONS.filter((b) => b.bar).map((b) => (
+          <button
+            key={b.view}
+            type="button"
+            aria-pressed={camera?.view === b.view}
+            title={`${b.label} view (key ${b.key}; Shift+${b.key} looks from the other side)`}
+            onClick={() => viewportRef.current?.setView(b.view)}
+            disabled={webglError}
+          >
+            {b.label}
+          </button>
+        ))}
+        <span className="divider" aria-hidden="true" />
+        <button
+          type="button"
+          aria-pressed={projection === "orthographic"}
+          aria-label="Orthographic"
+          title={`Orthographic: no perspective, parallel edges stay parallel (key ${PROJECTION_KEY})`}
+          onClick={toggleProjection}
+          disabled={webglError}
+        >
+          Ortho
+        </button>
+        <span className="divider" aria-hidden="true" />
+        <button
+          type="button"
+          aria-pressed={showSizes}
+          title="Show sizes in the 3D view (M)"
+          onClick={() => setShowSizes((v) => !v)}
+          disabled={webglError}
+        >
+          <Icon name="ruler" />
+          Sizes
+        </button>
+      </nav>
 
       {ribbonShown && (
         <Ribbon
@@ -1612,15 +1656,18 @@ export function App() {
         <span className="hint">
           <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
           <span className="hint-text">
-            {printing
-              ? "Your part on the printer's plate · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom"
-              : "Click to select · Wheel-drag to pan · Shift+wheel-drag to orbit · Scroll to zoom · " +
-                "Help › Keyboard and mouse lists the rest"}
+            {printing ? "Your part on the printer's plate" : "Click a piece to select it"}
+            <span className="hint-keys" title="Help › Keyboard and mouse lists every control">
+              Wheel-drag pans · Shift+wheel-drag orbits · Scroll zooms
+            </span>
           </span>
         </span>
         {!focus && screenModes}
       </footer>
 
+      {appearanceOpen && (
+        <AppearancePanel value={appearance} onChange={changeAppearance} onClose={() => setAppearanceOpen(false)} />
+      )}
       {dialog && <HelpDialog kind={dialog} onClose={() => setDialog(null)} />}
       {calibratingPicture && (
         <CalibrateDialog
@@ -1799,7 +1846,7 @@ function SelectionBar(props: {
             ? "Moving…"
             : `Moving ${["left/right", "front/back", "up/down"][axis]} ${signed(m[axis]!)}`
           : props.canMove
-            ? "Drag an arrow or press the arrow keys to move it"
+            ? "Drag an arrow to move"
             : "Edit it in the panel"}
       </span>
       {props.onSketch && (

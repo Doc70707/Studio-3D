@@ -135,7 +135,11 @@ What works today:
   inner edge (drag or arrow keys), swap sides and hide; View > Reset workspace puts everything back. Docked (solid,
   against the edges) or Floating (frosted glass over the view). The layout is remembered on this computer, and the
   part stays centred in the space the palettes leave open.
-- Text contrast is checked by a test, and the app respects Windows' reduced motion, reduced transparency and high
+- Appearance (top bar, or View > Appearance…): Midnight, Graphite or Light theme; six accent colours; and the part's
+  colour, so it looks like the filament it will be printed in. Changes show straight away and are remembered.
+- A calm frame: the camera views sit in a slim column in the corner of the 3D view, steps in the Browser show their
+  sizes on a second line instead of cutting them off, and a picked piece shows only its own sizes.
+- Text contrast is checked by a test for every theme and accent, and the app respects Windows' reduced motion, reduced transparency and high
   contrast settings.
 
 ![Studio 3D](docs/ui/workspace-docked.png)

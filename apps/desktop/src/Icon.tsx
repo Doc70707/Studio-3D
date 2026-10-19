@@ -48,6 +48,10 @@ const PATHS = {
   layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
   reset: "M4 4v6h6M4.5 10A8 8 0 1 1 6 17.5",
   floating: "M4 6h7v12H4zM14 6h6v6h-6z",
+  palette:
+    "M12 3a9 9 0 1 0 0 18c1 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.3-.4-.6-.4-1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 " +
+    "5-5c0-4.3-4-7.7-9-7.7zM7.5 12.5h.01M9 8.5h.01M13.5 7h.01M17 10h.01",
+  cube: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9",
 } as const;
 
 export type IconName = keyof typeof PATHS;

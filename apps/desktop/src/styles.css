@@ -3,29 +3,37 @@
  * Text colours are chosen to stay readable (WCAG AA, 4.5:1 or better) on the darkest and lightest the glass can get.
  */
 :root {
+  /* Midnight theme with the blue accent; appearance.ts sets these for the theme and accent the user picks. */
   --bg-1: #0b1020;
   --bg-2: #121a33;
   --glow-1: rgba(88, 130, 255, 0.28);
   --glow-2: rgba(160, 96, 255, 0.18);
-  --glass: rgba(20, 26, 44, 0.66);
-  --glass-strong: rgba(18, 23, 40, 0.8);
+  --glass: rgba(20, 26, 44, 0.78);
+  --glass-strong: rgba(18, 23, 40, 0.86);
   --glass-edge: rgba(255, 255, 255, 0.12);
   --glass-highlight: rgba(255, 255, 255, 0.22);
-  --fill: rgba(255, 255, 255, 0.07);
-  --fill-hover: rgba(255, 255, 255, 0.13);
-  --fill-pressed: rgba(255, 255, 255, 0.2);
+  --ink-rgb: 255 255 255;
+  --fill: rgb(var(--ink-rgb) / 0.07);
+  --fill-hover: rgb(var(--ink-rgb) / 0.12);
+  --fill-pressed: rgb(var(--ink-rgb) / 0.18);
   --text: #f4f6fb;
   --muted: #b7c0d6;
-  --accent: #5ea8ff;
   --chrome: #141a2b; /* docked bars and palettes: solid, like a CAD program's frame */
   --chrome-2: #1a2136;
-  --chrome-edge: rgba(255, 255, 255, 0.09);
-  --button: #3b82f6;
-  --button-strong: #2563eb;
-  --on-accent: #ffffff;
+  --chrome-edge: rgba(255, 255, 255, 0.08);
+  --frame: #0d1222;
+  --menu-bg: rgba(16, 21, 37, 0.97);
+  --scrim: rgba(4, 8, 20, 0.45);
+  --well: rgba(0, 0, 0, 0.28);
+  --well-focus: rgba(0, 0, 0, 0.36);
   --success: #6ee7a8;
   --error: #ffaba4;
   --warning: #ffd36b;
+  --accent: #5ea8ff;
+  --accent-rgb: 94 168 255;
+  --button: #3b82f6;
+  --button-strong: #2563eb;
+  --on-accent: #ffffff;
   --radius-lg: 20px;
   --radius-md: 12px;
   --radius-sm: 9px;
@@ -61,6 +69,16 @@ body,
 button {
   font: inherit;
   color: inherit;
+}
+
+/* Light theme: softer shadows, since dark ones look dirty on a light frame. */
+:root {
+  --halo: rgba(8, 12, 24, 0.85); /* behind numbers drawn straight on the sketch */
+}
+
+:root[data-theme="light"] {
+  --halo: rgba(255, 255, 255, 0.92);
+  --shadow: 0 8px 28px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
 }
 
 /* ---------- Layout: full-window 3D view with floating panels ---------- */
@@ -136,10 +154,12 @@ button {
   width: 22px;
   height: 22px;
   border-radius: 7px;
-  background: linear-gradient(135deg, #8fc6ff 0%, #5e8bff 50%, #9a6bff 100%);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.35), transparent 55%),
+    linear-gradient(135deg, var(--accent), var(--button-strong));
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.25) inset,
-    0 4px 12px rgba(94, 139, 255, 0.45);
+    0 3px 10px rgb(var(--accent-rgb) / 0.35);
 }
 
 .visually-hidden {
@@ -186,7 +206,7 @@ button {
   padding: 6px;
   border-radius: var(--radius-md);
   /* Nearly solid: a menu inside the frosted bar can't blur what's behind it, so text below would show through. */
-  background: rgba(16, 21, 37, 0.97);
+  background: var(--menu-bg);
   animation: menu-drop 140ms var(--ease);
 }
 
@@ -253,7 +273,7 @@ button {
   z-index: 20;
   display: grid;
   place-items: center;
-  background: rgba(4, 8, 20, 0.45);
+  background: var(--scrim);
 }
 
 .dialog {
@@ -396,7 +416,7 @@ button {
   font-weight: 650;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.22) inset,
-    0 8px 24px rgba(59, 130, 246, 0.45);
+    0 8px 24px rgb(var(--accent-rgb) / 0.45);
 }
 
 .topbar > .primary:hover:not(:disabled) {
@@ -475,11 +495,11 @@ input:focus-visible {
 
 .panel .tool:hover:not(:disabled) {
   background: var(--fill-hover);
-  border-color: rgba(94, 168, 255, 0.45);
+  border-color: rgb(var(--accent-rgb) / 0.45);
 }
 
 .panel .tool[aria-pressed="true"] {
-  background: rgba(94, 168, 255, 0.3);
+  background: rgb(var(--accent-rgb) / 0.3);
   border-color: var(--accent);
 }
 
@@ -505,7 +525,7 @@ input:focus-visible {
   overflow-y: auto;
   padding: 20px 20px 8px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-color: rgb(var(--ink-rgb) / 0.2) transparent;
 }
 
 .panel-title {
@@ -542,12 +562,12 @@ input:focus-visible {
 }
 
 .step:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink-rgb) / 0.05);
 }
 
 .step.current {
-  background: rgba(94, 168, 255, 0.14);
-  border-color: rgba(94, 168, 255, 0.35);
+  background: rgb(var(--accent-rgb) / 0.14);
+  border-color: rgb(var(--accent-rgb) / 0.35);
 }
 
 /* The piece picked in the 3D view is marked in the same yellow as its tint. */
@@ -583,11 +603,12 @@ input:focus-visible {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 6px 0 8px;
+  column-gap: 10px;
+  row-gap: 1px;
+  min-height: 44px;
+  padding: 6px 6px 6px 10px;
   border: 0;
   background: transparent;
   color: var(--text);
@@ -596,6 +617,7 @@ input:focus-visible {
 }
 
 .step-icon {
+  grid-row: span 2;
   display: grid;
   color: var(--accent);
 }
@@ -605,15 +627,18 @@ input:focus-visible {
 }
 
 .step-name {
+  overflow: hidden;
   font-size: 13.5px;
-  font-weight: 650;
+  font-weight: 620;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .step-summary {
   overflow: hidden;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.35;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -646,9 +671,9 @@ input:focus-visible {
   height: 28px;
   margin-left: auto;
   padding: 0 10px;
-  border: 1px solid rgba(94, 168, 255, 0.45);
+  border: 1px solid rgb(var(--accent-rgb) / 0.45);
   border-radius: 999px;
-  background: rgba(94, 168, 255, 0.14);
+  background: rgb(var(--accent-rgb) / 0.14);
   color: var(--text);
   font-size: 12.5px;
   font-weight: 600;
@@ -703,9 +728,9 @@ input:focus-visible {
   align-items: center;
   height: 38px;
   padding: 0 14px 0 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgb(var(--ink-rgb) / 0.1);
   border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--well);
   transition:
     border-color 160ms var(--ease),
     background-color 160ms var(--ease),
@@ -713,13 +738,13 @@ input:focus-visible {
 }
 
 .input-row:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: rgb(var(--ink-rgb) / 0.2);
 }
 
 .input-row:focus-within {
   border-color: var(--accent);
-  background: rgba(0, 0, 0, 0.36);
-  box-shadow: 0 0 0 4px rgba(94, 168, 255, 0.22);
+  background: var(--well-focus);
+  box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.22);
 }
 
 .input-row:has(input[aria-invalid="true"]) {
@@ -780,7 +805,7 @@ input:focus-visible {
   margin-bottom: 14px;
   padding: 3px;
   border-radius: 11px;
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--well);
 }
 
 .segmented-small button {
@@ -826,9 +851,9 @@ input:focus-visible {
   gap: 6px;
   height: 32px;
   padding: 0 12px;
-  border: 1px solid rgba(94, 168, 255, 0.45);
+  border: 1px solid rgb(var(--accent-rgb) / 0.45);
   border-radius: 999px;
-  background: rgba(94, 168, 255, 0.14);
+  background: rgb(var(--accent-rgb) / 0.14);
   color: var(--text);
   font-weight: 600;
   font-size: 13px;
@@ -839,7 +864,7 @@ input:focus-visible {
 }
 
 .sketch-side button.add:hover {
-  background: rgba(94, 168, 255, 0.24);
+  background: rgb(var(--accent-rgb) / 0.24);
 }
 
 .panel .tool:active,
@@ -928,7 +953,7 @@ input:focus-visible {
   padding: 12px 16px;
   border-radius: 14px;
   background: transparent; /* measured, not typed in: no input look */
-  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border: 1px dashed rgb(var(--ink-rgb) / 0.16);
   font-size: 13px;
 }
 
@@ -1112,7 +1137,7 @@ input:focus-visible {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :root {
+  :root:not([data-theme="light"]) {
     --glass: #161c2e;
     --glass-strong: #141a2b;
   }
@@ -1124,7 +1149,7 @@ input:focus-visible {
 }
 
 @media (prefers-contrast: more) {
-  :root {
+  :root:not([data-theme="light"]) {
     --glass: #0d1220;
     --glass-strong: #0d1220;
     --glass-edge: #8a96b3;
@@ -1276,13 +1301,13 @@ input:focus-visible {
 
 /* The way out of a screen mode is a labelled button, not just an icon. */
 .screen-modes button.exit {
-  background: rgba(94, 168, 255, 0.2);
+  background: rgb(var(--accent-rgb) / 0.2);
   box-shadow: 0 0 0 1px var(--accent) inset;
   font-weight: 600;
 }
 
 .screen-modes button.exit:hover:not(:disabled) {
-  background: rgba(94, 168, 255, 0.32);
+  background: rgb(var(--accent-rgb) / 0.32);
 }
 
 .app.panel-hidden .panel {
@@ -1455,8 +1480,8 @@ input:focus-visible {
 
 .sketch-editor.view-2d {
   background:
-    radial-gradient(900px 600px at 80% 0%, rgba(88, 130, 255, 0.12), transparent 60%),
-    linear-gradient(180deg, #10182c, #0b1020);
+    radial-gradient(900px 600px at 80% 0%, var(--glow-1), transparent 60%),
+    linear-gradient(180deg, var(--bg-2), var(--bg-1));
 }
 
 .sketch-editor.view-3d {
@@ -1555,11 +1580,11 @@ input:focus-visible {
 }
 
 .sketch-canvas .grid.minor {
-  stroke: rgba(255, 255, 255, 0.05);
+  stroke: rgb(var(--ink-rgb) / 0.05);
 }
 
 .sketch-canvas .grid.major {
-  stroke: rgba(255, 255, 255, 0.12);
+  stroke: rgb(var(--ink-rgb) / 0.12);
 }
 
 .sketch-canvas .axis {
@@ -1581,7 +1606,7 @@ input:focus-visible {
 }
 
 .sketch-canvas .spin .plate-line {
-  stroke: rgba(108, 180, 255, 0.7);
+  stroke: rgb(var(--accent-rgb) / 0.7);
   stroke-width: 1.5;
 }
 
@@ -1592,7 +1617,7 @@ input:focus-visible {
 }
 
 .sketch-canvas .face path {
-  fill: rgba(108, 180, 255, 0.22);
+  fill: rgb(var(--accent-rgb) / 0.22);
 }
 
 .sketch-canvas .origin {
@@ -1621,15 +1646,15 @@ input:focus-visible {
 
 .sketch-canvas .profile.selected path,
 .sketch-canvas .profile.selected circle {
-  stroke: #ffffff;
+  stroke: var(--text);
   stroke-width: 2.5;
 }
 
 .sketch-canvas .pending path,
 .sketch-canvas .pending circle,
 .sketch-canvas .pending line {
-  fill: rgba(255, 255, 255, 0.06);
-  stroke: #ffffff;
+  fill: rgb(var(--ink-rgb) / 0.06);
+  stroke: var(--text);
   stroke-width: 1.5;
   stroke-dasharray: 4 3;
 }
@@ -1672,7 +1697,7 @@ input:focus-visible {
 }
 
 .sketch-canvas .dim line {
-  stroke: rgba(244, 246, 251, 0.7);
+  stroke: rgb(var(--ink-rgb) / 0.7);
   stroke-width: 1;
 }
 
@@ -1687,7 +1712,7 @@ input:focus-visible {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   paint-order: stroke;
-  stroke: rgba(8, 12, 24, 0.85);
+  stroke: var(--halo);
   stroke-width: 3.5px;
   stroke-linejoin: round;
   pointer-events: none;
@@ -1775,12 +1800,12 @@ input:focus-visible {
   position: absolute;
   top: 0;
   left: 0;
-  padding: 2px 7px;
-  border-radius: 7px;
-  background: rgba(10, 14, 28, 0.82);
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 650;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(10, 14, 28, 0.82); /* dark chips in every theme: they sit on the part, whatever its colour */
+  color: #f4f6fb;
+  font-size: 12px;
+  font-weight: 620;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
@@ -1836,7 +1861,7 @@ input:focus-visible {
 }
 
 .select-row select option {
-  background: #141a26;
+  background: var(--menu-bg);
   color: var(--text);
 }
 
@@ -2233,8 +2258,8 @@ button.link:hover {
 }
 
 .ribbon-button[aria-pressed="true"] {
-  background: rgba(94, 168, 255, 0.22);
-  border-color: rgba(94, 168, 255, 0.6);
+  background: rgb(var(--accent-rgb) / 0.22);
+  border-color: rgb(var(--accent-rgb) / 0.6);
 }
 
 .ribbon-button:disabled {
@@ -2480,7 +2505,7 @@ button.link:hover {
 }
 
 @media (prefers-contrast: more) {
-  :root {
+  :root:not([data-theme="light"]) {
     --chrome: #0d1220;
     --chrome-2: #0d1220;
     --chrome-edge: #8a96b3;
@@ -2491,4 +2516,311 @@ button.link:hover {
 .palette-body .panel-scroll > .props:first-child {
   padding-top: 0;
   border-top: 0;
+}
+
+/* ---------- A calmer frame (v0.33) ---------- */
+
+/* Palette titles read as words, not shouted labels. */
+.palette-header {
+  padding: 10px 8px 10px 16px;
+}
+
+.palette-header h2 {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 620;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.palette-header > .icon {
+  color: var(--accent);
+}
+
+.palette-body > .panel-scroll {
+  padding: 16px 16px 20px;
+}
+
+.panel-title {
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+}
+
+.step + .step {
+  margin-top: 2px;
+}
+
+.props-title {
+  margin-bottom: 16px;
+}
+
+.brand-name {
+  font-size: 14px;
+}
+
+.style-docked .topbar {
+  min-height: 52px;
+}
+
+.topbar-end {
+  margin-left: auto;
+}
+
+.appearance-button[aria-pressed="true"] {
+  background: var(--fill-pressed);
+}
+
+.appearance-button .icon {
+  color: var(--accent);
+}
+
+/* The camera views: a slim column at the top right of the open part of the 3D view. */
+.view-bar {
+  position: absolute;
+  z-index: 3;
+  top: calc(var(--safe-top, 76px) + 12px);
+  right: calc(var(--safe-right, 0px) + 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 14px;
+}
+
+.view-bar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 56px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    background-color 140ms var(--ease),
+    color 140ms var(--ease);
+}
+
+.view-bar button:hover:not(:disabled) {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.view-bar button[aria-pressed="true"] {
+  background: rgb(var(--accent-rgb) / 0.2);
+  color: var(--text);
+}
+
+.view-bar .divider {
+  width: auto;
+  height: 1px;
+  margin: 3px 6px;
+}
+
+.app.sketching .view-bar {
+  display: none;
+}
+
+/* The status bar keeps to a few words; the mouse controls sit quietly at the end. */
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.hint-text {
+  display: inline-flex;
+  gap: 14px;
+  min-width: 0;
+}
+
+.hint-keys {
+  overflow: hidden;
+  opacity: 0.8;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1100px) {
+  .hint-keys {
+    display: none;
+  }
+}
+
+/* Appearance: floats at the top right, beside the work, so each change shows on the app straight away. */
+.appearance {
+  position: absolute;
+  z-index: 30;
+  top: calc(var(--safe-top, 76px) + 12px);
+  right: calc(var(--safe-right, 0px) + 12px);
+  width: 340px;
+  max-height: calc(100% - var(--safe-top, 76px) - 72px);
+  overflow-y: auto;
+  padding: 16px 18px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-strong);
+  animation: materialize 240ms var(--ease);
+}
+
+.appearance header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.appearance h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.appearance-group {
+  padding: 12px 0 4px;
+}
+
+.appearance-group h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.appearance-group p {
+  margin: -4px 0 10px;
+  font-size: 12.5px;
+}
+
+.appearance .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.appearance .choices button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease),
+    transform 100ms ease-out;
+}
+
+.appearance .choices button:hover {
+  transform: scale(1.06);
+}
+
+.appearance .choices button[aria-checked="true"] {
+  border-color: var(--accent);
+}
+
+.appearance .choices button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.dot-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(var(--ink-rgb) / 0.18) inset;
+}
+
+.appearance .choices.wide {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.appearance .choices.wide button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: auto;
+  height: auto;
+  padding: 6px;
+  border-radius: 14px;
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.appearance .choices.wide button:hover {
+  transform: none;
+  background: var(--fill-hover);
+}
+
+.theme-swatch {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 4px;
+  width: 100%;
+  height: 44px;
+  padding: 5px;
+  border: 1px solid;
+  border-radius: 9px;
+}
+
+.theme-swatch span:first-child {
+  grid-row: span 2;
+  border-radius: 4px;
+}
+
+.theme-swatch span:last-child {
+  align-self: center;
+  height: 4px;
+  border-radius: 2px;
+  opacity: 0.8;
+}
+
+.appearance .actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.appearance .actions button {
+  height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  color: var(--text);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.appearance .actions button:hover {
+  background: var(--fill-hover);
+}
+
+.appearance .actions button.primary {
+  background: var(--button);
+  color: var(--on-accent);
+}
+
+/* Light theme: the white pressed pill needs an edge to stand off a light track. */
+:root[data-theme="light"] .segmented button[aria-pressed="true"],
+:root[data-theme="light"] .segmented-small button[aria-pressed="true"],
+:root[data-theme="light"] .sketch-top .group button[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.1),
+    0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+/* A long Properties list fades out above the facts card instead of being cut off mid-field. */
+.palette-body > .panel-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
 }

@@ -28,6 +28,24 @@ export interface DisplayMesh {
 }
 
 /** Pixels along each edge of the view that floating panels cover. The scene is centred and fitted in the rest. */
+/** The colours of the part and the build plate, so they can follow the app's theme and the user's choice. */
+export interface ViewportColors {
+  part: number;
+  /** The part's edge lines: darker than the part on a light part, lighter on a dark one. */
+  edge: number;
+  plate: number;
+  gridMinor: number;
+  gridMajor: number;
+}
+
+export const DEFAULT_VIEWPORT_COLORS: ViewportColors = {
+  part: 0x6cb4ff,
+  edge: 0x123a6b,
+  plate: 0x1b2233,
+  gridMinor: 0x2f3a52,
+  gridMajor: 0x4a5878,
+};
+
 export interface SafeArea {
   top: number;
   right: number;
@@ -122,6 +140,11 @@ export class Viewport {
   private textures = new Map<string, { src: string; texture: THREE.Texture }>();
   private readonly raycaster = new THREE.Raycaster();
   private dimensionGroup: THREE.Group | null = null;
+  private colors: ViewportColors = DEFAULT_VIEWPORT_COLORS;
+  private plateSize: { width: number; depth: number; volume?: { height: number; fits: boolean } } = {
+    width: 0,
+    depth: 0,
+  };
   private labels: { el: HTMLElement; at: THREE.Vector3 }[] = [];
   private readonly labelLayer: HTMLDivElement;
   private safeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -156,7 +179,8 @@ export class Viewport {
     const sun = new THREE.DirectionalLight(0xffffff, 1.5);
     sun.position.set(200, -300, 400);
     this.scene.add(sun);
-    this.plate = buildPlate(w, d);
+    this.plateSize = { width: w, depth: d };
+    this.plate = buildPlate(w, d, this.colors);
     this.scene.add(this.plate);
 
     // Dragging a move arrow comes before orbiting: registered first, on the capture phase, so the orbit never sees it.
@@ -272,7 +296,7 @@ export class Viewport {
       const surface = new THREE.Mesh(
         g,
         new THREE.MeshStandardMaterial({
-          color: 0x6cb4ff,
+          color: this.colors.part,
           roughness: 0.45,
           metalness: 0.05,
           polygonOffset: true,
@@ -284,7 +308,7 @@ export class Viewport {
       this.surface = surface;
       const e = new THREE.BufferGeometry();
       e.setAttribute("position", new THREE.BufferAttribute(mesh.edges, 3));
-      group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x123a6b })));
+      group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: this.colors.edge })));
       group.visible = !this.layers;
       this.scene.add(group);
       this.model = group;
@@ -710,6 +734,20 @@ export class Viewport {
     if (!fits) this.setView(this.view);
   }
 
+  /** Recolours the part and the plate in place; nothing is rebuilt and the camera stays put. */
+  setColors(colors: ViewportColors): void {
+    this.colors = colors;
+    this.model?.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial)
+        o.material.color.set(colors.part);
+      if (o instanceof THREE.LineSegments && o.material instanceof THREE.LineBasicMaterial)
+        o.material.color.set(colors.edge);
+    });
+    const { width, depth, volume } = this.plateSize;
+    if (width > 0) this.setPlate(width, depth, volume);
+    else this.requestRender();
+  }
+
   /**
    * Swaps the build plate for one of this size, centred on the origin. With a height, the printer's whole build
    * volume is outlined too: in the accent colour when the part fits, red when it doesn't. The camera stays put.
@@ -717,7 +755,8 @@ export class Viewport {
   setPlate(width: number, depth: number, volume?: { height: number; fits: boolean }): void {
     this.scene.remove(this.plate);
     disposeObject(this.plate);
-    this.plate = buildPlate(width, depth);
+    this.plateSize = { width, depth, volume };
+    this.plate = buildPlate(width, depth, this.colors);
     if (volume) this.plate.add(buildVolume(width, depth, volume.height, volume.fits));
     this.scene.add(this.plate);
     this.plateBounds = { min: [-width / 2, -depth / 2, 0], max: [width / 2, depth / 2, volume?.height ?? 0] };
@@ -935,14 +974,14 @@ function buildVolume(width: number, depth: number, height: number, fits: boolean
 }
 
 /** Build plate: a flat surface with 10 mm and 50 mm grid lines and X/Y axis lines through the origin. */
-function buildPlate(width: number, depth: number): THREE.Group {
+function buildPlate(width: number, depth: number, colors: ViewportColors): THREE.Group {
   const group = new THREE.Group();
   group.name = "build-plate";
 
   const surface = new THREE.Mesh(
     new THREE.PlaneGeometry(width, depth),
     new THREE.MeshStandardMaterial({
-      color: 0x1b2233,
+      color: colors.plate,
       roughness: 0.9,
       transparent: true,
       opacity: 0.72,
@@ -964,8 +1003,8 @@ function buildPlate(width: number, depth: number): THREE.Group {
     g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
     return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color }));
   };
-  group.add(lines(minor, 0x2f3a52));
-  group.add(lines(major, 0x4a5878));
+  group.add(lines(minor, colors.gridMinor));
+  group.add(lines(major, colors.gridMajor));
   group.add(lines([-width / 2, 0, 0.02, width / 2, 0, 0.02], 0xd9534f)); // X axis, red
   group.add(lines([0, -depth / 2, 0.02, 0, depth / 2, 0.02], 0x5cb85c)); // Y axis, green
   return group;
