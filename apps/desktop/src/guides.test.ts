@@ -12,14 +12,13 @@ describe("measurements for the selected shape or hole", () => {
 
   it("a shape shows its size and where it sits on the part", () => {
     const c = { ...newShape(newDocument(), "cylinder"), x: 10, y: 0, z: 30, diameter: 10, height: 8 } as ShapeFeature;
-    expect(featureDimensions(c, part).map((d) => d.text)).toEqual([
-      "10 mm",
-      "10 mm",
-      "8 mm",
-      "35 mm",
-      "15 mm",
-      "30 mm",
-    ]);
+    // A round shape's diameter shows once, not as a width and a depth.
+    expect(featureDimensions(c, part).map((d) => d.text)).toEqual(["Ø10 mm", "8 mm", "35 mm", "15 mm", "30 mm"]);
+  });
+
+  it("a sphere shows only its diameter, since its height is the same", () => {
+    const s = { ...newShape(newDocument(), "sphere"), x: 0, y: 0, z: 30, diameter: 12 } as ShapeFeature;
+    expect(featureDimensions(s, part).map((d) => d.text)).toEqual(["Ø12 mm", "24 mm", "14 mm", "30 mm"]);
   });
 
   it("the shape that is the whole part adds nothing (the overall size already shows it)", () => {

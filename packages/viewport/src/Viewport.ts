@@ -872,12 +872,22 @@ export class Viewport {
       const lh = el.offsetHeight + 2;
       const x = ((p.x + 1) / 2) * w;
       let y = ((1 - p.y) / 2) * h;
-      // Labels that would cover one already placed step down until they're clear, so every number stays readable.
-      const hits = (yy: number) =>
-        placed.some((q) => Math.abs(q.x - x) < (q.w + lw) / 2 && Math.abs(q.y - yy) < (q.h + lh) / 2);
-      for (let i = 0; i < 8 && hits(y); i++) y += lh;
-      placed.push({ x, y, w: lw, h: lh });
-      el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+      // A label that would cover one already placed moves a little way to the nearest clear spot beside its line.
+      // When there's none close by, it is left out for now (the number is in Properties), rather than piling
+      // labels up far from what they measure; turning or zooming the view brings it back.
+      const hits = (xx: number, yy: number) =>
+        placed.some((q) => Math.abs(q.x - xx) < (q.w + lw) / 2 && Math.abs(q.y - yy) < (q.h + lh) / 2);
+      let spot: [number, number] | null = hits(x, y) ? null : [x, y];
+      for (const [dx, dy] of NUDGES) {
+        if (spot) break;
+        if (!hits(x + dx * lw, y + dy * lh)) spot = [x + dx * lw, y + dy * lh];
+      }
+      if (!spot || !visible) {
+        el.style.visibility = "hidden";
+        continue;
+      }
+      placed.push({ x: spot[0], y: spot[1], w: lw, h: lh });
+      el.style.transform = `translate(${spot[0]}px, ${spot[1]}px) translate(-50%, -50%)`;
     }
   }
 
@@ -895,6 +905,20 @@ export class Viewport {
     });
   }
 }
+
+/** Where a crowded label may move, in label heights and widths: just above or below first, then to the sides. */
+const NUDGES: [number, number][] = [
+  [0, -1],
+  [0, 1],
+  [0.6, 0],
+  [-0.6, 0],
+  [0.6, -1],
+  [-0.6, -1],
+  [0.6, 1],
+  [-0.6, 1],
+  [0, -2],
+  [0, 2],
+];
 
 /** The part's box with space around it for measurement labels, never smaller than 60 mm across. */
 function roomAround(b: Bounds): Bounds {

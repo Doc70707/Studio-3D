@@ -31,9 +31,9 @@ test("labels follow the design when a size changes", async ({ page }) => {
 test("the selected shape shows its size and where it sits", async ({ page }) => {
   await page.getByRole("button", { name: "Add cylinder" }).click();
   await current(page);
-  // Only the cylinder's own sizes: 20 × 20 × 20, 20 mm from the left and 10 from the front, lifted 30. The part's
-  // overall size stays in Properties, so the labels don't crowd each other.
-  expect(await texts(page)).toEqual(["10 mm", "20 mm", "20 mm", "20 mm", "20 mm", "30 mm"]);
+  // Only the cylinder's own sizes: Ø20 (once, not as a width and a depth) × 20 high, 20 mm from the left and 10 from
+  // the front, lifted 30. The part's overall size stays in Properties, so the labels don't crowd each other.
+  expect(await texts(page)).toEqual(["10 mm", "20 mm", "20 mm", "30 mm", "Ø20 mm"]);
   await page.screenshot({ path: `${OUT}measure-shape.png` });
 });
 

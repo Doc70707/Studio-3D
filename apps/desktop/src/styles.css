@@ -41,13 +41,20 @@
   --blur: blur(24px) saturate(170%);
   --shadow: 0 10px 40px rgba(2, 6, 20, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
+  /* One type scale for the whole app: captions and units, supporting text, controls and values, titles, headline
+     figures. Numbers use the same size as the words around them, in tabular figures so columns line up. */
+  --fs-caption: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-title: 15px;
+  --fs-figure: 20px;
   font-family:
     "Segoe UI Variable Text",
     "Segoe UI",
     system-ui,
     -apple-system,
     sans-serif;
-  font-size: 14px;
+  font-size: var(--fs-body);
   line-height: 1.45;
   color: var(--text);
   background: var(--bg-1);
@@ -145,7 +152,7 @@ button {
   gap: 10px;
   padding: 0 8px 0 6px;
   font-weight: 650;
-  font-size: 15px;
+  font-size: var(--fs-title);
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -255,7 +262,7 @@ button {
 .menu-item kbd {
   margin-left: 24px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 
@@ -293,14 +300,14 @@ button {
 
 .dialog h2 {
   margin: 0 0 12px;
-  font-size: 17px;
+  font-size: var(--fs-title);
   letter-spacing: -0.01em;
 }
 
 .dialog .shortcuts {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .dialog .shortcuts th,
@@ -531,7 +538,7 @@ input:focus-visible {
 .panel-title {
   margin: 0 0 6px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -540,7 +547,7 @@ input:focus-visible {
 .empty {
   margin: 4px 0 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 /* The steps, one line each in the order they are built. */
@@ -596,7 +603,7 @@ input:focus-visible {
 .step-problem {
   flex-basis: 100%;
   margin: -4px 10px 8px 34px !important;
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .step-main {
@@ -628,7 +635,7 @@ input:focus-visible {
 
 .step-name {
   overflow: hidden;
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 620;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -637,7 +644,7 @@ input:focus-visible {
 .step-summary {
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-small);
   line-height: 1.35;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -655,7 +662,7 @@ input:focus-visible {
   align-items: center;
   gap: 8px;
   margin: 0 0 12px;
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -675,7 +682,7 @@ input:focus-visible {
   border-radius: 999px;
   background: rgb(var(--accent-rgb) / 0.14);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
 }
@@ -683,7 +690,7 @@ input:focus-visible {
 .props-note {
   margin: -6px 0 12px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-small);
 }
 
 .props .hole-grid {
@@ -702,7 +709,7 @@ input:focus-visible {
   width: max-content;
   margin-bottom: 8px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
 }
@@ -719,7 +726,7 @@ input:focus-visible {
   display: block;
   margin-bottom: 6px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fs-body);
   letter-spacing: 0.01em;
 }
 
@@ -756,12 +763,12 @@ input:focus-visible {
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding: 0 14px;
+  padding: 0 10px 0 12px;
   border: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 550;
   font-variant-numeric: tabular-nums;
 }
@@ -772,13 +779,13 @@ input:focus-visible {
 
 .unit {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .help,
 .issue {
   margin: 5px 2px 0;
-  font-size: 12.5px;
+  font-size: var(--fs-small);
   line-height: 1.4;
 }
 
@@ -814,7 +821,7 @@ input:focus-visible {
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 550;
   cursor: pointer;
 }
@@ -838,7 +845,7 @@ input:focus-visible {
   display: block;
   margin-bottom: 6px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .hole-grid.three {
@@ -856,7 +863,7 @@ input:focus-visible {
   background: rgb(var(--accent-rgb) / 0.14);
   color: var(--text);
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
   transition:
     background-color 160ms var(--ease),
@@ -906,7 +913,7 @@ input:focus-visible {
 
 .field.compact label {
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: var(--fs-small);
   font-weight: 550;
   color: var(--muted);
 }
@@ -918,7 +925,7 @@ input:focus-visible {
 
 .field.compact .input-row input {
   padding: 0 10px;
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .check {
@@ -926,7 +933,7 @@ input:focus-visible {
   align-items: center;
   gap: 8px;
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 
@@ -954,7 +961,7 @@ input:focus-visible {
   border-radius: 14px;
   background: transparent; /* measured, not typed in: no input look */
   border: 1px dashed rgb(var(--ink-rgb) / 0.16);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .facts dt {
@@ -986,7 +993,7 @@ input:focus-visible {
   min-height: 38px;
   padding: 8px 16px;
   border-radius: 14px;
-  font-size: 12.5px;
+  font-size: var(--fs-small);
 }
 
 .statusbar [data-testid="save-status"] {
@@ -1086,7 +1093,7 @@ input:focus-visible {
 
 .notice h2 {
   margin: 0 0 8px;
-  font-size: 17px;
+  font-size: var(--fs-title);
   letter-spacing: -0.01em;
 }
 
@@ -1235,7 +1242,7 @@ input:focus-visible {
 
 .recovery h2 {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: var(--fs-title);
   letter-spacing: -0.01em;
 }
 
@@ -1360,7 +1367,7 @@ input:focus-visible {
   grid-template-columns: 16px 1fr;
   gap: 8px;
   align-items: start;
-  font-size: 12.5px;
+  font-size: var(--fs-small);
   line-height: 1.45;
 }
 
@@ -1611,7 +1618,7 @@ input:focus-visible {
 }
 
 .sketch-canvas .spin text {
-  font-size: 11px;
+  font-size: var(--fs-caption);
   fill: var(--muted);
   pointer-events: none;
 }
@@ -1676,7 +1683,7 @@ input:focus-visible {
 }
 
 .sketch-canvas .typed-box text {
-  font-size: 12px;
+  font-size: var(--fs-small);
   fill: var(--muted);
 }
 
@@ -1708,7 +1715,7 @@ input:focus-visible {
 
 .sketch-canvas text {
   fill: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-small);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   paint-order: stroke;
@@ -1804,7 +1811,7 @@ input:focus-visible {
   border-radius: 6px;
   background: rgba(10, 14, 28, 0.82); /* dark chips in every theme: they sit on the part, whatever its colour */
   color: #f4f6fb;
-  font-size: 12px;
+  font-size: var(--fs-small);
   font-weight: 620;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1846,12 +1853,12 @@ input:focus-visible {
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding: 0 14px;
+  padding: 0 10px 0 12px;
   border: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 15px;
+  font-size: var(--fs-body);
   font-weight: 550;
   cursor: pointer;
 }
@@ -1901,7 +1908,7 @@ input:focus-visible {
 .selection-help {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .selection-bar button {
@@ -1937,7 +1944,7 @@ input:focus-visible {
   gap: 6px;
   padding: 0 4px 0 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .sketch-top .angle-step select {
@@ -1960,7 +1967,7 @@ input:focus-visible {
 .sketch-canvas .snap-marker text,
 .sketch-canvas .angle-guide text {
   fill: var(--warning);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 
@@ -1984,7 +1991,7 @@ input:focus-visible {
   justify-content: space-between;
   gap: 4px 10px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-small);
 }
 
 .hole-on-actions {
@@ -2145,7 +2152,7 @@ button.link:hover {
   border-radius: 8px 8px 0 0;
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 560;
   cursor: pointer;
   transition: color 140ms var(--ease), background-color 140ms var(--ease);
@@ -2233,7 +2240,7 @@ button.link:hover {
   border-radius: 9px;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-small);
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
@@ -2270,7 +2277,7 @@ button.link:hover {
 .ribbon-group-label {
   padding: 3px 0 1px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   text-align: center;
   white-space: nowrap;
 }
@@ -2298,7 +2305,7 @@ button.link:hover {
 .palette-header h2 {
   flex: 1;
   margin: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2377,7 +2384,7 @@ button.link:hover {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-small);
   font-weight: 600;
   letter-spacing: 0.04em;
   writing-mode: vertical-rl;
@@ -2527,7 +2534,7 @@ button.link:hover {
 
 .palette-header h2 {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 620;
   letter-spacing: 0;
   text-transform: none;
@@ -2555,7 +2562,7 @@ button.link:hover {
 }
 
 .brand-name {
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .style-docked .topbar {
@@ -2599,7 +2606,7 @@ button.link:hover {
   border-radius: 10px;
   background: transparent;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-small);
   font-weight: 550;
   cursor: pointer;
   transition:
@@ -2678,7 +2685,7 @@ button.link:hover {
 
 .appearance h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--fs-title);
   font-weight: 650;
 }
 
@@ -2688,13 +2695,13 @@ button.link:hover {
 
 .appearance-group h3 {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
 .appearance-group p {
   margin: -4px 0 10px;
-  font-size: 12.5px;
+  font-size: var(--fs-small);
 }
 
 .appearance .choices {
@@ -2752,7 +2759,7 @@ button.link:hover {
   padding: 6px;
   border-radius: 14px;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-small);
 }
 
 .appearance .choices.wide button:hover {
@@ -2867,7 +2874,7 @@ button.link:hover {
   height: 30px;
   padding: 0 12px;
   border-radius: var(--radius-md);
-  font-size: 13.5px;
+  font-size: var(--fs-body);
   font-weight: 500;
 }
 
@@ -2892,7 +2899,7 @@ button.link:hover {
   gap: 3px;
   min-width: 54px;
   padding: 5px 6px 4px;
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
 }
 
 .ribbon-button .icon {
@@ -2939,7 +2946,7 @@ button.link:hover {
 .snap-menu label small {
   grid-column: 3;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
 }
 
 .snap-menu .snap-on {
@@ -2972,7 +2979,7 @@ button.link:hover {
   background: var(--fill);
   color: var(--muted);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-caption);
 }
 
 .snap-menu .snap-mid {
@@ -2984,7 +2991,7 @@ button.link:hover {
 .snap-menu .help {
   margin: 8px 4px 0;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
 }
 
 .sketch-canvas .m2p-marker circle,
@@ -3021,7 +3028,7 @@ button.link:hover {
 
 .next-side-title small {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
   font-weight: 450;
 }
 
@@ -3029,7 +3036,7 @@ button.link:hover {
   display: grid;
   gap: 3px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-small);
 }
 
 .next-side input {
@@ -3156,7 +3163,7 @@ button.link:hover {
   border-radius: var(--radius-md);
   background: linear-gradient(180deg, var(--button), var(--button-strong));
   color: var(--on-accent);
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 650;
   cursor: pointer;
 }
@@ -3185,17 +3192,17 @@ button.link:hover {
   grid-column: 1 / -1;
 }
 .slice-figures span:first-child strong {
-  font-size: 22px;
+  font-size: var(--fs-figure);
 }
 .slice-figures strong {
   white-space: nowrap;
-  font-size: 17px;
+  font-size: var(--fs-title);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 .slice-figures small {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--fs-caption);
 }
 .slice-result .props-note {
   margin: 0;
@@ -3205,4 +3212,82 @@ button.link:hover {
   height: 13px;
   vertical-align: -2px;
   color: var(--success);
+}
+
+/* ---------- Fit and finish (v0.36): nothing overlaps, at any window size ---------- */
+
+/* The selection bar centres in the open view, clear of the camera views column on the right. */
+.app {
+  --view-bar-room: 96px;
+}
+.selection-bar {
+  left: calc(
+    var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px) - var(--view-bar-room)) / 2
+  );
+  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - var(--view-bar-room) - 2 * var(--gap));
+}
+.selection-bar .selection-help {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The selected shape's panel sits under the sketch toolbar however many rows it takes, never over it. */
+.sketch-side {
+  position: relative;
+  top: auto;
+  right: auto;
+  grid-row: 2;
+  grid-column: 1;
+  align-self: start;
+  justify-self: end;
+  margin: 12px 0 0 0; /* flush with the drawing's right edge, as before */
+  max-height: calc(100% - 24px);
+}
+.sketch-canvas {
+  grid-column: 1;
+}
+
+/* Narrower windows: the top bar keeps to one row by dropping words that have an icon or are said elsewhere. */
+@media (max-width: 1240px) {
+  .brand-name {
+    display: none;
+  }
+  .appearance-button .label {
+    display: none;
+  }
+  .bar .menu-top {
+    padding: 0 7px;
+  }
+  .workspaces button {
+    padding: 0 10px;
+  }
+}
+@media (max-width: 1100px) {
+  .topbar .group[aria-label="Quick access"] button[aria-label="New"],
+  .topbar .group[aria-label="Quick access"] button[aria-label="Open…"] {
+    display: none; /* still in the File menu, with Ctrl+N and Ctrl+O */
+  }
+  .sketch-top .group[aria-label="Drafting aids"] .angle-step span {
+    display: none;
+  }
+}
+@media (max-width: 1240px) {
+  .sketch-title-text {
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sketch-top .segmented-small {
+    min-width: 84px;
+  }
+}
+.range-row {
+  margin-bottom: 4px;
+}
+@media (max-width: 1100px) {
+  .sketch-title-text {
+    display: none; /* the pencil stays, with the sketch's name in its tooltip */
+  }
 }

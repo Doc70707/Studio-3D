@@ -674,9 +674,10 @@ export function App() {
     const focused = built.doc.features.find((f) => f.id === focusId);
     // With a piece picked, its own sizes show without the part's overall ones (those stay in Properties), so the
     // labels don't crowd each other.
-    const own = focused ? featureDimensions(focused, m, built.doc) : [];
+    // Print Studio is about the whole part on its plate: only its overall size.
+    const own = focused && !printing ? featureDimensions(focused, m, built.doc) : [];
     vp.setDimensions(own.length ? own : partDimensions(m.min, m.max));
-  }, [built, showSizes, focusId, draft]);
+  }, [built, showSizes, focusId, draft, printing]);
 
   // The selected piece: tinted, with move arrows in its middle. Redrawn with each new model.
   const selected = selection ? doc.features.find((f) => f.id === selection.id) : undefined;
@@ -1637,12 +1638,13 @@ export function App() {
             type="button"
             className="appearance-button"
             data-opens="appearance"
+            aria-label="Appearance"
             aria-pressed={appearanceOpen}
             title="Appearance: theme, accent colour and the part's colour"
             onClick={() => setAppearanceOpen((o) => !o)}
           >
             <Icon name="palette" />
-            Appearance
+            <span className="label">Appearance</span>
           </button>
         </div>
 

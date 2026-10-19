@@ -155,6 +155,10 @@ What works today:
   part and shown in 3D at once; pick one to type its exact place and size, drag it, or delete it. Done turns them
   into ordinary hole steps (one undo takes the sketch and its holes back), where threads, counterbores and depth are
   set. Polygon (P) draws a hexagon or any equal-sided shape sized across its flats, the way nuts are, for nut traps.
+- Fit and finish: one type scale (caption, small, body, title, figure) instead of eleven sizes; long numbers show
+  to 3 decimals until clicked; a round shape shows one Ø label; 3D size labels step aside or hide instead of piling
+  up; sketch sizes and offsets sit outside the shape; the top bar stays on one row down to 1024 px wide. A layout
+  test (`e2e/ui-audit.spec.ts`) checks 12 screens at 4 window sizes for clipped, escaping or overlapping text.
 - Text contrast is checked by a test for every theme and accent, and the app respects Windows' reduced motion, reduced transparency and high
   contrast settings.
 

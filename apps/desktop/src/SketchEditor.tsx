@@ -695,9 +695,11 @@ export function SketchEditor(props: {
   return (
     <div className={`sketch-editor view-${props.view}`} data-testid="sketch-editor">
       <div className="sketch-top glass bar">
-        <span className="sketch-title">
+        <span className="sketch-title" title={`${s.name} on the ${s.surface}`}>
           <Icon name="pencil" />
-          {s.name} on the {s.surface}
+          <span className="sketch-title-text">
+            {s.name} on the {s.surface}
+          </span>
         </span>
         <span className="divider" aria-hidden="true" />
         <div className="group" role="group" aria-label="Drawing tools">
@@ -1266,7 +1268,7 @@ function Face({ face, toScreen }: { face: NonNullable<SketchDraft["face"]>; toSc
   return (
     <g className="face">
       <path d={d} />
-      <Dimension a={[ox, oy + 26]} b={[wx, oy + 26]} text={mm(face.width)} />
+      <Dimension a={[ox, oy + 26]} b={[wx, oy + 26]} text={mm(face.width)} outside />
       <Dimension a={[ox - 26, oy]} b={[ox - 26, hy]} text={mm(face.height)} vertical />
       <circle className="origin" cx={ox} cy={oy} r={4} />
     </g>
@@ -1280,12 +1282,15 @@ function Dimension({
   text,
   vertical,
   dashed,
+  outside,
 }: {
   a: Point2;
   b: Point2;
   text: string;
   vertical?: boolean;
   dashed?: boolean;
+  /** The number goes on the far side of the line from the shape (below a bottom line, right of a right one). */
+  outside?: boolean;
 }) {
   const mx = (a[0] + b[0]) / 2;
   const my = (a[1] + b[1]) / 2;
@@ -1308,7 +1313,13 @@ function Dimension({
           />
         </>
       )}
-      <text x={mx} y={my} transform={vertical ? `rotate(-90 ${mx} ${my})` : undefined} dy="-5" textAnchor="middle">
+      <text
+        x={mx}
+        y={my}
+        transform={vertical ? `rotate(-90 ${mx} ${my})` : undefined}
+        dy={outside ? "13" : "-5"}
+        textAnchor="middle"
+      >
         {text}
       </text>
     </g>
@@ -1344,8 +1355,8 @@ function ProfileShape(props: { profile: Profile; mode: Mode; hole: boolean; sele
       )}
       {p.kind === "rectangle" && (
         <>
-          <Dimension a={[bl[0], bl[1] + 16]} b={[tr[0], bl[1] + 16]} text={mm(p.width)} />
-          <Dimension a={[tr[0] + 16, bl[1]]} b={[tr[0] + 16, tr[1]]} text={mm(p.height)} vertical />
+          <Dimension a={[bl[0], bl[1] + 16]} b={[tr[0], bl[1] + 16]} text={mm(p.width)} outside />
+          <Dimension a={[tr[0] + 16, bl[1]]} b={[tr[0] + 16, tr[1]]} text={mm(p.height)} vertical outside />
         </>
       )}
       {p.kind === "circle" && (
@@ -1360,14 +1371,18 @@ function ProfileShape(props: { profile: Profile; mode: Mode; hole: boolean; sele
 }
 
 /** Dashed lines from the edges of the face (or the plate's centre lines) to the shape, with the distances. */
+// They run above the shape and to its left, outside it, so they never cross the shape or its own sizes (which are
+// below and to the right).
 function Offsets({ bounds, toScreen }: { bounds: [number, number, number, number]; toScreen: ToScreen }) {
-  const [x0, y0] = bounds;
-  const cy = (bounds[1] + bounds[3]) / 2;
-  const cx = (bounds[0] + bounds[2]) / 2;
+  const [x0, y0, , y1] = bounds;
+  const [ax, top] = toScreen([0, y1]);
+  const [bx] = toScreen([x0, y1]);
+  const [left, ay] = toScreen([x0, 0]);
+  const [, by] = toScreen([x0, y0]);
   return (
     <g className="offsets">
-      {Math.abs(x0) > 1e-9 && <Dimension a={toScreen([0, cy])} b={toScreen([x0, cy])} text={mm(x0)} dashed />}
-      {Math.abs(y0) > 1e-9 && <Dimension a={toScreen([cx, 0])} b={toScreen([cx, y0])} text={mm(y0)} vertical dashed />}
+      {Math.abs(x0) > 1e-9 && <Dimension a={[ax, top - 16]} b={[bx, top - 16]} text={mm(x0)} dashed />}
+      {Math.abs(y0) > 1e-9 && <Dimension a={[left - 16, ay]} b={[left - 16, by]} text={mm(y0)} vertical dashed />}
     </g>
   );
 }
@@ -1416,8 +1431,8 @@ function PendingShape({ pending, cursor, toScreen }: { pending: Pending; cursor:
     return (
       <g className="pending">
         <path d={outlinePath(p, toScreen)} />
-        <Dimension a={[bl[0], bl[1] + 16]} b={[tr[0], bl[1] + 16]} text={mm(p.width)} />
-        <Dimension a={[tr[0] + 16, bl[1]]} b={[tr[0] + 16, tr[1]]} text={mm(p.height)} vertical />
+        <Dimension a={[bl[0], bl[1] + 16]} b={[tr[0], bl[1] + 16]} text={mm(p.width)} outside />
+        <Dimension a={[tr[0] + 16, bl[1]]} b={[tr[0] + 16, tr[1]]} text={mm(p.height)} vertical outside />
       </g>
     );
   }

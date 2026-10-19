@@ -74,9 +74,14 @@ export function featureDimensions(f: Feature, part: { min: Vec3; max: Vec3 }, do
     near(y0 + d, part.max[1]) &&
     near(z0 + h, part.max[2]);
   if (whole) return out;
-  dim([x0, y0, z0 + h], [x0 + w, y0, z0 + h], [0, -gap, 0], fmt(w));
-  dim([x0 + w, y0, z0 + h], [x0 + w, y0 + d, z0 + h], [gap, 0, 0], fmt(d));
-  dim([x0, y0, z0], [x0, y0, z0 + h], [-gap, 0, 0], fmt(h));
+  // A round shape has one diameter, not a width and a depth; a sphere's height is its diameter too.
+  const round = f.type === "cylinder" || f.type === "tube" || f.type === "cone" || f.type === "sphere";
+  if (round && near(w, d)) dim([x0, f.y, z0 + h], [x0 + w, f.y, z0 + h], [0, -gap, 0], `Ø${fmt(w)}`);
+  else {
+    dim([x0, y0, z0 + h], [x0 + w, y0, z0 + h], [0, -gap, 0], fmt(w));
+    dim([x0 + w, y0, z0 + h], [x0 + w, y0 + d, z0 + h], [gap, 0, 0], fmt(d));
+  }
+  if (f.type !== "sphere") dim([x0, y0, z0], [x0, y0, z0 + h], [-gap, 0, 0], fmt(h));
   if (!near(x0, px0)) dim([px0, y0, z0], [x0, y0, z0], [0, 0, 0.01], fmt(x0 - px0));
   if (!near(y0, py0)) dim([x0, py0, z0], [x0, y0, z0], [0, 0, 0.01], fmt(y0 - py0));
   if (z0 > 0.005) dim([x0, y0, 0], [x0, y0, z0], [0, 0, 0], fmt(z0));
