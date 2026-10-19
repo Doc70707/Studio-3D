@@ -11,5 +11,5 @@ export { slicePart, type SlicedLayer, type SlicedPart, type SlicerSettings } fro
 export { SlicerClient } from "./slicerClient";
 export { layerPaths, pathLength, type PathRole, type ToolPath } from "./toolpath";
 export { PLA, writeGcode, type GcodeMaterial, type GcodeOptions } from "./gcode";
-export { checkGcode, expectedFilament, type GcodeReport } from "./gcodeCheck";
+export { checkGcode, expectedFilament, movesTime, TYPICAL_ACCELERATION, type GcodeReport } from "./gcodeCheck";
 export { makeGcode, type PrintJob, type PrintJobResult } from "./printJob";

@@ -21,6 +21,7 @@ import {
   SlicerClient,
   createSlicerWorker,
   type Measurements,
+  type PrintJobResult,
   type SlicedPart,
   type SlicerSettings,
   type MeshData,
@@ -48,6 +49,7 @@ import {
   type BoxFeature,
   type FaceOutline,
   type HoleFace,
+  type HoleFeature,
   type Issue,
   type ProjectDocument,
   newReference,
@@ -79,11 +81,12 @@ import {
 import { MenuBar, type Menu } from "./MenuBar";
 import { allows, interactionMode } from "./interaction";
 import { SketchEditor, type SketchDraft } from "./SketchEditor";
+import { faceForHoles, holeSteps } from "./faceHoles";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
-import { PrintPanel, type LayerPreview, type PrintState } from "./PrintPanel";
+import { PrintPanel, type LayerPreview, type PrintState, type SliceSummary } from "./PrintPanel";
 import { escapeLeaves, focusPanelAfterSelection, type FocusPanel } from "./screen";
 import { APP_INFO, useProject, whenSaved } from "./useProject";
 
@@ -292,10 +295,7 @@ export function App() {
     () => ({ units: doc.units, features: doc.features }),
     [doc.units, doc.features],
   );
-  const shownDoc = useMemo(
-    () => (draft ? withDraft(modelDoc, draft.feature, draft.isNew) : modelDoc),
-    [modelDoc, draft],
-  );
+  const shownDoc = useMemo(() => (draft ? withDraft(modelDoc, draft) : modelDoc), [modelDoc, draft]);
 
   // Rebuild real geometry whenever the document changes and its values are valid.
   const inputIssues = validateDocument(shownDoc);
@@ -452,34 +452,65 @@ export function App() {
             thinLayers: sliced!.thinLayers,
           };
 
-  // G-code: written and read back in the slicer's worker, and saved only once that check passes.
+  // G-code: written and read back in the slicer's worker as soon as the part is sliced, so the print's time and
+  // filament show straight away; it is saved only when that check passed.
+  const cantWrite = !fitsPrinter
+    ? "The part doesn't fit this printer."
+    : sliced && sliced.openEnds > 0
+      ? "The part's surface has gaps, so its layers can't be trusted."
+      : null;
   const gcodeBlocked =
     printer.maker === "Bambu Lab"
       ? "Bambu printers take G-code packed in Bambu's own 3MF, which Studio 3D can't write yet. Use Open in Bambu " +
         "Studio for now."
-      : !fitsPrinter
-        ? "The part doesn't fit this printer."
-        : sliced && sliced.openEnds > 0
-          ? "The part's surface has gaps, so its layers can't be trusted."
-          : null;
+      : cantWrite;
+  const [gcodeJob, setGcodeJob] = useState<{
+    part: SlicedPart;
+    printer: string;
+    result: PrintJobResult | { error: string };
+  } | null>(null);
+  const jobCurrent = !!sliced && gcodeJob?.part === sliced && gcodeJob.printer === printer.id;
+  useEffect(() => {
+    const client = slicerRef.current;
+    if (!sliced || cantWrite || jobCurrent || !client) return;
+    const [part, id] = [sliced, printer.id];
+    client
+      .gcode(part, {
+        printerName: `${printer.maker} ${printer.name}`,
+        volume: printer.volume,
+        maxNozzleTemp: printer.maxNozzleTemp,
+        maxBedTemp: printer.maxBedTemp,
+        application: `${APP_INFO.name} ${APP_INFO.version}`,
+      })
+      .then(
+        (result) => setGcodeJob({ part, printer: id, result }),
+        // Superseded: a setting changed and the part is being sliced again.
+        (e: Error) => e.message !== "superseded" && setGcodeJob({ part, printer: id, result: { error: e.message } }),
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sliced, cantWrite, jobCurrent, printer.id]);
+  const job = jobCurrent ? gcodeJob!.result : null;
+  const sliceSummary: SliceSummary | null =
+    !sliced || cantWrite
+      ? null
+      : !job
+        ? { status: "writing" }
+        : "error" in job
+          ? { status: "failed", problem: job.error }
+          : !job.report.ok
+            ? { status: "failed", problem: job.report.problems[0] ?? "" }
+            : {
+                status: "ready",
+                layers: job.report.layers,
+                height: sliced.layers[sliced.layers.length - 1]?.top ?? 0,
+                filament: job.report.filament,
+                grams: job.grams,
+                seconds: job.report.seconds,
+              };
   const exportGcode = useCallback(
     () =>
       run(async () => {
-        const client = slicerRef.current;
-        if (!sliced || !client || gcodeBlocked) return;
-        let job;
-        try {
-          job = await client.gcode(sliced, {
-            printerName: `${printer.maker} ${printer.name}`,
-            volume: printer.volume,
-            maxNozzleTemp: printer.maxNozzleTemp,
-            maxBedTemp: printer.maxBedTemp,
-            application: `${APP_INFO.name} ${APP_INFO.version}`,
-          });
-        } catch (e) {
-          if (e instanceof Error && e.message === "superseded") return; // a setting changed: slicing again
-          throw e;
-        }
+        if (!job || "error" in job || gcodeBlocked) return;
         const { report } = job;
         if (!report.ok) {
           setNotice({
@@ -498,7 +529,7 @@ export function App() {
               "Not yet tried on a real printer, so watch the first layer.",
           });
       }),
-    [sliced, gcodeBlocked, printer, name, run, setNotice],
+    [job, gcodeBlocked, name, run, setNotice],
   );
 
   // The plate under the part: the printer's own, with its build volume outlined, in Print Studio.
@@ -588,7 +619,7 @@ export function App() {
     if (!allows(mode, "pick-face")) return;
     const hit = faceAt(e.clientX, e.clientY);
     if (!hit?.outline) return;
-    if (holeTarget === undefined) sketchOnFace(hit.outline);
+    if (holeTarget === undefined) sketchOnFace(hit.outline, meshRef.current?.owners[hit.face]);
     else holeOnFace(hit.outline, meshRef.current?.owners[hit.face]);
   };
 
@@ -608,7 +639,7 @@ export function App() {
     else addAndSelect({ ...newHole(doc), face });
   };
 
-  const sketchOnFace = (o: FaceOutline) => {
+  const sketchOnFace = (o: FaceOutline, owner?: string) => {
     stopPicking();
     setSketchView("2d");
     setDraft({
@@ -616,6 +647,8 @@ export function App() {
       isNew: true,
       face: { triangles: o.triangles, width: o.width, height: o.height },
       area: [0, 0, o.width, o.height],
+      holeFace: faceForHoles(doc, o, owner),
+      holes: [],
     });
   };
 
@@ -734,7 +767,13 @@ export function App() {
   const finishSketch = useCallback(() => {
     if (!draft) return;
     const f = draft.feature;
-    if (draft.isNew) {
+    const holes = draftHoles(doc, draft);
+    if (draft.isNew && holes.length) {
+      // The sketch and its holes go in together, so one undo takes them all back. Holes alone need no sketch.
+      const sketch = f.profiles.length ? [f] : [];
+      project.addSteps([...sketch, ...holes]);
+      setSelection({ id: (sketch[0] ?? holes[0]!).id, face: null });
+    } else if (draft.isNew) {
       project.addFeature(f);
       setSelection({ id: f.id, face: null }); // its settings show in the panel, ready to change
     } else
@@ -745,7 +784,7 @@ export function App() {
         ...(f.revolve !== undefined && { revolve: f.revolve }),
       });
     setDraft(null);
-  }, [draft, project]);
+  }, [draft, project, doc]);
 
   // In the sketch's 3D view, show the outlines on the face and look at them from an angle.
   // Reference pictures that are switched on and have sensible settings are shown in the 3D view.
@@ -792,10 +831,15 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sketchView, draft?.feature.id]);
 
+  const draftHoleIds = new Set((draft?.holes ?? []).map((h) => h.id));
   const draftIssues = draft
     ? dedupe([
-        ...validateSketch(draft.feature),
-        ...(inputOk ? kernelIssues.filter((i) => i.featureId === draft.feature.id) : []),
+        // A sketch with only holes in it is fine: the holes are added without it.
+        ...(draftHoleIds.size && !draft.feature.profiles.length ? [] : validateSketch(draft.feature)),
+        ...inputIssues.filter((i) => i.featureId && draftHoleIds.has(i.featureId)),
+        ...(inputOk
+          ? kernelIssues.filter((i) => i.featureId === draft.feature.id || draftHoleIds.has(i.featureId ?? ""))
+          : []),
       ])
     : [];
   const draftIndex = draft ? shownDoc.features.findIndex((f) => f.id === draft.feature.id) : -1;
@@ -1261,6 +1305,7 @@ export function App() {
             settings={slicerSettings}
             onSettings={project.setPrintSettings}
             layers={layerPreview}
+            summary={sliceSummary}
             onLayerView={setLayerView}
             onLayer={setLayerAt}
             onExport={(format) => void exportMesh(format)}
@@ -1359,8 +1404,40 @@ export function App() {
     ],
   };
   // Print Studio has one palette of its own, so only the style and reset apply there.
+  const printTab: RibbonTab = {
+    id: "print",
+    label: "Print",
+    groups: [
+      {
+        label: "Slice",
+        items: [
+          {
+            icon: "layers",
+            label: layerView ? "Show part" : "Slice",
+            name: layerView ? "Show the part again" : "Slice the part",
+            title: layerView ? "Back to the part from its layers" : "Cut the part into its printed layers",
+            onClick: () => setLayerView((v) => !v),
+            pressed: layerView,
+            disabled: !layerView && printState.kind !== "checked",
+            reason: "the checks need to finish first",
+            size: "large",
+          },
+          {
+            icon: "export",
+            label: "G-code",
+            name: "Export G-code",
+            title: "Save the checked G-code for your printer",
+            onClick: () => void exportGcode(),
+            disabled: !job || "error" in job || !!gcodeBlocked || busy,
+            reason: gcodeBlocked ?? "slice the part first",
+            size: "large",
+          },
+        ],
+      },
+    ],
+  };
   const ribbonTabs: RibbonTab[] = printing
-    ? [{ ...viewTab, groups: viewTab.groups.filter((g) => g.label !== "Palettes") }]
+    ? [printTab, { ...viewTab, groups: viewTab.groups.filter((g) => g.label !== "Palettes") }]
     : [{ id: "home", label: "Home", groups: design.ribbon }, viewTab];
 
   return (
@@ -1634,6 +1711,7 @@ export function App() {
           view={sketchView}
           onView={setSketchView}
           onChange={(feature) => setDraft((d) => (d ? { ...d, feature } : d))}
+          onHoles={(holes) => setDraft((d) => (d ? { ...d, holes } : d))}
           onDone={finishSketch}
           onCancel={() => setDraft(null)}
           references={doc.references}
@@ -1790,11 +1868,20 @@ function layerLines(layers: { z: number; loops: Float64Array[] }[]): Float32Arra
   return out;
 }
 
-function withDraft(doc: ProjectDocument, f: SketchFeature, isNew: boolean): ProjectDocument {
-  return {
-    ...doc,
-    features: isNew ? [...doc.features, f] : doc.features.map((x) => (x.id === f.id ? f : x)),
-  };
+/** The holes placed while sketching on a face, as the hole steps they will become. */
+function draftHoles(doc: ProjectDocument, d: SketchDraft): HoleFeature[] {
+  if (!d.holeFace || !d.holes?.length) return [];
+  return holeSteps(doc, d.holeFace, d.holes, d.isNew && d.feature.profiles.length ? d.feature : undefined);
+}
+
+/** The design with the sketch being drawn in it, and its holes, so the 3D view shows them as they are drawn. */
+function withDraft(doc: ProjectDocument, d: SketchDraft): ProjectDocument {
+  const f = d.feature;
+  const holes = draftHoles(doc, d);
+  // A new sketch with only holes in it is left out, like it will be when it's done.
+  const sketch = d.isNew && holes.length && !f.profiles.length ? [] : d.isNew ? [f] : [];
+  const features = d.isNew ? doc.features : doc.features.map((x) => (x.id === f.id ? f : x));
+  return { ...doc, features: [...features, ...sketch, ...holes] };
 }
 
 /** The kernel repeats the input checks it ran; show each message once. */

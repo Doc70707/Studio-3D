@@ -320,3 +320,16 @@ export const along = (from: Point2, length: number, angle: number): Point2 => {
   const a = (angle * Math.PI) / 180;
   return exactPoint([from[0] + length * Math.cos(a), from[1] + length * Math.sin(a)]);
 };
+
+/**
+ * The corners of a regular polygon (a hexagon for a nut trap, say) around `centre`. It is sized across its flats,
+ * the way nuts and bolt heads are, and turned so the middle of one flat points at `facing` (degrees).
+ */
+export function regularPolygon(centre: Point2, acrossFlats: number, sides: number, facing = 0): Point2[] {
+  const corner = acrossFlats / 2 / Math.cos(Math.PI / sides);
+  const first = (facing * Math.PI) / 180 + Math.PI / sides;
+  return Array.from({ length: sides }, (_, i) => {
+    const a = first + (2 * Math.PI * i) / sides;
+    return exactPoint([centre[0] + corner * Math.cos(a), centre[1] + corner * Math.sin(a)]);
+  });
+}

@@ -24,7 +24,10 @@ import {
   validateReference,
   type ReferenceImage,
   type SketchPlane,
+  type HoleFace,
+  newId,
 } from "@studio3d/document";
+import type { DraftHole } from "./faceHoles";
 import {
   anyTyped,
   liveValues,
@@ -51,6 +54,7 @@ import {
   findSnap,
   isPointKey,
   parsePoint,
+  regularPolygon,
   sideOf,
   snapScene,
   type Snap,
@@ -66,11 +70,16 @@ export interface SketchDraft {
   face: { triangles: Point2[]; width: number; height: number } | null;
   /** Area to show when there is no face: [minX, minY, maxX, maxY]. */
   area: [number, number, number, number];
+  /** On a face of the part: the face holes go in, measured like the sketch from its bottom-left corner. */
+  holeFace?: HoleFace | null;
+  /** Holes placed while sketching; they become hole steps when the sketch is done. */
+  holes?: DraftHole[];
 }
 
-type Tool = "select" | "rectangle" | "circle" | "polygon";
+type Tool = "select" | "rectangle" | "circle" | "polygon" | "regular" | "hole";
 type Pending =
-  | { kind: "rectangle" | "circle"; start: Point2; pressed: boolean }
+  /** `sides`: a regular polygon, drawn like a circle from its centre out to the middle of a flat. */
+  | { kind: "rectangle" | "circle"; start: Point2; pressed: boolean; sides?: number }
   | { kind: "polygon"; points: Point2[] }
   | null;
 
@@ -101,7 +110,21 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
       "Click each corner, or type a length (Tab for the angle), or a point: x,y  @dx,dy  @length<angle, then Enter. " +
       "F8 locks to straight across or up. Click the first corner, press Enter or double-click to close.",
   },
+  {
+    tool: "regular",
+    label: "Polygon",
+    key: "p",
+    hint: "A hexagon (or any number of equal sides), say for a nut trap: click the centre, then the middle of a flat, or type the size across the flats and press Enter.",
+  },
+  {
+    tool: "hole",
+    label: "Hole",
+    key: "h",
+    hint: "Click where each hole goes; it drills straight through the part. After Done each is a hole step: add a thread, a counterbore or a depth in Properties.",
+  },
 ];
+/** A hole's name in the sketch, as on its Delete button. */
+const holeLabel = (i: number) => `Hole ${i + 1}`;
 
 const SNAP_PX = 10;
 const SNAPS_KEY = "studio3d.snaps";
@@ -136,6 +159,8 @@ export function SketchEditor(props: {
   view: "2d" | "3d";
   onView: (v: "2d" | "3d") => void;
   onChange: (feature: SketchFeature) => void;
+  /** The holes placed on the face changed. */
+  onHoles?: (holes: DraftHole[]) => void;
   onDone: () => void;
   onCancel: () => void;
   /** Reference pictures; those facing the same way as the drawing are shown under it, to trace over. */
@@ -150,7 +175,23 @@ export function SketchEditor(props: {
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [cam, setCam] = useState<{ cx: number; cy: number; k: number } | null>(null);
   const [tool, setTool] = useState<Tool>("rectangle");
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelectedShape] = useState<number | null>(null);
+  /** Holes can go in only when sketching on a face of the part. */
+  const holeFace = draft.holeFace ?? null;
+  const holes = useMemo(() => draft.holes ?? [], [draft.holes]);
+  const [selectedHole, setSelectedHoleIndex] = useState<number | null>(null);
+  // A shape or a hole is picked, never both.
+  const setSelected = (i: number | null) => {
+    setSelectedShape(i);
+    if (i !== null) setSelectedHoleIndex(null);
+  };
+  const setSelectedHole = (i: number | null) => {
+    setSelectedHoleIndex(i);
+    if (i !== null) setSelectedShape(null);
+  };
+  const tools = TOOLS.filter((t) => t.tool !== "hole" || holeFace);
+  const [holeSize, setHoleSize] = useState(5);
+  const [polygonSides, setPolygonSides] = useState(6);
   const [offsetBy, setOffsetBy] = useState(-2);
   const [offsetError, setOffsetError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
@@ -181,24 +222,34 @@ export function SketchEditor(props: {
   const setTyped = (t: Typed) => setTypedFor({ pending, typed: t });
   const drag = useRef<{
     start: Point2;
-    original: Profile;
+    original: Profile | DraftHole;
     index: number;
+    hole: boolean;
     moved: boolean;
   } | null>(null);
   const pan = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
-  const undoStack = useRef<Profile[][]>([]);
-  const redoStack = useRef<Profile[][]>([]);
+  /** The sketch's own undo: the shapes and the holes as they were. */
+  type Snapshot = { profiles: Profile[]; holes: DraftHole[] };
+  const undoStack = useRef<Snapshot[]>([]);
+  const redoStack = useRef<Snapshot[]>([]);
+  const now = (): Snapshot => ({ profiles: s.profiles, holes });
+  const restore = (to: Snapshot) => {
+    onChange({ ...s, profiles: to.profiles });
+    if (to.holes !== holes) props.onHoles?.(to.holes);
+  };
+  const remember = () => {
+    undoStack.current.push(now());
+    redoStack.current = [];
+  };
 
-  const setProfiles = useCallback(
-    (profiles: Profile[], undoable = true) => {
-      if (undoable) {
-        undoStack.current.push(s.profiles);
-        redoStack.current = [];
-      }
-      onChange({ ...s, profiles });
-    },
-    [onChange, s],
-  );
+  const setProfiles = (profiles: Profile[], undoable = true) => {
+    if (undoable) remember();
+    onChange({ ...s, profiles });
+  };
+  const setHoles = (next: DraftHole[], undoable = true) => {
+    if (undoable) remember();
+    props.onHoles?.(next);
+  };
 
   // Size of the drawing area.
   useLayoutEffect(() => {
@@ -249,7 +300,13 @@ export function SketchEditor(props: {
   /** Everything worth snapping to: the face's outline, every shape drawn, and the outline being drawn. */
   const faceEdges = useMemo(() => (draft.face ? boundaryEdges(draft.face.triangles) : []), [draft.face]);
   const drawing = pending?.kind === "polygon" ? pending.points : null;
-  const scene = useMemo(() => snapScene(s.profiles, faceEdges, drawing ?? []), [s.profiles, faceEdges, drawing]);
+  const scene = useMemo(() => {
+    const sc = snapScene(s.profiles, faceEdges, drawing ?? []);
+    return {
+      ...sc,
+      circles: [...sc.circles, ...holes.map((h) => ({ centre: [h.u, h.v] as Point2, radius: h.diameter / 2 }))],
+    };
+  }, [s.profiles, faceEdges, drawing, holes]);
 
   /**
    * Where the pointer puts a point: on an object snap if one is near (Alt turns snaps off), else held to ortho or an
@@ -280,7 +337,14 @@ export function SketchEditor(props: {
     setSelected(s.profiles.length);
   };
 
-  const finishShape = (kind: "rectangle" | "circle", a: Point2, b: Point2): boolean => {
+  const finishShape = (kind: "rectangle" | "circle", a: Point2, b: Point2, sides?: number): boolean => {
+    if (kind === "circle" && sides) {
+      const acrossFlats = round(2 * Math.hypot(b[0] - a[0], b[1] - a[1]));
+      if (acrossFlats < 0.5) return false;
+      const facing = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+      addProfile({ kind: "polygon", points: regularPolygon(a, acrossFlats, sides, facing) });
+      return true;
+    }
     if (kind === "rectangle") {
       const width = round(Math.abs(b[0] - a[0]));
       const height = round(Math.abs(b[1] - a[1]));
@@ -326,7 +390,7 @@ export function SketchEditor(props: {
     if (typed?.point !== undefined && !parsePoint(typed.point, from(pending))) return; // not a whole point yet
     const p = aim(pending, cursor);
     if (pending.kind === "polygon") addCorner(pending.points, p);
-    else if (finishShape(pending.kind, pending.start, p)) setPending(null);
+    else if (finishShape(pending.kind, pending.start, p, pending.sides)) setPending(null);
   };
 
   /** Where the side typed in "Next side" starts and ends; an outline not started yet starts at the origin. */
@@ -343,6 +407,14 @@ export function SketchEditor(props: {
     if (!side) return;
     if (pending?.kind === "polygon" && pending.points.length) addCorner(pending.points, side.to);
     else setPending({ kind: "polygon", points: [side.from, side.to] });
+  };
+
+  const hitHole = (q: Point2): number | null => {
+    for (let i = holes.length - 1; i >= 0; i--) {
+      const h = holes[i]!;
+      if (Math.hypot(q[0] - h.u, q[1] - h.v) <= h.diameter / 2 + 6 / k) return i;
+    }
+    return null;
   };
 
   const hit = (q: Point2): number | null => {
@@ -385,6 +457,14 @@ export function SketchEditor(props: {
   /** A click at p with the current tool; `pressed` when the button is still down, so a drag can finish a shape. */
   const place = (p: Point2, pressed: boolean) => {
     if (tool === "select") {
+      // Holes sit on top of the shapes, so they are picked first.
+      const h = hitHole(p);
+      if (h !== null) {
+        setSelectedHole(h);
+        drag.current = { start: p, original: holes[h]!, index: h, hole: true, moved: false };
+        return;
+      }
+      setSelectedHole(null);
       const i = hit(p);
       setSelected(i);
       if (i !== null)
@@ -392,8 +472,14 @@ export function SketchEditor(props: {
           start: p,
           original: s.profiles[i]!,
           index: i,
+          hole: false,
           moved: false,
         };
+      return;
+    }
+    if (tool === "hole") {
+      setHoles([...holes, { id: newId(), u: p[0], v: p[1], diameter: holeSize }]);
+      setSelectedHole(holes.length);
       return;
     }
     if (tool === "polygon") {
@@ -401,11 +487,13 @@ export function SketchEditor(props: {
       else setPending({ kind: "polygon", points: [p] });
       return;
     }
-    if (pending && pending.kind === tool) {
-      if (finishShape(tool, pending.start, aim(pending, p))) setPending(null);
+    const kind = tool === "regular" ? "circle" : tool;
+    const sides = tool === "regular" ? polygonSides : undefined;
+    if (pending && pending.kind === kind && pending.sides === sides) {
+      if (finishShape(kind, pending.start, aim(pending, p), sides)) setPending(null);
       return;
     }
-    setPending({ kind: tool, start: p, pressed });
+    setPending({ kind, start: p, pressed, ...(sides && { sides }) });
   };
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -427,9 +515,14 @@ export function SketchEditor(props: {
       const dx = p[0] - d.start[0];
       const dy = p[1] - d.start[1];
       if (dx === 0 && dy === 0 && !d.moved) return;
-      if (!d.moved) undoStack.current.push(s.profiles);
+      if (!d.moved) remember();
       d.moved = true;
-      const moved = moveProfile(d.original, dx, dy);
+      if (d.hole) {
+        const h = d.original as DraftHole;
+        const moved = { ...h, u: round(h.u + dx), v: round(h.v + dy) };
+        return props.onHoles?.(holes.map((q, i) => (i === d.index ? moved : q)));
+      }
+      const moved = moveProfile(d.original as Profile, dx, dy);
       onChange({
         ...s,
         profiles: s.profiles.map((q, i) => (i === d.index ? moved : q)),
@@ -445,7 +538,8 @@ export function SketchEditor(props: {
     drag.current = null;
     if (pending && pending.kind !== "polygon" && pending.pressed) {
       const p = snap(e);
-      if (!same(p, pending.start) && finishShape(pending.kind, pending.start, aim(pending, p))) setPending(null);
+      if (!same(p, pending.start) && finishShape(pending.kind, pending.start, aim(pending, p), pending.sides))
+        setPending(null);
       else setPending({ ...pending, pressed: false });
     }
   };
@@ -462,6 +556,11 @@ export function SketchEditor(props: {
   };
 
   const removeSelected = () => {
+    if (selectedHole !== null) {
+      setHoles(holes.filter((_, i) => i !== selectedHole));
+      setSelectedHole(null);
+      return;
+    }
     if (selected === null) return;
     setProfiles(s.profiles.filter((_, i) => i !== selected));
     setSelected(null);
@@ -477,8 +576,8 @@ export function SketchEditor(props: {
         e.preventDefault();
         const next = redoStack.current.pop();
         if (next) {
-          undoStack.current.push(s.profiles);
-          onChange({ ...s, profiles: next });
+          undoStack.current.push(now());
+          restore(next);
         }
         return;
       }
@@ -487,9 +586,10 @@ export function SketchEditor(props: {
         if (pending) return setPending(null);
         const prev = undoStack.current.pop();
         if (prev) {
-          redoStack.current.push(s.profiles);
-          onChange({ ...s, profiles: prev });
+          redoStack.current.push(now());
+          restore(prev);
           setSelected(null);
+          setSelectedHole(null);
         }
         return;
       }
@@ -534,6 +634,7 @@ export function SketchEditor(props: {
         else if (m2p) setM2p(null);
         else if (pending) setPending(null);
         else if (selected !== null) setSelected(null);
+        else if (selectedHole !== null) setSelectedHole(null);
         return;
       }
       if (e.key === "Enter" && pending?.kind === "polygon") {
@@ -552,7 +653,7 @@ export function SketchEditor(props: {
         setM2p({ first: null });
         return;
       }
-      const t = TOOLS.find((x) => x.key === key);
+      const t = tools.find((x) => x.key === key);
       if (t) {
         setTool(t.tool);
         setPending(null);
@@ -570,7 +671,7 @@ export function SketchEditor(props: {
       ? "Mid between 2 points: click the second point. The point halfway is used. Esc cancels."
       : "Mid between 2 points: click the first point (snaps help). Esc cancels."
     : (spun && tool !== "select" ? "Draw half of the part's outline, right of the spin line. " : "") +
-      TOOLS.find((t) => t.tool === tool)!.hint;
+      (tools.find((t) => t.tool === tool) ?? TOOLS[0]!).hint;
   const sel = selected !== null ? s.profiles[selected] : undefined;
   const depths = useMemo(() => nestingDepths(s.profiles), [s.profiles]);
   useEffect(() => setOffsetError(null), [selected]);
@@ -600,7 +701,7 @@ export function SketchEditor(props: {
         </span>
         <span className="divider" aria-hidden="true" />
         <div className="group" role="group" aria-label="Drawing tools">
-          {TOOLS.map((t) => (
+          {tools.map((t) => (
             <button
               key={t.tool}
               type="button"
@@ -613,8 +714,8 @@ export function SketchEditor(props: {
                 setPending(null);
               }}
             >
-              <Icon name={t.tool === "select" ? "pointer" : t.tool} />
-              {t.label}
+              <Icon name={t.tool === "select" ? "pointer" : t.tool === "regular" ? "hexagon" : t.tool} />
+              <span className="tool-label">{t.label}</span>
             </button>
           ))}
         </div>
@@ -757,6 +858,17 @@ export function SketchEditor(props: {
                   toScreen={toScreen}
                 />
               ))}
+              {holes.map((h, i) => (
+                <DraftHoleMark key={h.id} hole={h} selected={i === selectedHole} toScreen={toScreen} />
+              ))}
+              {tool === "hole" && cursor && !m2p && (
+                <circle
+                  className="hole-ghost"
+                  cx={toScreen(cursor)[0]}
+                  cy={toScreen(cursor)[1]}
+                  r={(holeSize / 2) * k}
+                />
+              )}
               <PendingShape
                 pending={pending}
                 cursor={pending && (cursor || anyTyped(typed)) ? aim(pending, cursor) : cursor}
@@ -810,6 +922,46 @@ export function SketchEditor(props: {
             </>
           )}
         </svg>
+      )}
+
+      {selectedHole !== null && holes[selectedHole] && props.view === "2d" && (
+        <div className="sketch-side glass" aria-label="Selected hole">
+          <div className="hole-head">
+            <span className="hole-name">{holeLabel(selectedHole)}</span>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Delete ${holeLabel(selectedHole)}`}
+              onClick={removeSelected}
+            >
+              <Icon name="trash" />
+            </button>
+          </div>
+          <div className="hole-grid">
+            {(
+              [
+                ["Centre: from the left", "Hole across", "u"],
+                ["Centre: up from the bottom", "Hole up", "v"],
+                ["Diameter", "Hole diameter", "diameter"],
+              ] as const
+            ).map(([label, name, key]) => (
+              <NumberField
+                key={key}
+                label={label}
+                name={name}
+                value={holes[selectedHole]![key]}
+                onCommit={(v) => {
+                  if (key === "diameter" && !(v > 0)) return;
+                  setHoles(holes.map((h, i) => (i === selectedHole ? { ...h, [key]: v } : h)));
+                }}
+              />
+            ))}
+          </div>
+          <p className="help">
+            It goes straight through the part. After Done it is a hole step, where you can give it a thread, a
+            counterbore or a depth.
+          </p>
+        </div>
       )}
 
       {sel && props.view === "2d" && (
@@ -870,9 +1022,40 @@ export function SketchEditor(props: {
           <span data-testid="sketch-cursor">
             {cursor
               ? `${across} ${mm(cursor[0])} · ${up} ${mm(cursor[1])}${hold.snap ? ` · ${SNAP_LABELS[hold.snap.kind]}` : ""}`
-              : `${s.profiles.length} shape${s.profiles.length === 1 ? "" : "s"} drawn`}
+              : `${s.profiles.length} shape${s.profiles.length === 1 ? "" : "s"} drawn` +
+                (holes.length ? ` · ${holes.length} hole${holes.length === 1 ? "" : "s"}` : "")}
           </span>
         </div>
+        {(tool === "hole" || tool === "regular") && props.view === "2d" && (
+          <div
+            className="next-side tool-options"
+            role="group"
+            aria-label={tool === "hole" ? "New holes" : "New polygon"}
+          >
+            <span className="next-side-title">
+              {tool === "hole" ? "New holes" : "Polygon"}
+              <small>{tool === "hole" ? "through the part" : "sized across its flats"}</small>
+            </span>
+            {tool === "hole" ? (
+              <NumberField
+                label="Diameter"
+                name="New hole diameter"
+                value={holeSize}
+                onCommit={(v) => v > 0 && setHoleSize(v)}
+                compact
+              />
+            ) : (
+              <NumberField
+                label="Sides"
+                name="Polygon sides"
+                unit=""
+                value={polygonSides}
+                onCommit={(v) => setPolygonSides(Math.max(3, Math.min(24, Math.round(v))))}
+                compact
+              />
+            )}
+          </div>
+        )}
         {tool === "polygon" && props.view === "2d" && (
           <form
             className="next-side"
@@ -1242,6 +1425,19 @@ function PendingShape({ pending, cursor, toScreen }: { pending: Pending; cursor:
     const [cx, cy] = toScreen(pending.start);
     const [ex, ey] = toScreen(cursor);
     const d = 2 * Math.hypot(cursor[0] - pending.start[0], cursor[1] - pending.start[1]);
+    if (pending.sides) {
+      const facing = (Math.atan2(cursor[1] - pending.start[1], cursor[0] - pending.start[0]) * 180) / Math.PI;
+      const corners = regularPolygon(pending.start, d, pending.sides, facing);
+      return (
+        <g className="pending">
+          <path d={"M" + corners.map((q) => toScreen(q).join(",")).join("L") + "Z"} />
+          <line x1={cx} y1={cy} x2={ex} y2={ey} />
+          <text className="dim-label" x={cx} y={cy} dy="-8" textAnchor="middle">
+            {mm(d)} across flats
+          </text>
+        </g>
+      );
+    }
     return (
       <g className="pending">
         <circle cx={cx} cy={cy} r={Math.hypot(ex - cx, ey - cy)} />
@@ -1465,7 +1661,8 @@ function AngleGuide(props: {
 
 /** The boxes at the pointer that show (and take) typed sizes while drawing, like AutoCAD's dynamic input. */
 function TypedBoxes(props: { pending: NonNullable<Pending>; typed: Typed; from: Point2; to: Point2; at: Point2 }) {
-  const labels = TYPED_FIELDS[props.pending.kind];
+  const labels =
+    props.pending.kind === "circle" && props.pending.sides ? ["Across flats"] : TYPED_FIELDS[props.pending.kind];
   const live = liveValues(props.pending.kind, props.from, props.to);
   const [x, y] = [props.at[0] + 18, props.at[1] + 18];
   if (props.typed.point !== undefined)
@@ -1540,6 +1737,25 @@ function Underlay(props: {
 }
 
 /** Which snaps are on, like AutoCAD's object snap settings, plus "mid between 2 points". */
+/** A hole placed on the face: its edge and a centre cross, like a hole on a drawing. */
+function DraftHoleMark(props: { hole: DraftHole; selected: boolean; toScreen: ToScreen }) {
+  const [x, y] = props.toScreen([props.hole.u, props.hole.v]);
+  const [ex] = props.toScreen([props.hole.u + props.hole.diameter / 2, props.hole.v]);
+  const r = Math.max(ex - x, 2);
+  const c = r + 5;
+  return (
+    <g className={`draft-hole${props.selected ? " selected" : ""}`} data-testid="draft-hole">
+      <circle cx={x} cy={y} r={r} />
+      <path className="centre-mark" d={`M${x - c},${y}H${x + c}M${x},${y - c}V${y + c}`} />
+      {props.selected && (
+        <text className="dim-label" x={x} y={y - r} dy="-8" textAnchor="middle">
+          Ø {mm(props.hole.diameter)}
+        </text>
+      )}
+    </g>
+  );
+}
+
 function SnapMenu(props: {
   value: { on: boolean; kinds: SnapKind[] };
   onChange: (v: { on: boolean; kinds: SnapKind[] }) => void;

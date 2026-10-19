@@ -13,9 +13,9 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('[data-testid="print-check"][data-check="fits"]')).toHaveAttribute("data-status", "ok");
 });
 
-test("Preview layers cuts the checked part into its real layers", async ({ page }) => {
+test("Slice cuts the checked part into its real layers", async ({ page }) => {
   // The starting part is a 60 × 40 × 30 open box with 2 mm walls and floor.
-  await page.getByRole("button", { name: "Preview layers" }).click();
+  await page.getByRole("button", { name: "Slice", exact: true }).click();
   await expect(host(page)).toHaveAttribute("data-layers", "150/150");
   await expect(info(page)).toHaveText(/^Layer 150 of 150: 29\.80 mm to 30\.00 mm, 384 mm² of material\. 2 walls\./);
   await page.screenshot({ path: `${OUT}layers-top.png` });
@@ -38,7 +38,7 @@ test("Preview layers cuts the checked part into its real layers", async ({ page 
 });
 
 test("the layer height is saved beside the design, and changing it re-slices without rebuilding", async ({ page }) => {
-  await page.getByRole("button", { name: "Preview layers" }).click();
+  await page.getByRole("button", { name: "Slice", exact: true }).click();
   await page.getByLabel("Layer height").selectOption("0.28");
   // 107 full layers reach 29.96 mm; a last thin one finishes the top.
   await expect(host(page)).toHaveAttribute("data-layers", "108/108");
@@ -51,7 +51,7 @@ test("the layer height is saved beside the design, and changing it re-slices wit
 });
 
 test("walls: as many as fit in a 2 mm wall, and a fin too thin for a line is reported", async ({ page }) => {
-  await page.getByRole("button", { name: "Preview layers" }).click();
+  await page.getByRole("button", { name: "Slice", exact: true }).click();
   await expect(host(page)).toHaveAttribute("data-layers", "150/150");
   await page.screenshot({ path: `${OUT}layers-walls.png` });
   // Two 0.42 mm walls from each side fit in the 2 mm wall (4 × 0.42 = 1.68 mm); a third from each side wouldn't.
@@ -66,7 +66,7 @@ test("walls: as many as fit in a 2 mm wall, and a fin too thin for a line is rep
   await page.getByLabel("Wall thickness", { exact: true }).fill("0.3");
   await current(page);
   await page.getByRole("button", { name: "Print Studio" }).click();
-  await page.getByRole("button", { name: "Preview layers" }).click();
+  await page.getByRole("button", { name: "Slice", exact: true }).click();
   await expect(page.getByTestId("thin-warning")).toContainText("thinner than one 0.42 mm line");
   await expect(info(page)).toContainText("Too thin for any wall.");
 });
@@ -76,12 +76,12 @@ test("changing the design in Design and coming back slices the new part", async 
   await page.getByLabel("Height", { exact: true }).fill("10");
   await current(page);
   await page.getByRole("button", { name: "Print Studio" }).click();
-  await page.getByRole("button", { name: "Preview layers" }).click();
+  await page.getByRole("button", { name: "Slice", exact: true }).click();
   await expect(host(page)).toHaveAttribute("data-layers", "50/50");
 });
 
 test("Export G-code writes the printer's file and checks it before saving", async ({ page }) => {
-  await page.getByRole("button", { name: "Preview layers" }).click();
+  await page.getByRole("button", { name: "Slice", exact: true }).click();
   await expect(host(page)).toHaveAttribute("data-layers", "150/150");
   // The starting printer is a Bambu Lab A1: its G-code has to go inside Bambu's own 3MF, which isn't written yet.
   await expect(page.getByTestId("gcode-blocked")).toContainText("Bambu printers take G-code packed in Bambu's own 3MF");
@@ -131,4 +131,38 @@ test("Export G-code writes the printer's file and checks it before saving", asyn
       sparse: true,
     }),
   );
+});
+
+test("one click on Slice shows the print: time, filament and layers, from G-code that was checked", async ({
+  page,
+}) => {
+  // The starting printer is a Bambu Lab A1: its file can't be saved yet, but the print is still worked out.
+  await page.getByRole("button", { name: "Slice", exact: true }).click();
+  await expect(host(page)).toHaveAttribute("data-layers", "150/150");
+  const result = page.getByTestId("slice-result");
+  await expect(result).toContainText("Every line checked inside the part and the printer.");
+  await expect(page.getByTestId("slice-layers")).toHaveText("150");
+  await expect(result).toContainText("layers, 30 mm");
+  // The open box takes 15–30 g of PLA (see the G-code test), and some minutes at 20–60 mm/s.
+  const grams = Number((await page.getByTestId("slice-filament").textContent())!.replace(" g", ""));
+  expect(grams).toBeGreaterThan(15);
+  expect(grams).toBeLessThan(30);
+  await expect(page.getByTestId("slice-time")).toHaveText(/^(\d+ h \d\d min|\d+ min)$/);
+  const [h, m] = /(?:(\d+) h )?(\d+) min/.exec((await page.getByTestId("slice-time").textContent())!)!.slice(1);
+  const minutes = Number(h ?? 0) * 60 + Number(m);
+  expect(minutes).toBeGreaterThan(20);
+  expect(minutes).toBeLessThan(400);
+  await page.screenshot({ path: `${OUT}slice-result.png` });
+
+  // A thinner layer height slices again: more layers, longer.
+  await page.getByLabel("Layer height").selectOption("0.12");
+  await expect(page.getByTestId("slice-layers")).toHaveText("250");
+  const [h2, m2] = /(?:(\d+) h )?(\d+) min/.exec((await page.getByTestId("slice-time").textContent())!)!.slice(1);
+  expect(Number(h2 ?? 0) * 60 + Number(m2)).toBeGreaterThan(minutes);
+
+  // The Print tab of the ribbon slices too, and goes back to the part.
+  await page.getByRole("button", { name: "Show the part again" }).click();
+  await expect(host(page)).not.toHaveAttribute("data-layers", /.*/);
+  await page.getByRole("button", { name: "Slice the part" }).click();
+  await expect(page.getByTestId("slice-layers")).toHaveText("250");
 });

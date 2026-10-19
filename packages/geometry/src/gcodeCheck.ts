@@ -19,6 +19,8 @@ export interface GcodeExpectations {
   maxBedTemp?: number;
   /** Where plastic may go outside the part on the first layer (the prime line): x1, y1, x2, y2. */
   primeArea?: [number, number, number, number];
+  /** How fast the print head speeds up and slows down, mm/s², for the time estimate. */
+  acceleration?: number;
 }
 
 export interface GcodeReport {
@@ -34,6 +36,51 @@ export interface GcodeReport {
   plastic: number;
   moves: number;
   lines: number;
+  /** About how long the moves take, seconds: heating up and the printer's own planning aren't counted. */
+  seconds: number;
+}
+
+/** A move as the time estimate sees it: how far, at what top speed, and which way (zero for filament only). */
+export interface TimedMove {
+  length: number;
+  speed: number;
+  direction: [number, number, number];
+}
+
+/** A rough guess at how fast printers speed up and slow down, mm/s², when the printer's own figure isn't known. */
+export const TYPICAL_ACCELERATION = 1000;
+
+/**
+ * How long the moves take, seconds. Each move speeds up and slows down at `acceleration`; going straight on keeps the
+ * speed, a corner slows to the cosine of its angle and a turn of 90° or more stops, as do filament-only moves.
+ */
+export function movesTime(moves: TimedMove[], acceleration = TYPICAL_ACCELERATION): number {
+  const n = moves.length;
+  const a = acceleration;
+  // The speed at the start of each move (and the end of the last one).
+  const at = new Array<number>(n + 1).fill(0);
+  for (let i = 1; i < n; i++) {
+    const p = moves[i - 1]!;
+    const m = moves[i]!;
+    const cos = p.direction[0] * m.direction[0] + p.direction[1] * m.direction[1] + p.direction[2] * m.direction[2];
+    at[i] = Math.min(p.speed, m.speed) * Math.max(0, cos);
+  }
+  // A speed that can't be reached, or slowed from, within a move's length is lowered.
+  for (let i = n - 1; i >= 0; i--) at[i] = Math.min(at[i]!, Math.sqrt(at[i + 1]! ** 2 + 2 * a * moves[i]!.length));
+  for (let i = 0; i < n; i++) at[i + 1] = Math.min(at[i + 1]!, Math.sqrt(at[i]! ** 2 + 2 * a * moves[i]!.length));
+  let t = 0;
+  moves.forEach((m, i) => {
+    const [v0, v1, d] = [at[i]!, at[i + 1]!, m.length];
+    if (d <= 0 || m.speed <= 0) return;
+    const up = (m.speed ** 2 - v0 ** 2) / (2 * a);
+    const down = (m.speed ** 2 - v1 ** 2) / (2 * a);
+    if (up + down <= d) t += (m.speed - v0) / a + (m.speed - v1) / a + (d - up - down) / m.speed;
+    else {
+      const peak = Math.sqrt((2 * a * d + v0 ** 2 + v1 ** 2) / 2);
+      t += (peak - v0) / a + (peak - v1) / a;
+    }
+  });
+  return t;
 }
 
 const MIN_NOZZLE_TEMP = 170;
@@ -110,6 +157,7 @@ export function checkGcode(text: string, expect: GcodeExpectations): GcodeReport
   let feed = 0;
   let filament = 0;
   let moves = 0;
+  const timed: TimedMove[] = [];
   let lastExtrusionLine = -1;
   let nozzleOff = -1;
   let bedOff = -1;
@@ -193,6 +241,10 @@ export function checkGcode(text: string, expect: GcodeExpectations): GcodeReport
           if (v < -1e-6 || v > max + 1e-6) problem(`A move goes outside the printer: ${axis} ${v} (${where}).`);
         const pushed = ne - e;
         const length = Math.hypot(nx - x, ny - y);
+        const path = Math.hypot(nx - x, ny - y, nz - z);
+        if (path > 1e-9)
+          timed.push({ length: path, speed: feed, direction: [(nx - x) / path, (ny - y) / path, (nz - z) / path] });
+        else if (Math.abs(pushed) > 1e-9) timed.push({ length: Math.abs(pushed), speed: feed, direction: [0, 0, 0] });
         if (pushed > 1e-9 && length > 0) {
           if (cmd === "G0") problem(`Plastic is pushed on a travel move (${where}).`);
           if (nz !== z) problem(`Plastic is pushed while moving up or down (${where}).`);
@@ -256,5 +308,6 @@ export function checkGcode(text: string, expect: GcodeExpectations): GcodeReport
     plastic: filament * area,
     moves,
     lines: lines.length,
+    seconds: movesTime(timed, expect.acceleration),
   };
 }

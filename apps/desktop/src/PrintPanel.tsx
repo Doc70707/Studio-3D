@@ -50,6 +50,29 @@ export type LayerPreview =
       thinLayers: number[];
     };
 
+/** What slicing came to: the G-code written from the layers and read back, or why it couldn't be. */
+export type SliceSummary =
+  | { status: "writing" }
+  | { status: "failed"; problem: string }
+  | {
+      status: "ready";
+      layers: number;
+      height: number;
+      /** Filament, mm. */
+      filament: number;
+      grams: number;
+      /** About how long the moves take, seconds. */
+      seconds: number;
+    };
+
+/** "1 h 05 min", "38 min" or "under a minute". */
+export function duration(seconds: number): string {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 1) return "under a minute";
+  const h = Math.floor(minutes / 60);
+  return h ? `${h} h ${String(minutes % 60).padStart(2, "0")} min` : `${minutes} min`;
+}
+
 /** The offered values, plus the current one if a file holds another. */
 const withCurrent = (values: number[], current: number) =>
   (values.includes(current) ? values : [...values, current]).sort((a, b) => a - b);
@@ -91,6 +114,8 @@ interface Props {
   settings: SlicerSettings;
   onSettings: (patch: { layerHeight?: number; walls?: number; infill?: number }) => void;
   layers: LayerPreview | null;
+  /** The sliced part's print, once its G-code is written and checked. */
+  summary: SliceSummary | null;
   onLayerView: (on: boolean) => void;
   onLayer: (index: number) => void;
   state: PrintState;
@@ -102,6 +127,44 @@ interface Props {
   onOpenInSlicer: (slicer: SlicerProgram) => void;
   onBackToDesign: () => void;
   busy: boolean;
+}
+
+/** The slice at a glance: how long, how much filament, how many layers, and that the file was checked. */
+function SliceResult({ summary }: { summary: SliceSummary }) {
+  if (summary.status === "writing")
+    return (
+      <p className="props-note" role="status" data-testid="slice-result">
+        Writing the toolpaths and checking them…
+      </p>
+    );
+  if (summary.status === "failed")
+    return (
+      <p className="issue error" role="alert" data-testid="slice-result">
+        The toolpaths didn't pass their check: {summary.problem}
+      </p>
+    );
+  return (
+    <div className="slice-result" role="status" data-testid="slice-result">
+      <div className="slice-figures">
+        <span>
+          <strong data-testid="slice-time">{duration(summary.seconds)}</strong>
+          <small>printing</small>
+        </span>
+        <span>
+          <strong data-testid="slice-filament">{Math.round(summary.grams)} g</strong>
+          <small>{(summary.filament / 1000).toFixed(2)} m of PLA</small>
+        </span>
+        <span>
+          <strong data-testid="slice-layers">{summary.layers}</strong>
+          <small>layers, {Math.round(summary.height * 100) / 100} mm</small>
+        </span>
+      </div>
+      <p className="props-note">
+        <Icon name="check" /> Every line checked inside the part and the printer. The time is a rough guess at Studio
+        3D's own speeds (20 to 60 mm/s), without heating up; your printer's own estimate will differ.
+      </p>
+    </div>
+  );
 }
 
 export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(props, ref) {
@@ -247,21 +310,32 @@ export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(
             </select>
           </div>
         </div>
-        <button
-          type="button"
-          className="layer-toggle"
-          aria-pressed={!!layers}
-          disabled={!layers && state.kind !== "checked"}
-          onClick={() => props.onLayerView(!layers)}
-          title={state.kind !== "checked" ? "The checks need to finish first" : "Cut the part into its printed layers"}
-        >
-          {layers ? "Show the part" : "Preview layers"}
-        </button>
+        {layers ? (
+          <button type="button" className="layer-toggle" onClick={() => props.onLayerView(false)}>
+            Show the part
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="primary slice-button"
+            disabled={state.kind !== "checked"}
+            onClick={() => props.onLayerView(true)}
+            title={
+              state.kind !== "checked"
+                ? "The checks need to finish first"
+                : "Cut the part into its printed layers with Studio 3D's own slicer, and work out the print"
+            }
+          >
+            <Icon name="layers" />
+            Slice
+          </button>
+        )}
         {layers?.status === "slicing" && (
           <p className="props-note" role="status" data-testid="slicing">
             Slicing…
           </p>
         )}
+        {layers?.status === "sliced" && props.summary && <SliceResult summary={props.summary} />}
         {layers?.status === "failed" && (
           <p className="issue error" role="alert">
             The part couldn't be sliced: {layers.error}

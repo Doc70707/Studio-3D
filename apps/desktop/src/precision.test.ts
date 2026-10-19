@@ -13,6 +13,7 @@ import {
   parseDirection,
   along,
   parsePoint,
+  regularPolygon,
   sideOf,
   snapScene,
 } from "./precision";
@@ -271,5 +272,28 @@ describe("directions as bearings or angles", () => {
     expect(along([5, 5], 10, parseDirection("N 45 E")!)).toEqual(
       [5 + 10 / Math.SQRT2, 5 + 10 / Math.SQRT2].map((v) => Math.round(v * 1e6) / 1e6),
     );
+  });
+});
+
+describe("regular polygons", () => {
+  it("a hexagon 5.5 mm across its flats, like an M3 nut, with a flat facing the pointer", () => {
+    const hex = regularPolygon([10, 0], 5.5, 6, 0);
+    expect(hex).toHaveLength(6);
+    // The two upright flats are 5.5 apart; the corners sit 5.5 / cos 30° apart.
+    const xs = hex.map((p) => p[0]);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(5.5, 5);
+    const corner = Math.hypot(hex[0]![0] - 10, hex[0]![1]);
+    expect(2 * corner).toBeCloseTo(5.5 / Math.cos(Math.PI / 6), 5);
+    // Every side is the same length.
+    const sides = hex.map((p, i) =>
+      Math.hypot(...([0, 1].map((k) => hex[(i + 1) % 6]![k]! - p[k]!) as [number, number])),
+    );
+    for (const s of sides) expect(s).toBeCloseTo(sides[0]!, 5);
+  });
+
+  it("turns so a flat's middle points the given way", () => {
+    const square = regularPolygon([0, 0], 10, 4, 90);
+    // A square facing up has its top side flat at y = 5.
+    expect(square.filter((p) => Math.abs(p[1] - 5) < 1e-6)).toHaveLength(2);
   });
 });

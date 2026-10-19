@@ -147,6 +147,10 @@ What works today:
 - Next side by length and bearing, like Civil 3D's line by bearing: with the Outline tool, type a length and a
   direction as a surveyor's bearing (`N 45 E`, `S 30 15 W` with minutes) or as an angle, see the side previewed, and
   Add side (or Enter). Close outline finishes it.
+- More tools when sketching on a face: Hole (H) puts holes right where you click (with snaps), straight through the
+  part and shown in 3D at once; pick one to type its exact place and size, drag it, or delete it. Done turns them
+  into ordinary hole steps (one undo takes the sketch and its holes back), where threads, counterbores and depth are
+  set. Polygon (P) draws a hexagon or any equal-sided shape sized across its flats, the way nuts are, for nut traps.
 - Text contrast is checked by a test for every theme and accent, and the app respects Windows' reduced motion, reduced transparency and high
   contrast settings.
 
