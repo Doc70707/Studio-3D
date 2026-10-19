@@ -28,6 +28,9 @@ import {
   type StlReport,
 } from "@studio3d/geometry";
 import {
+  threadSettingsFor,
+  withThread,
+  type ThreadSettings,
   PLATE_PLANE,
   SHAPES,
   boxSideFace,
@@ -82,6 +85,12 @@ import { MenuBar, type Menu } from "./MenuBar";
 import { allows, interactionMode } from "./interaction";
 import { SketchEditor, type SketchDraft } from "./SketchEditor";
 import { faceForHoles, holeSteps } from "./faceHoles";
+import { ThreadDialog } from "./ThreadDialog";
+import { cosmeticThreadLines } from "./cosmeticThreads";
+import { ContextMenu, snapShape, type MenuCommand, type SnapChoice } from "./ContextMenu";
+import { toggleSnap, useSnaps } from "./snapSettings";
+import { SKETCH_ONLY, SNAPS_3D, describeEdge, distance, edgeAt, findSnap3, type Snap3, type Vec3 } from "./snap3d";
+import { SNAP_KINDS, SNAP_LABELS, type SnapKind } from "./precision";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
 import { Icon } from "./Icon";
@@ -158,7 +167,29 @@ export function App() {
   /** The workspace: Design (build the part) or Print Studio (check it and get it ready for a printer). */
   const [workspace, setWorkspace] = useState<"design" | "print">("design");
   const printing = workspace === "print";
-  const mode = interactionMode({ sketching: !!draft, picking, moving: moveBy !== null, printing });
+  /** The Thread dialog: the hole being threaded and the settings being tried (previewed in the 3D view). */
+  const [threadEdit, setThreadEdit] = useState<{ id: string; settings: ThreadSettings } | null>(null);
+  /** Measure (D): the first and second points, each on a snap or on the part or plate. */
+  const [measure, setMeasure] = useState<{ a: Vec3 | null; b: Vec3 | null } | null>(null);
+  /** Where the pointer would put the next measuring point, shown as a live line from the first. */
+  const [measureCursor, setMeasureCursor] = useState<Vec3 | null>(null);
+  const [snaps, setSnaps] = useSnaps();
+  /** A snap picked from the right-click menu for the next point only (AutoCAD's snap override). */
+  const [snapOnce, setSnapOnce] = useState<SnapKind | null>(null);
+  /** The snap the pointer is on, drawn at its place in the 3D view. */
+  const [snapMark, setSnapMark] = useState<{ snap: Snap3; x: number; y: number } | null>(null);
+  /** The right-click menu, where it opened (window pixels). */
+  const [menu3d, setMenu3d] = useState<{ x: number; y: number } | null>(null);
+  const closeMenu3d = useCallback(() => setMenu3d(null), []);
+  const cancelThread = useCallback(() => setThreadEdit(null), []);
+  const rightDown = useRef<{ x: number; y: number } | null>(null);
+  const mode = interactionMode({
+    sketching: !!draft,
+    picking,
+    moving: moveBy !== null,
+    printing,
+    measuring: measure !== null,
+  });
   const hovered = useRef<string | null>(null);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
@@ -295,7 +326,17 @@ export function App() {
     () => ({ units: doc.units, features: doc.features }),
     [doc.units, doc.features],
   );
-  const shownDoc = useMemo(() => (draft ? withDraft(modelDoc, draft) : modelDoc), [modelDoc, draft]);
+  const shownDoc = useMemo(() => {
+    const threaded = threadEdit
+      ? {
+          ...modelDoc,
+          features: modelDoc.features.map((f) =>
+            f.id === threadEdit.id && f.type === "hole" ? withThread(f, threadEdit.settings) : f,
+          ),
+        }
+      : modelDoc;
+    return draft ? withDraft(threaded, draft) : threaded;
+  }, [modelDoc, draft, threadEdit]);
 
   // Rebuild real geometry whenever the document changes and its values are valid.
   const inputIssues = validateDocument(shownDoc);
@@ -584,6 +625,105 @@ export function App() {
     return hit && id ? { ...hit, id } : null;
   };
 
+  /**
+   * Where a measuring point goes for the pointer: a snap on the part's own edges and faces if one is near (or the snap
+   * picked for this point), else the point on the part, else the point on the plate.
+   */
+  const snapAt = (x: number, y: number, from: Vec3 | null, only: SnapKind | null = snapOnce, strict = false) => {
+    const vp = viewportRef.current;
+    const mesh = meshRef.current;
+    if (!vp) return { point: null, snap: null };
+    const hit = vp.pickPoint(x, y);
+    const plate = hit ? null : vp.pickPlate(x, y);
+    const model = mesh ? { edges: mesh.edgeInfo, faces: mesh.faceInfo } : { edges: [], faces: [] };
+    const base = { pointer: [x, y] as [number, number], toScreen: (p: Vec3) => vp.toClient(p), from, plate };
+    const forced = only ? findSnap3(model, { ...base, radius: 40, kinds: [only] }) : null;
+    if (strict) return { point: forced?.point ?? null, snap: forced };
+    // F3 turns the object snaps off; the grid snap stays as it is set.
+    const kinds = SNAPS_3D.filter((k) => snaps.kinds.includes(k) && (snaps.on || k === "grid"));
+    const snap = forced ?? (kinds.length ? findSnap3(model, { ...base, radius: 12, kinds }) : null);
+    return { point: snap?.point ?? hit ?? plate, snap };
+  };
+
+  /** What is under the pointer, for the right-click menu's title and commands. */
+  const underPointer = (x: number, y: number) => {
+    const vp = viewportRef.current;
+    const mesh = meshRef.current;
+    const edge =
+      vp && mesh
+        ? edgeAt({ edges: mesh.edgeInfo, faces: [] }, { pointer: [x, y], toScreen: (p) => vp.toClient(p), radius: 8 })
+        : null;
+    const hit = faceAt(x, y);
+    const info = hit && mesh ? mesh.faceInfo[hit.face] : undefined;
+    // A circle edge at the mouth of a hole belongs to the hole's wall: the same radius, centred on its axis.
+    const rim = edge !== null && mesh ? holeWallOfRim(mesh, edge) : -1;
+    const wall = rim >= 0 ? rim : info?.kind === "cylinder" && info.inside ? hit!.face : -1;
+    const ownerFace = wall >= 0 ? wall : hit?.face;
+    const owner =
+      mesh && ownerFace !== undefined ? doc.features.find((f) => f.id === mesh.owners[ownerFace]) : undefined;
+    const of = owner ? ` of ${owner.name}` : "";
+    const title =
+      edge !== null && mesh
+        ? `${describeEdge(mesh.edgeInfo[edge]!)}${of}`
+        : info?.kind === "plane"
+          ? `Flat face${of}`
+          : info?.kind === "cylinder"
+            ? info.inside
+              ? `Inside of a hole, Ø${Math.round(2 * info.radius! * 100) / 100 + 0} mm${of}`
+              : `Round face${of}`
+            : hit
+              ? `Curved face${of}`
+              : "Empty space";
+    return { title, hit, owner, holeWall: wall >= 0 };
+  };
+
+  /** Opens the Thread dialog on a hole step. */
+  const openThread = (id: string) => {
+    const h = doc.features.find((f): f is HoleFeature => f.id === id && f.type === "hole");
+    if (!h) return;
+    stopMeasure();
+    setSelection({ id, face: null });
+    setThreadEdit({ id, settings: threadSettingsFor(h) });
+  };
+  const applyThread = () => {
+    const h = doc.features.find((f): f is HoleFeature => f.id === threadEdit?.id && f.type === "hole");
+    if (!h || !threadEdit) return;
+    const next = withThread(h, threadEdit.settings);
+    // Settings the thread replaces (a clearance size, a head) are cleared; one undo step takes it all back.
+    const cleared = {
+      clearance: undefined,
+      head: undefined,
+      threadDepth: undefined,
+      simplified: undefined,
+      hand: undefined,
+    };
+    project.updateFeature(h.id, { ...cleared, ...next });
+    setThreadEdit(null);
+  };
+
+  const startMeasure = (a: Vec3 | null = null) => {
+    setSelection(null);
+    hoverPiece(null);
+    setMeasure({ a, b: null });
+    setMeasureCursor(null);
+  };
+  const stopMeasure = () => {
+    setMeasure(null);
+    setMeasureCursor(null);
+    setSnapOnce(null);
+    setSnapMark(null);
+  };
+
+  /** Shows the snap the pointer is on, placed relative to the 3D view. */
+  const markSnap = (snap: Snap3 | null) => {
+    const vp = viewportRef.current;
+    const host = hostRef.current;
+    const at = snap && vp ? vp.toClient(snap.point) : null;
+    if (!snap || !at || !host) return setSnapMark(null);
+    const r = host.getBoundingClientRect();
+    setSnapMark({ snap, x: at[0] - r.left, y: at[1] - r.top });
+  };
+
   const hoverPiece = (id: string | null) => {
     if (hovered.current === id) return;
     hovered.current = id;
@@ -592,6 +732,14 @@ export function App() {
   };
 
   const onHostPointerMove = (e: React.PointerEvent) => {
+    if (mode === "measure") {
+      if (e.buttons || viewportRef.current?.moving || !(e.target instanceof HTMLCanvasElement)) return;
+      const where = snapAt(e.clientX, e.clientY, measure?.a && !measure.b ? measure.a : null);
+      markSnap(where.snap);
+      setMeasureCursor(where.point);
+      showPointer(where.point);
+      return;
+    }
     if (!allows(mode, "pick-face")) {
       const still = !e.buttons && !viewportRef.current?.moving;
       showPointer(still ? (viewportRef.current?.pickPoint(e.clientX, e.clientY) ?? null) : null);
@@ -605,8 +753,26 @@ export function App() {
     setPickMessage(hit && !hit.outline ? "That face is curved. Pick a flat one." : pickPrompt);
   };
   const onHostPointerUp = (e: React.PointerEvent) => {
+    const right = rightDown.current;
+    rightDown.current = null;
+    // A right click that doesn't drag opens the menu; a right drag still pans.
+    if (e.button === 2 && right && Math.hypot(e.clientX - right.x, e.clientY - right.y) <= 4) {
+      if ((mode === "model" || mode === "measure") && e.target instanceof HTMLCanvasElement)
+        setMenu3d({ x: e.clientX, y: e.clientY });
+      return;
+    }
     const down = pointerDown.current;
     pointerDown.current = null;
+    if (mode === "measure") {
+      if (!down || e.button !== 0 || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+      if (!(e.target instanceof HTMLCanvasElement)) return;
+      const from = measure?.a && !measure.b ? measure.a : null;
+      const { point } = snapAt(e.clientX, e.clientY, from);
+      setSnapOnce(null);
+      if (!point) return;
+      setMeasure(!measure?.a || measure.b ? { a: point, b: null } : { a: measure.a, b: point });
+      return;
+    }
     if (!down || e.button !== 0 || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return; // a drag orbits
     if (!(e.target instanceof HTMLCanvasElement)) return; // a click on a floating panel, not the part
     if (allows(mode, "select")) {
@@ -669,6 +835,13 @@ export function App() {
   useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
+    if (measure?.a) {
+      const to = measure.b ?? measureCursor;
+      const d = to ? distance(measure.a, to) : 0;
+      return vp.setDimensions(
+        to && d > 1e-6 ? [{ from: measure.a, to, offset: [0, 0, 0], text: `${mmText(d)}`, kind: "feature" }] : [],
+      );
+    }
     const m = built?.measurements;
     if (!showSizes || !m || draft) return vp.setDimensions([]);
     const focused = built.doc.features.find((f) => f.id === focusId);
@@ -677,7 +850,16 @@ export function App() {
     // Print Studio is about the whole part on its plate: only its overall size.
     const own = focused && !printing ? featureDimensions(focused, m, built.doc) : [];
     vp.setDimensions(own.length ? own : partDimensions(m.min, m.max));
-  }, [built, showSizes, focusId, draft, printing]);
+  }, [built, showSizes, focusId, draft, printing, measure, measureCursor]);
+
+  // Cosmetic threads: dashed circles at the thread's full size where it starts and ends.
+  useEffect(() => {
+    const vp = viewportRef.current;
+    const m = built?.measurements;
+    if (!vp) return;
+    const lines = m && !draft && !printing ? cosmeticThreadLines(built.doc, m) : [];
+    vp.setThreadMarks(lines.length ? new Float32Array(lines) : null);
+  }, [built, draft, printing]);
 
   // The selected piece: tinted, with move arrows in its middle. Redrawn with each new model.
   const selected = selection ? doc.features.find((f) => f.id === selection.id) : undefined;
@@ -900,6 +1082,12 @@ export function App() {
         stopPicking();
         return;
       }
+      // Esc lets go of a snap picked for the next point first, then leaves Measure.
+      if (mode === "measure" && e.key === "Escape") {
+        if (snapOnce) setSnapOnce(null);
+        else stopMeasure();
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (mod && !allows(mode, "file-keys")) return; // the sketch screen has its own undo
@@ -989,6 +1177,16 @@ export function App() {
         setShowSizes((v) => !v);
         return;
       }
+      // F3 turns object snaps off and on, as in AutoCAD; D measures (AutoCAD's DIST).
+      if (e.key === "F3" && (mode === "model" || mode === "measure")) {
+        e.preventDefault();
+        setSnaps({ ...snaps, on: !snaps.on });
+        return;
+      }
+      if (key === "d" && mode === "model" && !e.shiftKey) {
+        startMeasure();
+        return;
+      }
       // With nothing else for Escape to do, it leaves full screen, then Focus canvas (dialogs handle their own).
       if (e.key === "Escape" && !dialog && !calibrating && !e.shiftKey) {
         const leave = escapeLeaves({ fullScreen, focus });
@@ -1001,6 +1199,8 @@ export function App() {
   }, [
     project,
     mode,
+    snaps,
+    snapOnce,
     stopPicking,
     selection,
     selected,
@@ -1124,6 +1324,20 @@ export function App() {
           reason: noView,
         },
         { label: "Show sizes", shortcut: "M", checked: showSizes, onSelect: () => setShowSizes((v) => !v) },
+        {
+          label: "Measure distance",
+          shortcut: "D",
+          checked: measure !== null,
+          onSelect: () => (measure ? stopMeasure() : startMeasure()),
+          disabled: webglError || printing || !!draft,
+          reason: noView ?? "Measure works on the design",
+        },
+        {
+          label: "Object snaps",
+          shortcut: "F3",
+          checked: snaps.on,
+          onSelect: () => setSnaps({ ...snaps, on: !snaps.on }),
+        },
         "separator" as const,
         { label: "Palettes", shortcut: "Ctrl+B", checked: panelShown, onSelect: togglePanel },
         {
@@ -1276,6 +1490,7 @@ export function App() {
     onRemove: project.removeFeature,
     onSketchOnFace: startPicking,
     onPickHoleFace: startHolePicking,
+    onThreadHole: openThread,
     onSketchOnPlate: sketchOnPlate,
     onRevolve: startRevolve,
     onEditSketch: editSketch,
@@ -1331,11 +1546,118 @@ export function App() {
       </Palette>
     );
   };
+  /** The 3D view's right-click menu: snaps that have something to snap to here, and commands for what is here. */
+  const contextMenu3d = (() => {
+    const vp = viewportRef.current;
+    const host = hostRef.current;
+    if (!menu3d || !vp || !host) return null;
+    const { x, y } = menu3d;
+    const under = underPointer(x, y);
+    const from = measure?.a && !measure.b ? measure.a : null;
+    // Snaps that only mean something in a sketch (crossings, tangents, single points) aren't listed here at all.
+    const snapsHere: SnapChoice[] = SNAP_KINDS.filter((kind) => !SKETCH_ONLY.includes(kind)).map((kind) => {
+      if (kind === "perpendicular" && !from)
+        return { kind, unavailable: "Works from the first point of a measurement" };
+      const found = snapAt(x, y, from, kind, true).snap;
+      return { kind, unavailable: found ? null : `No ${SNAP_LABELS[kind].toLowerCase()} near here` };
+    });
+    const flat = under.hit?.outline;
+    const commands: MenuCommand[] = [
+      measure
+        ? { label: "Stop measuring", shortcut: "Esc", run: stopMeasure }
+        : { label: "Measure from here", shortcut: "D", run: () => startMeasure(snapAt(x, y, null).point) },
+      ...(under.owner && !measure
+        ? [
+            {
+              label: `Select ${under.owner.name}`,
+              run: () => setSelection({ id: under.owner!.id, face: under.hit!.face }),
+            },
+          ]
+        : []),
+      ...(under.holeWall && !measure
+        ? [
+            under.owner?.type === "hole"
+              ? { label: `Thread ${under.owner.name}…`, run: () => openThread(under.owner!.id) }
+              : {
+                  label: "Thread this hole…",
+                  disabled: "Holes made with the Hole tool can be threaded; this one was cut another way",
+                  run: () => {},
+                },
+          ]
+        : []),
+      ...(flat && !measure
+        ? [
+            {
+              label: "Sketch on this face",
+              run: () => sketchOnFace(flat, meshRef.current?.owners[under.hit!.face]),
+            },
+          ]
+        : []),
+      { label: "Snapping on", shortcut: "F3", checked: snaps.on, run: () => setSnaps({ ...snaps, on: !snaps.on }) },
+      { label: "Show sizes", shortcut: "M", checked: showSizes, run: () => setShowSizes((v) => !v) },
+      { label: "Fit all", run: () => vp.zoomExtents() },
+    ];
+    return (
+      <ContextMenu
+        at={menu3d}
+        bounds={host.getBoundingClientRect()}
+        title={under.title}
+        snaps={snapsHere}
+        kept={snaps.on ? snaps.kinds : []}
+        snapping={snaps.on}
+        once={snapOnce}
+        onOnce={(kind) => {
+          setSnapOnce(kind);
+          if (!measure) startMeasure();
+        }}
+        onKeep={(kind) => (snaps.on ? toggleSnap(kind) : setSnaps({ on: true, kinds: [kind] }))}
+        commands={commands}
+        onClose={closeMenu3d}
+      />
+    );
+  })();
+  const threadHole = doc.features.find((f): f is HoleFeature => f.id === threadEdit?.id && f.type === "hole");
+  const partHeight = built ? built.measurements.max[2] - built.measurements.min[2] : 0;
+  const measured = measure?.a && measure.b ? measure : null;
+  const measureBar = measure && (
+    <div className="measure-bar glass" role="status" data-testid="measure-bar">
+      <Icon name="ruler" />
+      {measured ? (
+        <span data-testid="measure-result">
+          <strong>{mmText(distance(measured.a!, measured.b!))}</strong>
+          {" · "}left/right {mmText(Math.abs(measured.b![0] - measured.a![0]))} · front/back{" "}
+          {mmText(Math.abs(measured.b![1] - measured.a![1]))} · up {mmText(Math.abs(measured.b![2] - measured.a![2]))}
+        </span>
+      ) : (
+        <span>
+          {snapOnce ? `Next point snaps to ${SNAP_LABELS[snapOnce]}. ` : ""}
+          {measure.a ? "Click the second point." : "Click the first point. Right-click for snaps."}
+        </span>
+      )}
+      <button type="button" onClick={stopMeasure}>
+        Done
+      </button>
+    </div>
+  );
+
   const ribbonShown = !focus && !draft;
   const viewTab: RibbonTab = {
     id: "view",
     label: "View",
     groups: [
+      {
+        label: "Inspect",
+        items: [
+          {
+            icon: "ruler",
+            label: "Measure",
+            name: "Measure distance",
+            title: "Measure between two points, snapping to edges, corners and centres (D). Right-click for snaps.",
+            pressed: measure !== null,
+            onClick: () => (measure ? stopMeasure() : startMeasure()),
+          },
+        ],
+      },
       {
         label: "Palettes",
         items: [
@@ -1460,7 +1782,11 @@ export function App() {
       <main
         className="viewport-host"
         ref={hostRef}
-        onPointerDown={(e) => (pointerDown.current = { x: e.clientX, y: e.clientY })}
+        onPointerDown={(e) => {
+          if (e.button === 2) rightDown.current = { x: e.clientX, y: e.clientY };
+          else pointerDown.current = { x: e.clientX, y: e.clientY };
+        }}
+        onContextMenu={(e) => e.preventDefault()}
         onPointerMove={onHostPointerMove}
         onPointerUp={onHostPointerUp}
         data-camera-view={camera?.view ?? ""}
@@ -1490,6 +1816,38 @@ export function App() {
             <h2>The geometry engine couldn't start</h2>
             <p>{engineError}</p>
           </div>
+        )}
+        {measureBar}
+        {snapMark && mode === "measure" && (
+          <svg
+            className="snap-overlay"
+            data-testid="snap3d"
+            data-snap={snapMark.snap.kind}
+            data-point={snapMark.snap.point.map((v) => Math.round(v * 1000) / 1000 + 0).join(",")}
+            style={{ left: snapMark.x - 10, top: snapMark.y - 10 }}
+            width="20"
+            height="20"
+            viewBox="-10 -10 20 20"
+            aria-hidden="true"
+          >
+            {snapShape(snapMark.snap.kind, 0, 0, 6)}
+          </svg>
+        )}
+        {snapMark && mode === "measure" && (
+          <span className="snap-overlay-label" style={{ left: snapMark.x + 12, top: snapMark.y - 26 }}>
+            {SNAP_LABELS[snapMark.snap.kind]}
+          </span>
+        )}
+        {contextMenu3d}
+        {threadEdit && threadHole && (
+          <ThreadDialog
+            hole={threadHole}
+            settings={threadEdit.settings}
+            partHeight={partHeight}
+            onChange={(settings) => setThreadEdit({ ...threadEdit, settings })}
+            onApply={applyThread}
+            onCancel={cancelThread}
+          />
         )}
         {picking && (
           <div className="pick-hint glass" role="status">
@@ -1965,4 +2323,19 @@ function safeAreaStyle(area: string): CSSProperties | undefined {
   const [top, left, , right] = area.split(",").map(Number);
   if (top === undefined || left === undefined || right === undefined || Number.isNaN(top)) return undefined;
   return { "--safe-top": `${top}px`, "--safe-left": `${left}px`, "--safe-right": `${right}px` } as CSSProperties;
+}
+
+const mmText = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+
+/** The hole wall (an inside cylinder face) whose mouth a circle edge is, or -1. */
+function holeWallOfRim(mesh: MeshData, edge: number): number {
+  const e = mesh.edgeInfo[edge]!;
+  if (e.kind !== "circle" || !e.centre || !e.radius) return -1;
+  return mesh.faceInfo.findIndex((f) => {
+    if (f.kind !== "cylinder" || !f.inside || !f.axis || Math.abs(f.radius! - e.radius!) > 1e-6) return false;
+    const { point: p, direction: d } = f.axis;
+    const v = [0, 1, 2].map((i) => e.centre![i]! - p[i]!);
+    const t = v[0]! * d[0] + v[1]! * d[1] + v[2]! * d[2];
+    return Math.hypot(...v.map((x, i) => x - t * d[i]!)) < 1e-6;
+  });
 }

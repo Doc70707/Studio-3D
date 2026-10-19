@@ -73,35 +73,82 @@ export function constrain(
   return { point: exactPoint([from[0] + len * Math.cos(a), from[1] + len * Math.sin(a)]), angle };
 }
 
-export type SnapKind = "end" | "middle" | "centre" | "quadrant" | "intersection" | "perpendicular" | "nearest";
+export type SnapKind =
+  | "end"
+  | "middle"
+  | "centre"
+  | "geometric"
+  | "quadrant"
+  | "intersection"
+  | "perpendicular"
+  | "tangent"
+  | "nearest"
+  | "node"
+  | "grid";
 export interface Snap {
   kind: SnapKind;
   point: Point2;
 }
-/** When two snaps are equally near, the first in this list wins. */
-const PRIORITY: SnapKind[] = ["end", "intersection", "middle", "centre", "quadrant", "perpendicular", "nearest"];
+/** When two snaps are equally near, the first in this list wins. Grid comes last: it only applies when nothing else is near. */
+const PRIORITY: SnapKind[] = [
+  "end",
+  "intersection",
+  "middle",
+  "centre",
+  "node",
+  "geometric",
+  "quadrant",
+  "tangent",
+  "perpendicular",
+  "nearest",
+  "grid",
+];
 export const SNAP_LABELS: Record<SnapKind, string> = {
   end: "End",
   middle: "Middle",
   centre: "Centre",
+  geometric: "Shape centre",
   quadrant: "Quadrant",
   intersection: "Crossing",
   perpendicular: "Square to",
+  tangent: "Tangent",
   nearest: "On the line",
+  node: "Point",
+  grid: "Grid",
 };
 /** What each snap does, for the Snaps menu. */
 export const SNAP_HINTS: Record<SnapKind, string> = {
   end: "Corners and the ends of sides",
   middle: "Halfway along a side",
-  centre: "The middle of a circle",
+  centre: "The middle of a circle or hole",
+  geometric: "The centre of area of a closed shape",
   quadrant: "A circle's top, bottom, left and right",
   intersection: "Where two sides cross",
   perpendicular: "Square to a side, from the last corner",
+  tangent: "Just touching a circle, from the last corner",
   nearest: "Anywhere on a side or a circle",
+  node: "Single points, such as the sketch's origin",
+  grid: "The grid's points, when nothing else is near",
+};
+/** AutoCAD's names, typed or used as keys in the right-click menu. */
+export const SNAP_KEYS: Record<SnapKind, string> = {
+  end: "E",
+  middle: "M",
+  centre: "C",
+  geometric: "G",
+  quadrant: "Q",
+  intersection: "I",
+  perpendicular: "P",
+  tangent: "T",
+  nearest: "N",
+  node: "D",
+  grid: "R",
 };
 export const SNAP_KINDS = PRIORITY;
 /** On unless the user turns them off; "On the line" starts off, as in AutoCAD, since it grabs the pointer often. */
 export const DEFAULT_SNAPS: readonly SnapKind[] = PRIORITY.filter((k) => k !== "nearest");
+/** Snaps added after the first Snaps menu: switched on for people who saved their choices before these existed. */
+export const NEWER_SNAPS: readonly SnapKind[] = ["geometric", "tangent", "node", "grid"];
 
 type Segment = [Point2, Point2];
 
@@ -171,6 +218,10 @@ export interface SnapScene {
   sides: Segment[];
   /** Circles: centres, quadrants and points on them. */
   circles: { centre: Point2; radius: number }[];
+  /** Single points (the origin, hole centres). */
+  nodes?: Point2[];
+  /** Centres of area of closed shapes. */
+  centroids?: Point2[];
 }
 
 /** Everything in the sketch worth snapping to. */
@@ -183,13 +234,48 @@ export function snapScene(profiles: Profile[], faceEdges: Segment[], drawing: Po
     circles: profiles.flatMap((p) =>
       p.kind === "circle" ? [{ centre: [p.x, p.y] as Point2, radius: p.diameter / 2 }] : [],
     ),
+    nodes: [[0, 0]],
+    centroids: profiles.flatMap((p) => {
+      if (p.kind === "circle") return [];
+      const c = centroid(p.kind === "rectangle" ? profileSides(p).map((s) => s[0]) : p.points);
+      return c ? [c] : [];
+    }),
   };
+}
+
+/** The centre of area of a closed outline, or null if it has no area. */
+export function centroid(points: Point2[]): Point2 | null {
+  let a = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i]!;
+    const [xj, yj] = points[j]!;
+    const cross = xj * yi - xi * yj;
+    a += cross;
+    cx += (xj + xi) * cross;
+    cy += (yj + yi) * cross;
+  }
+  if (Math.abs(a) < 1e-12) return null;
+  return [cx / (3 * a), cy / (3 * a)];
+}
+
+/** Where lines from `from` just touch a circle (two points), or none when `from` is on or inside it. */
+export function tangentPoints(from: Point2, centre: Point2, radius: number): Point2[] {
+  const dx = from[0] - centre[0];
+  const dy = from[1] - centre[1];
+  const d = Math.hypot(dx, dy);
+  if (d <= radius + 1e-9) return [];
+  const a = Math.acos(radius / d);
+  const base = Math.atan2(dy, dx);
+  return [base + a, base - a].map((t) => [centre[0] + radius * Math.cos(t), centre[1] + radius * Math.sin(t)]);
 }
 
 /**
  * The snap nearest the pointer within `radius` (in screen pixels, measured with `toScreen`), or null. `from` is the
  * last corner placed: sides get a "square to" snap from it. Only the kinds in `kinds` are used. "On the line" only
- * applies when no other snap is near, so it never hides an end or a middle.
+ * applies when no other snap is near, so it never hides an end or a middle. With a `grid` step and the grid snap on,
+ * a pointer with nothing near goes to the nearest grid point.
  */
 export function findSnap(
   scene: SnapScene,
@@ -198,6 +284,7 @@ export function findSnap(
   radius: number,
   toScreen: (p: Point2) => Point2,
   kinds: readonly SnapKind[] = DEFAULT_SNAPS,
+  grid = 0,
 ): Snap | null {
   const [px, py] = toScreen(pointer);
   let best: Snap | null = null;
@@ -214,6 +301,8 @@ export function findSnap(
     }
   };
   for (const p of scene.points) consider("end", p);
+  for (const p of scene.nodes ?? []) consider("node", p);
+  for (const p of scene.centroids ?? []) consider("geometric", p);
   for (const [a, b] of scene.sides) {
     consider("end", a);
     consider("end", b);
@@ -229,6 +318,7 @@ export function findSnap(
       [0, -r],
     ] as const)
       consider("quadrant", [c[0] + dx, c[1] + dy]);
+    if (from) for (const t of tangentPoints(from, c, r)) consider("tangent", t);
   }
   // Crossings: only of sides near the pointer, so a busy sketch stays quick.
   const reach = radius * 2;
@@ -247,6 +337,10 @@ export function findSnap(
       const d = Math.hypot(pointer[0] - c[0], pointer[1] - c[1]);
       if (d > 1e-9) consider("nearest", [c[0] + ((pointer[0] - c[0]) * r) / d, c[1] + ((pointer[1] - c[1]) * r) / d]);
     }
+  }
+  if (!best && grid > 0 && kinds.includes("grid")) {
+    const g = (v: number) => Math.round(v / grid) * grid;
+    return { kind: "grid", point: exactPoint([g(pointer[0]), g(pointer[1])]) };
   }
   return best;
 }

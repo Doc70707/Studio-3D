@@ -1,6 +1,6 @@
 export { GeometryClient, type RebuildOutcome } from "./client";
 export { createGeometryWorker, createSlicerWorker } from "./createWorker";
-export type { Measurements, MeshData } from "./protocol";
+export type { EdgeInfo, FaceInfo, Measurements, MeshData } from "./protocol";
 export * from "./faces";
 export { checkBinaryStl, type StlReport } from "./stl-check";
 export { stlTo3mf, type ThreeMfOptions } from "./threemf";

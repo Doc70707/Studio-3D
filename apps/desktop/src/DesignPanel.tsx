@@ -99,6 +99,8 @@ interface Props {
   onSketchOnFace: () => void;
   /** Waits for a face to be clicked and puts the hole on it (null: a new hole). */
   onPickHoleFace: (id: string | null) => void;
+  /** Opens the Thread dialog for a hole. */
+  onThreadHole: (id: string) => void;
   onSketchOnPlate: () => void;
   onRevolve: () => void;
   onEditSketch: (id: string) => void;
@@ -384,6 +386,7 @@ export function useDesignPanel({
               issues={issuesOf(current.id)}
               onChange={(patch) => onChange(current.id, patch)}
               onPickHoleFace={sketching.onPickHoleFace}
+              onThreadHole={sketching.onThreadHole}
             />
           </section>
         )}
@@ -461,13 +464,21 @@ function Properties(props: {
   issues: Issue[];
   onChange: (patch: Patch) => void;
   onPickHoleFace: (id: string) => void;
+  onThreadHole: (id: string) => void;
 }) {
   const { step: f, doc, issues, onChange } = props;
   const first = doc.features[0]?.id === f.id;
   if (isShape(f)) return <ShapeProps shape={f} first={first} issues={issues} onChange={onChange} />;
   if (f.type === "hole")
     return (
-      <HoleProps hole={f} doc={doc} issues={issues} onChange={onChange} onPickFace={() => props.onPickHoleFace(f.id)} />
+      <HoleProps
+        hole={f}
+        doc={doc}
+        issues={issues}
+        onChange={onChange}
+        onPickFace={() => props.onPickHoleFace(f.id)}
+        onThread={() => props.onThreadHole(f.id)}
+      />
     );
   if (f.type === "sketch") return <SketchProps sketch={f} first={first} issues={issues} onChange={onChange} />;
   if (f.type === "hollow") return <HollowProps hollow={f} issues={issues} onChange={onChange} />;
@@ -650,6 +661,7 @@ function HoleProps(props: {
   issues: Issue[];
   onChange: (patch: Patch) => void;
   onPickFace: () => void;
+  onThread: () => void;
 }) {
   const { hole, issues, onChange } = props;
   const through = hole.depth === 0;
@@ -722,6 +734,10 @@ function HoleProps(props: {
         <input type="checkbox" checked={through} onChange={(e) => onChange({ depth: e.target.checked ? 0 : 5 })} />
         All the way through
       </label>
+      <button type="button" className="add thread-open" onClick={props.onThread}>
+        <Icon name="hole" />
+        {hole.thread ? "Thread settings…" : "Thread this hole…"}
+      </button>
       <ThreadPicker
         id={hole.id}
         name={hole.name}
@@ -781,7 +797,7 @@ function TappedOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (p
           title="A plain hole the tap drill size, to tap after printing or for a thread-forming screw. Builds faster."
           onClick={() => onChange({ simplified: true })}
         >
-          Simplified
+          Cosmetic
         </button>
       </div>
       {hole.simplified && (
@@ -1070,7 +1086,7 @@ function ThreadPicker(props: {
   );
 }
 
-const STANDARD_LABELS: Record<ThreadStandard, string> = {
+export const STANDARD_LABELS: Record<ThreadStandard, string> = {
   "ISO coarse": "Metric (ISO coarse)",
   "ISO fine": "Metric fine",
   UNC: "Inch coarse (UNC)",

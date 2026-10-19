@@ -3291,3 +3291,293 @@ button.link:hover {
     display: none; /* the pencil stays, with the sketch's name in its tooltip */
   }
 }
+
+/* ---------- Right-click menu (v0.37) ---------- */
+
+.context-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 248px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  background: var(--glass-strong);
+  font-size: var(--fs-body);
+  animation: menu-drop 140ms var(--ease);
+}
+.context-menu:focus {
+  outline: none;
+}
+.context-menu .context-title {
+  padding: 6px 10px 4px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+.context-menu .context-heading {
+  padding: 6px 10px 4px;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.context-menu .context-off {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.context-menu .menu-item {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px 0 6px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-weight: 450;
+}
+.context-menu .menu-item:hover,
+.context-menu .menu-item:focus {
+  outline: none;
+  background: var(--fill-hover);
+}
+.context-menu .menu-item[aria-disabled="true"] {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+  background: transparent;
+}
+.context-menu .menu-item[aria-checked="true"] .menu-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+.context-menu .context-snap {
+  display: grid;
+  grid-template-columns: 1fr 30px;
+  align-items: center;
+}
+.context-menu .context-keep {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  cursor: pointer;
+}
+.context-menu .menu-item kbd {
+  margin-left: 16px;
+}
+.context-menu .context-note {
+  margin: 2px 10px 4px;
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+/* Measure: a bar like the face-picking hint, and the snap marker drawn over the 3D view. */
+.measure-bar {
+  position: absolute;
+  top: calc(var(--safe-top, 76px) + 12px);
+  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px)) / 2);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - var(--view-bar-room) - 2 * var(--gap));
+  padding: 8px 8px 8px 16px;
+  border-radius: 16px;
+  background: var(--glass-strong);
+  font-weight: 500;
+  transform: translateX(-50%);
+  animation: materialize 320ms var(--ease);
+}
+.measure-bar > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.measure-bar .icon {
+  flex: none;
+  color: var(--warning);
+}
+.measure-bar button {
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  font-weight: 550;
+  cursor: pointer;
+}
+.measure-bar button:hover {
+  background: var(--fill-hover);
+}
+.snap-overlay {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  overflow: visible;
+}
+.snap-overlay rect,
+.snap-overlay path,
+.snap-overlay circle {
+  fill: none;
+  stroke: var(--warning);
+  stroke-width: 2;
+}
+.snap-overlay-label {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--glass-strong);
+  color: var(--warning);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* Eleven snaps: the Snaps list scrolls when the window is short, instead of running off the bottom. */
+.snap-menu {
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
+/* ---------- Thread an existing hole (v0.38) ---------- */
+
+.thread-dialog {
+  position: absolute;
+  z-index: 6;
+  top: calc(var(--safe-top, 76px) + 12px);
+  right: calc(var(--safe-right, 0px) + var(--view-bar-room) + var(--gap));
+  width: 340px;
+  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - var(--view-bar-room) - 2 * var(--gap));
+  max-height: calc(100% - var(--safe-top, 76px) - var(--safe-bottom, 0px) - 24px);
+  overflow-y: auto;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-strong);
+  display: grid;
+  gap: 10px;
+  animation: materialize 240ms var(--ease);
+}
+.thread-dialog header {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.thread-dialog header .icon {
+  color: var(--accent);
+  margin-top: 2px;
+}
+.thread-dialog h2 {
+  margin: 0;
+  font-size: var(--fs-title);
+}
+.thread-dialog header p,
+.thread-dialog .thread-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+.thread-dialog .thread-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.thread-dialog .thread-label {
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+.thread-dialog .segmented-small {
+  min-width: 0;
+}
+.thread-dialog .segmented-small button {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+}
+.thread-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--fs-small);
+}
+.thread-checks li {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  line-height: 1.4;
+}
+.thread-checks li.ok {
+  border-left: 3px solid var(--success);
+}
+.thread-checks li.warning {
+  border-left: 3px solid var(--warning);
+}
+.thread-checks li.error {
+  border-left: 3px solid var(--error);
+}
+.thread-checks .thread-fix {
+  justify-self: start;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(var(--accent-rgb) / 0.18);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.thread-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.thread-dialog footer button {
+  height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  font-weight: 600;
+  cursor: pointer;
+}
+.thread-dialog footer button.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.thread-dialog footer button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.thread-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin: 4px 0;
+  padding: 0 12px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.45);
+  border-radius: 10px;
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.thread-open:hover {
+  background: rgb(var(--accent-rgb) / 0.22);
+}

@@ -7,3 +7,4 @@ export * from "./threads";
 export * from "./recovery";
 export * from "./reference";
 export * from "./print";
+export * from "./holeThread";

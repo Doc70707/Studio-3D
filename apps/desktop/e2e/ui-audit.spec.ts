@@ -72,12 +72,26 @@ for (const [width, height] of SIZES)
     await page.mouse.click(b.x + b.width * 0.4, b.y + b.height * 0.4);
     await page.mouse.click(b.x + b.width * 0.6, b.y + b.height * 0.6);
     await look(page, "sketch-shape");
+    // The right-click menu near the bottom-right corner: it must open inside the drawing and fit.
+    await page.mouse.click(b.x + b.width - 30, b.y + b.height - 30, { button: "right" });
+    await expect(page.getByRole("menu", { name: "Right-click menu" })).toBeVisible();
+    await look(page, "sketch-menu");
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Cancel" }).click();
     for (const shape of ["Add box", "Add tube", "Add cone", "Add sphere"]) {
       await page.getByRole("button", { name: shape }).click();
       await current(page);
     }
     await look(page, "many-steps");
+    const v = (await page.getByTestId("viewport-canvas").boundingBox())!;
+    await page.mouse.click(v.x + v.width / 2, v.y + v.height / 2, { button: "right" });
+    await expect(page.getByRole("menu", { name: "Right-click menu" })).toBeVisible();
+    await look(page, "menu-3d");
+    await page.getByRole("menuitem", { name: "Measure from here" }).click();
+    await page.mouse.click(v.x + v.width / 2 + 60, v.y + v.height / 2 + 40);
+    await expect(page.getByTestId("measure-result")).toBeVisible();
+    await look(page, "measuring");
+    await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: "View", exact: true }).click();
     await page
       .getByTestId("ribbon")

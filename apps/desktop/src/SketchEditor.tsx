@@ -39,7 +39,6 @@ import {
   type Typed,
 } from "./dynamicInput";
 import {
-  DEFAULT_SNAPS,
   SNAP_HINTS,
   SNAP_KINDS,
   SNAP_LABELS,
@@ -61,6 +60,8 @@ import {
 } from "./precision";
 import { Icon } from "./Icon";
 import { NumberField } from "./NumberField";
+import { ContextMenu, SnapGlyph, snapShape, type SnapChoice } from "./ContextMenu";
+import { toggleSnap, useSnaps } from "./snapSettings";
 
 /** What is being drawn: the sketch itself, plus the face it sits on (in sketch coordinates). */
 export interface SketchDraft {
@@ -127,24 +128,6 @@ const TOOLS: { tool: Tool; label: string; key: string; hint: string }[] = [
 const holeLabel = (i: number) => `Hole ${i + 1}`;
 
 const SNAP_PX = 10;
-const SNAPS_KEY = "studio3d.snaps";
-/** The snaps turned on, and whether snapping is on at all (F3), kept on this computer like AutoCAD's OSNAP settings. */
-function readSnaps(): { on: boolean; kinds: SnapKind[] } {
-  try {
-    const r = JSON.parse(localStorage.getItem(SNAPS_KEY) ?? "null") as { on?: unknown; kinds?: unknown } | null;
-    const kinds = Array.isArray(r?.kinds) ? SNAP_KINDS.filter((k) => (r.kinds as unknown[]).includes(k)) : null;
-    return { on: typeof r?.on === "boolean" ? r.on : true, kinds: kinds ?? [...DEFAULT_SNAPS] };
-  } catch {
-    return { on: true, kinds: [...DEFAULT_SNAPS] };
-  }
-}
-function writeSnaps(v: { on: boolean; kinds: SnapKind[] }) {
-  try {
-    localStorage.setItem(SNAPS_KEY, JSON.stringify(v));
-  } catch {
-    // Storage can be refused; the settings then last until the app closes.
-  }
-}
 /** Angle steps the outline tool can click to, in degrees (0 = off). */
 const ANGLE_STEPS = [0, 15, 30, 45, 90];
 const round = (n: number) => Math.round(n * 100) / 100 + 0;
@@ -199,11 +182,12 @@ export function SketchEditor(props: {
   /** Ortho lock (F8): outline sides only go straight across or straight up. Shift flips it while held. */
   const [ortho, setOrtho] = useState(false);
   const [angleStep, setAngleStep] = useState(0);
-  const [snaps, setSnapsState] = useState(readSnaps);
-  const setSnaps = (v: { on: boolean; kinds: SnapKind[] }) => {
-    writeSnaps(v);
-    setSnapsState(v);
-  };
+  const [snaps, setSnaps] = useSnaps();
+  /** A snap picked from the right-click menu for the next point only (AutoCAD's snap override). */
+  const [once, setOnce] = useState<SnapKind | null>(null);
+  /** The right-click menu: where it opened, in window pixels and in sketch millimetres. */
+  const [menu, setMenu] = useState<{ x: number; y: number; at: Point2 } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const [snapMenu, setSnapMenu] = useState(false);
   /** Mid between 2 points: the next two clicks are averaged, and the drawing tool gets the point halfway. */
   const [m2p, setM2p] = useState<{ first: Point2 | null } | null>(null);
@@ -319,16 +303,23 @@ export function SketchEditor(props: {
       const free = { snap: null, angle: null };
       if (e.altKey) return { point: [round(raw[0]), round(raw[1])] as Point2, ...free };
       const last = drawing?.length ? drawing[drawing.length - 1]! : null;
-      const snapped = snaps.on ? findSnap(scene, raw, last, SNAP_PX, toScreen, snaps.kinds) : null;
+      // A snap picked for this point reaches further, and wins over everything else, as in AutoCAD.
+      const forced = once ? findSnap(scene, raw, last, SNAP_PX * 4, toScreen, [once], step) : null;
+      if (forced) return { point: forced.point, snap: forced, angle: null };
+      // F3 turns the object snaps off; the grid snap stays as it is set (AutoCAD keeps it on its own key, F9).
+      const objects = snaps.on ? snaps.kinds.filter((k) => k !== "grid") : [];
+      const snapped = objects.length ? findSnap(scene, raw, last, SNAP_PX, toScreen, objects) : null;
       if (snapped) return { point: snapped.point, snap: snapped, angle: null };
       if (last) {
         const held = constrain(last, raw, { ortho: ortho !== e.shiftKey, step: angleStep }, step);
         if (held.angle !== null) return { point: held.point, snap: null, angle: held.angle };
       }
-      const point: Point2 = [round(Math.round(raw[0] / step) * step), round(Math.round(raw[1] / step) * step)];
+      const point: Point2 = snaps.kinds.includes("grid")
+        ? [round(Math.round(raw[0] / step) * step), round(Math.round(raw[1] / step) * step)]
+        : [round(raw[0]), round(raw[1])];
       return { point, ...free };
     },
-    [fromScreen, toScreen, scene, drawing, ortho, angleStep, step, snaps],
+    [fromScreen, toScreen, scene, drawing, ortho, angleStep, step, snaps, once],
   );
   const snap = (e: Parameters<typeof locate>[0]) => locate(e).point;
 
@@ -446,6 +437,7 @@ export function SketchEditor(props: {
     }
     if (e.button !== 0) return;
     const at = snap(e);
+    setOnce(null); // a snap picked from the menu is for one point
     if (m2p && tool !== "select") {
       if (!m2p.first) return setM2p({ first: at });
       setM2p(null);
@@ -532,7 +524,14 @@ export function SketchEditor(props: {
 
   const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>) => {
     if (pan.current) {
+      const { x, y, cx, cy } = pan.current;
       pan.current = null;
+      // A right click that didn't drag opens the menu (a drag slides the drawing, as before).
+      if (e.button === 2 && Math.hypot(e.clientX - x, e.clientY - y) <= 4 && cam) {
+        setCam({ ...cam, cx, cy });
+        const rect = svgRef.current!.getBoundingClientRect();
+        setMenu({ x: e.clientX, y: e.clientY, at: fromScreen(e.clientX - rect.left, e.clientY - rect.top) });
+      }
       return;
     }
     drag.current = null;
@@ -631,6 +630,7 @@ export function SketchEditor(props: {
       }
       if (e.key === "Escape") {
         if (snapMenu) setSnapMenu(false);
+        else if (once) setOnce(null);
         else if (m2p) setM2p(null);
         else if (pending) setPending(null);
         else if (selected !== null) setSelected(null);
@@ -666,12 +666,14 @@ export function SketchEditor(props: {
   const errors = hasErrors(props.issues);
   const across = onPlate ? "Left / right" : spun ? "Out from the line" : "Across";
   const up = onPlate ? "Front / back" : spun ? "Height" : "Up";
-  const hint = m2p
-    ? m2p.first
-      ? "Mid between 2 points: click the second point. The point halfway is used. Esc cancels."
-      : "Mid between 2 points: click the first point (snaps help). Esc cancels."
-    : (spun && tool !== "select" ? "Draw half of the part's outline, right of the spin line. " : "") +
-      (tools.find((t) => t.tool === tool) ?? TOOLS[0]!).hint;
+  const hint = once
+    ? `Next point snaps to ${SNAP_LABELS[once]}: move near one and click. Esc cancels.`
+    : m2p
+      ? m2p.first
+        ? "Mid between 2 points: click the second point. The point halfway is used. Esc cancels."
+        : "Mid between 2 points: click the first point (snaps help). Esc cancels."
+      : (spun && tool !== "select" ? "Draw half of the part's outline, right of the spin line. " : "") +
+        (tools.find((t) => t.tool === tool) ?? TOOLS[0]!).hint;
   const sel = selected !== null ? s.profiles[selected] : undefined;
   const depths = useMemo(() => nestingDepths(s.profiles), [s.profiles]);
   useEffect(() => setOffsetError(null), [selected]);
@@ -691,6 +693,98 @@ export function SketchEditor(props: {
     setProfiles([...s.profiles, copy]);
     setSelected(s.profiles.length);
   };
+
+  /** What is under the pointer where the menu opened, in words, and the shape or hole there. */
+  const underMenu = (at: Point2): { title: string; shape: number | null; hole: number | null } => {
+    const near = findSnap(scene, at, null, SNAP_PX, toScreen, ["end", "centre", "node", "nearest"]);
+    const hole = hitHole(at);
+    const shape = hole === null ? hit(at) : null;
+    const onCircle = scene.circles.some(
+      (c) => Math.abs(Math.hypot(at[0] - c.centre[0], at[1] - c.centre[1]) - c.radius) * k <= SNAP_PX,
+    );
+    const what =
+      near?.kind === "end"
+        ? "Corner"
+        : near?.kind === "centre"
+          ? "Centre of a circle"
+          : near?.kind === "node"
+            ? "The sketch's origin"
+            : near?.kind === "nearest"
+              ? onCircle
+                ? "Edge of a circle"
+                : "Side"
+              : hole !== null
+                ? holeLabel(hole)
+                : shape !== null
+                  ? `${PROFILE_LABELS[s.profiles[shape]!.kind]} ${shape + 1}`
+                  : "Empty space";
+    return { title: `${what} · ${mm(at[0])}, ${mm(at[1])}`, shape, hole };
+  };
+  /** The snaps the menu offers: only the ones with something to snap to near where it opened. */
+  const menuSnaps = (at: Point2): SnapChoice[] => {
+    const last = drawing?.length ? drawing[drawing.length - 1]! : null;
+    return SNAP_KINDS.map((kind) => {
+      if ((kind === "perpendicular" || kind === "tangent") && !last)
+        return { kind, unavailable: "Works from the last corner of an outline being drawn" };
+      const found = findSnap(scene, at, last, SNAP_PX * 4, toScreen, [kind], step);
+      return { kind, unavailable: found ? null : `No ${SNAP_LABELS[kind].toLowerCase()} near here` };
+    });
+  };
+  const contextMenu = (() => {
+    if (!menu || !svgRef.current) return null;
+    const under = underMenu(menu.at);
+    const drawingTool = tool !== "select";
+    const commands = [
+      ...(pending?.kind === "polygon" && pending.points.length >= 3
+        ? [{ label: "Close outline", shortcut: "Enter", run: () => closePolygon(pending.points) }]
+        : []),
+      ...(pending ? [{ label: "Cancel this shape", shortcut: "Esc", run: () => setPending(null) }] : []),
+      ...(under.shape !== null
+        ? [
+            {
+              label: `Select ${PROFILE_LABELS[s.profiles[under.shape]!.kind]} ${under.shape + 1}`,
+              run: () => {
+                setTool("select");
+                setPending(null);
+                setSelectedHole(null);
+                setSelected(under.shape);
+              },
+            },
+          ]
+        : []),
+      ...(under.hole !== null
+        ? [
+            {
+              label: `Select ${holeLabel(under.hole)}`,
+              run: () => {
+                setTool("select");
+                setPending(null);
+                setSelected(null);
+                setSelectedHole(under.hole);
+              },
+            },
+          ]
+        : []),
+      ...(drawingTool ? [{ label: "Mid between 2 points", shortcut: "M", run: () => setM2p({ first: null }) }] : []),
+      { label: "Snapping on", shortcut: "F3", checked: snaps.on, run: () => setSnaps({ ...snaps, on: !snaps.on }) },
+      { label: "Fit the drawing", run: fit },
+    ];
+    return (
+      <ContextMenu
+        at={menu}
+        bounds={svgRef.current.getBoundingClientRect()}
+        title={under.title}
+        snaps={drawingTool ? menuSnaps(menu.at) : []}
+        kept={snaps.on ? snaps.kinds : []}
+        snapping={snaps.on}
+        once={once}
+        onOnce={setOnce}
+        onKeep={(kind) => (snaps.on ? toggleSnap(kind) : setSnaps({ on: true, kinds: [kind] }))}
+        commands={commands}
+        onClose={closeMenu}
+      />
+    );
+  })();
 
   return (
     <div className={`sketch-editor view-${props.view}`} data-testid="sketch-editor">
@@ -1170,6 +1264,7 @@ export function SketchEditor(props: {
           </div>
         )}
       </div>
+      {contextMenu}
     </div>
   );
 }
@@ -1828,34 +1923,5 @@ function SnapMenu(props: {
       </button>
       <p className="help">Hold Alt while clicking to ignore snaps for one click.</p>
     </div>
-  );
-}
-
-/** Each snap's mark: a square for an end, a triangle for a middle, a circle for a centre, a diamond for a quadrant. */
-function snapShape(kind: SnapKind, x: number, y: number, r = 6) {
-  switch (kind) {
-    case "end":
-      return <rect x={x - r} y={y - r} width={2 * r} height={2 * r} />;
-    case "middle":
-      return <path d={`M${x},${y - r}L${x + r},${y + r}L${x - r},${y + r}Z`} />;
-    case "centre":
-      return <circle cx={x} cy={y} r={r} />;
-    case "quadrant":
-      return <path d={`M${x},${y - r}L${x + r},${y}L${x},${y + r}L${x - r},${y}Z`} />;
-    case "intersection":
-      return <path d={`M${x - r},${y - r}L${x + r},${y + r}M${x - r},${y + r}L${x + r},${y - r}`} />;
-    case "perpendicular":
-      return <path d={`M${x - r},${y + r}H${x + r}M${x},${y + r}V${y - r}`} />;
-    case "nearest":
-      return <path d={`M${x - r},${y - r}L${x + r},${y + r}L${x - r},${y + r}L${x + r},${y - r}Z`} />;
-  }
-}
-
-/** The same marks the drawing shows for each snap, small, for the Snaps menu. */
-function SnapGlyph({ kind }: { kind: SnapKind }) {
-  return (
-    <svg className="snap-glyph" viewBox="-8 -8 16 16" width="16" height="16" aria-hidden="true">
-      {snapShape(kind, 0, 0)}
-    </svg>
   );
 }

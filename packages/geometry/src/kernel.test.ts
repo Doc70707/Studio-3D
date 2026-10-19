@@ -832,6 +832,20 @@ describe("threads", { timeout: 120_000 }, () => {
     expect(measureVolume(holed.shape.intersect(offCentre))).toBeGreaterThan(0.1);
   });
 
+  it("a left-hand threaded hole takes a left-hand bolt, not a right-hand one, and removes the same space", () => {
+    const p = THREADS.M8.pitch;
+    const left = { ...tapped("M8"), hand: "left" as const };
+    const holed = designed({ units: "mm", features: [solid(), left] });
+    expect(rel(72000 - holed.measurements.volume, threadVolume(threadProfile("M8", 0.3, false), 30))).toBeLessThan(
+      2e-5,
+    );
+    const leftBolt = makeShape(bolt("M8", 4, { id: "bolt", z: 5 * p - 1, hand: "left" }));
+    expect(measureVolume(holed.shape.intersect(leftBolt))).toBeLessThan(1e-6);
+    // A right-hand bolt's teeth lean the other way, so they cross the hole's teeth.
+    const rightBolt = makeShape(bolt("M8", 4, { id: "bolt", z: 5 * p - 1 }));
+    expect(measureVolume(holed.shape.intersect(rightBolt))).toBeGreaterThan(0.1);
+  });
+
   it("a threaded rod standing on a block is one piece and exports watertight", async () => {
     const r = designed({ units: "mm", features: [solid(), bolt("M8", 15, { z: 30 })] });
     expect(r.measurements.size[2]).toBeCloseTo(45, 6);
@@ -1876,5 +1890,59 @@ describe("G-code from Studio 3D's own slicer, read back and checked", () => {
       expect(problems(good().replace("M104 S0", "M104 S200"))).toContain("doesn't turn the heaters off");
       expect(problems(good().replace("G28 ;", "M117 hi ;"))).toContain("It moves before homing.");
     });
+  });
+});
+
+describe("edges and faces for snapping", () => {
+  it("a block with a 10 mm hole: straight edges with true ends and middles, the hole's circles with centres", () => {
+    const b = box({ width: 60, depth: 40, height: 30, wall: 0 });
+    const mesh = tessellate(designed(design(b, hole({ x: 5, y: -4, diameter: 10 }))).shape);
+    const lines = mesh.edgeInfo.filter((e) => e.kind === "line");
+    const circles = mesh.edgeInfo.filter((e) => e.kind === "circle");
+    // The block's 12, plus the hole wall's seam (a real kernel edge, where the cylinder's surface joins itself).
+    expect(lines).toHaveLength(13);
+    for (const e of lines) e.middle.forEach((v, i) => expect(v).toBeCloseTo((e.start[i]! + e.end[i]!) / 2, 9));
+    // The hole goes through the top and bottom: one circle at each, centred on the hole.
+    expect(circles.length).toBeGreaterThanOrEqual(2);
+    const heights = new Set(circles.map((c) => Math.round(c.centre![2])));
+    expect([...heights].sort()).toEqual([0, 30]);
+    for (const c of circles) {
+      expect(c.radius).toBeCloseTo(5, 9);
+      expect(c.centre![0]).toBeCloseTo(5, 9);
+      expect(c.centre![1]).toBeCloseTo(-4, 9);
+      expect(Math.abs(c.axis![2])).toBeCloseTo(1, 9);
+    }
+    // One face record per mesh face, in the same order: the hole's wall is a cylinder with the solid outside it.
+    expect(mesh.faceInfo).toHaveLength(mesh.faces.length / 2);
+    const walls = mesh.faceInfo.filter((f) => f.kind === "cylinder");
+    expect(walls.length).toBeGreaterThanOrEqual(1);
+    for (const w of walls) {
+      expect(w.inside).toBe(true);
+      expect(w.radius).toBeCloseTo(5, 9);
+      expect(w.axis!.point[0]).toBeCloseTo(5, 9);
+      expect(w.axis!.point[1]).toBeCloseTo(-4, 9);
+    }
+    // Each face's centre lies on that face's own triangles' plane (checks the order matches the mesh's faces).
+    mesh.faceInfo.forEach((f, i) => {
+      if (f.kind !== "plane") return;
+      const pts = facePoints(mesh, i);
+      const [a, c, d] = [pts[0]!, pts[1]!, pts[2]!];
+      const u = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const v = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+      const n = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
+      const len = Math.hypot(...n);
+      const off = ((f.centre[0] - a[0]) * n[0]! + (f.centre[1] - a[1]) * n[1]! + (f.centre[2] - a[2]) * n[2]!) / len;
+      expect(Math.abs(off)).toBeLessThan(1e-6);
+    });
+    const top = mesh.faceInfo.find((f) => f.kind === "plane" && Math.abs(f.centre[2] - 30) < 1e-9)!;
+    // The top's centre of area moves away from the hole: (60*40*0 - pi*25*5) / (2400 - pi*25) across.
+    expect(top.centre[0]).toBeCloseTo((-Math.PI * 25 * 5) / (2400 - Math.PI * 25), 6);
+  });
+
+  it("a cylinder's own side is a cylinder with the solid inside it", () => {
+    const mesh = tessellate(designed(part(shape("cylinder", { width: 20, depth: 20, height: 10 }))).shape);
+    const side = mesh.faceInfo.find((f) => f.kind === "cylinder")!;
+    expect(side.inside).toBe(false);
+    expect(side.radius).toBeCloseTo(10, 9);
   });
 });

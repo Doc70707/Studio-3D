@@ -32,4 +32,14 @@ describe("one interaction mode at a time", () => {
     expect(allows("print", "file-keys")).toBe(true);
     for (const a of ["select", "hover", "pick-face", "edit-keys"] as const) expect(allows("print", a)).toBe(false);
   });
+
+  it("measuring: clicks place points, so pieces aren't selected or nudged; a sketch or Print Studio comes first", () => {
+    expect(interactionMode({ sketching: false, picking: false, moving: false, measuring: true })).toBe("measure");
+    expect(interactionMode({ sketching: true, picking: false, moving: false, measuring: true })).toBe("sketch");
+    expect(interactionMode({ sketching: false, picking: false, moving: false, measuring: true, printing: true })).toBe(
+      "print",
+    );
+    expect(allows("measure", "view-keys")).toBe(true);
+    for (const a of ["select", "hover", "pick-face", "edit-keys"] as const) expect(allows("measure", a)).toBe(false);
+  });
 });

@@ -33,12 +33,14 @@ export function clearThreadCache(): void {
 
 /**
  * A threaded solid standing on z = 0, `length` tall, centred on the z axis. The caller owns the returned shape.
+ * A left-hand thread is the right-hand one mirrored through a plane along the axis: the same tooth, turning the
+ * other way.
  */
-export function makeThread(t: ThreadProfile, length: number): Shape3D {
-  const key = JSON.stringify([t, length]);
+export function makeThread(t: ThreadProfile, length: number, leftHand = false): Shape3D {
+  const key = JSON.stringify([t, length, leftHand]);
   let shape = cache.get(key);
   if (!shape) {
-    shape = build(t, length);
+    shape = leftHand ? build(t, length).mirror("YZ", [0, 0, 0]) : build(t, length);
     cache.set(key, shape);
     if (cache.size > CACHE_SIZE) {
       const [oldest, old] = cache.entries().next().value!;

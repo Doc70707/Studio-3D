@@ -134,6 +134,7 @@ export class Viewport {
   } | null = null;
   private moveListeners = new Set<(e: MoveEvent) => void>();
   private sketchLines: THREE.LineSegments | null = null;
+  private threadMarks: THREE.LineSegments | null = null;
   private layers: THREE.Group | null = null;
   private references: THREE.Group | null = null;
   /** Pictures already loaded, by id, so changing a picture's place or see-through doesn't load it again. */
@@ -519,6 +520,39 @@ export class Viewport {
   }
 
   /**
+   * Marks cosmetic threads (line pairs, x, y, z): dashed circles at the thread's full size where it starts and ends,
+   * seen through the part like hidden lines in a drawing. Null clears them.
+   */
+  setThreadMarks(lines: Float32Array | null): void {
+    if (this.threadMarks) {
+      this.scene.remove(this.threadMarks);
+      disposeObject(this.threadMarks);
+      this.threadMarks = null;
+    }
+    if (lines && lines.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(lines, 3));
+      const marks = new THREE.LineSegments(
+        g,
+        new THREE.LineDashedMaterial({
+          color: 0xffc94d,
+          dashSize: 0.8,
+          gapSize: 0.6,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.9,
+        }),
+      );
+      marks.computeLineDistances();
+      marks.name = "thread-marks";
+      marks.renderOrder = 3;
+      this.threadMarks = marks;
+      this.scene.add(marks);
+    }
+    this.requestRender();
+  }
+
+  /**
    * Shows the part's sliced layers in its place, as outlines (x, y, z line pairs): the layers below the current one
    * faint, and the current one's walls bright, its infill lines (`infill`) orange, over its filled area (`fill`: its
    * outlines, x, y pairs, counter-clockwise outsides and clockwise holes, at height z). Null shows the part again.
@@ -630,6 +664,24 @@ export class Viewport {
     this.raycaster.setFromCamera(ndc, this.camera);
     const hit = this.raycaster.intersectObject(this.surface, false)[0];
     return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  }
+
+  /** Where a point of the model is in the window (client pixels) and how deep, or null when behind the camera. */
+  toClient(p: [number, number, number]): [number, number, number] | null {
+    const v = new THREE.Vector3(...p).project(this.camera);
+    if (v.z > 1 || v.z < -1) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    // The third number is the depth: smaller is nearer the eye.
+    return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height, v.z];
+  }
+
+  /** The point on the plate (height 0) under a point of the window, or null when looking away from it. */
+  pickPlate(clientX: number, clientY: number): [number, number, number] | null {
+    const hit = this.ray(clientX, clientY).intersectPlane(
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+      new THREE.Vector3(),
+    );
+    return hit ? [hit.x, hit.y, 0] : null;
   }
 
   /** Shows measurement lines with labels that always face the screen. Replaces the previous ones. */

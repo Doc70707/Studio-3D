@@ -62,6 +62,8 @@ interface Threadable {
   thread?: ThreadSize;
   /** Extra room across the thread so printed parts turn, in mm. */
   fit?: number;
+  /** A left-hand thread (it tightens turning anticlockwise). Unset, the thread is right-hand, as almost all are. */
+  hand?: "left";
 }
 
 /** A cylinder. With a thread it becomes a threaded rod (adding) or a threaded hole (cutting). */
@@ -1023,7 +1025,9 @@ const short = (n: number) => `${Math.round(n * 100) / 100 + 0}`;
 
 /** What kind of hole it is, in a few words: "Ø5 mm", "M5 thread", "M6 tapped, Ø5 mm drill", "M5 clearance Ø5.5 mm". */
 export function holeKindLabel(h: HoleFeature): string {
-  if (h.thread) return h.simplified ? `${h.thread} tapped, Ø${short(boreDiameter(h))} mm drill` : `${h.thread} thread`;
+  const lh = h.hand === "left" ? " left-hand" : "";
+  if (h.thread)
+    return h.simplified ? `${h.thread}${lh} tapped, Ø${short(boreDiameter(h))} mm drill` : `${h.thread}${lh} thread`;
   if (h.clearance) return `${h.clearance.screw} clearance Ø${short(boreDiameter(h))} mm`;
   return `Ø${short(h.diameter)} mm`;
 }

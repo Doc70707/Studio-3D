@@ -11,18 +11,22 @@ export type InteractionMode =
   /** A move arrow is being dragged. */
   | "move"
   /** Print Studio: the part is looked at on the printer's plate; the design isn't edited here. */
-  | "print";
+  | "print"
+  /** Measuring between two points on the part, with object snaps. Clicks place points instead of selecting. */
+  | "measure";
 
 export function interactionMode(s: {
   sketching: boolean;
   picking: boolean;
   moving: boolean;
   printing?: boolean;
+  measuring?: boolean;
 }): InteractionMode {
   if (s.printing) return "print";
   if (s.sketching) return "sketch";
   if (s.picking) return "pick-face";
   if (s.moving) return "move";
+  if (s.measuring) return "measure";
   return "model";
 }
 
@@ -46,6 +50,7 @@ const ALLOWED: Record<InteractionMode, readonly Action[]> = {
   sketch: [],
   move: [],
   print: ["view-keys", "file-keys"],
+  measure: ["view-keys", "file-keys"],
 };
 
 export const allows = (mode: InteractionMode, action: Action) => ALLOWED[mode].includes(action);

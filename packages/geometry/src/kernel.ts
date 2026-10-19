@@ -64,7 +64,7 @@ import {
   type ProjectDocument,
   type ShapeFeature,
 } from "@studio3d/document";
-import type { Measurements, MeshData } from "./protocol";
+import type { EdgeInfo, FaceInfo, Measurements, MeshData } from "./protocol";
 import { makeThread } from "./threads";
 
 export function useKernel(oc: OpenCascadeInstance): void {
@@ -115,7 +115,7 @@ function makeRaw(s: ShapeFeature): Shape3D {
     }
     case "cylinder": {
       const thread = threadOf(s);
-      if (thread) return makeThread(thread, s.height).translate([s.x, s.y, s.z]);
+      if (thread) return makeThread(thread, s.height, s.hand === "left").translate([s.x, s.y, s.z]);
       return makeCylinder(s.diameter / 2, s.height, [s.x, s.y, s.z], [0, 0, 1]);
     }
     case "tube": {
@@ -426,7 +426,11 @@ function localHoleTool(h: HoleFeature, deep: number, extra: number): Shape3D {
     const threaded = Math.min(h.threadDepth ?? deep, deep);
     // A threaded tool is made in 5 mm steps of length (any extra pokes out of the face, cutting nothing), so a
     // thread already built is reused while the part or the hole's depth changes a little.
-    const tool = makeThread(thread, Math.ceil((threaded + extra) / 5) * 5).translate([0, 0, -threaded]);
+    const tool = makeThread(thread, Math.ceil((threaded + extra) / 5) * 5, h.hand === "left").translate([
+      0,
+      0,
+      -threaded,
+    ]);
     if (threaded >= deep - 1e-9) return tool;
     const rest = makeCylinder(thread.minor, deep - threaded, [0, 0, -deep], [0, 0, 1]);
     try {
@@ -953,7 +957,86 @@ export function tessellate(shape: Shape3D): MeshData {
     edges: new Float32Array(e.lines),
     faces: new Uint32Array(m.faceGroups.flatMap((g) => [g.start, g.count])),
     owners: [],
+    edgeInfo: shape.edges.map(edgeInfo),
+    faceInfo: shape.faces.map(faceInfo),
   };
+}
+
+type P3 = [number, number, number];
+const xyz = (v: { x: number; y: number; z: number }): P3 => [v.x, v.y, v.z];
+const gp = (p: { X(): number; Y(): number; Z(): number }): P3 => [p.X(), p.Y(), p.Z()];
+
+/** One edge for snapping: its ends and middle, points along it, and a circle's centre, radius and axis. */
+function edgeInfo(edge: Edge): EdgeInfo {
+  const type = edge.geomType;
+  const kind = type === "LINE" ? "line" : type === "CIRCLE" ? "circle" : "other";
+  const steps = kind === "line" ? 1 : 48;
+  const points: P3[] = [];
+  for (let i = 0; i <= steps; i++) points.push(xyz(edge.pointAt(i / steps)));
+  const info: EdgeInfo = {
+    kind,
+    start: xyz(edge.startPoint),
+    end: xyz(edge.endPoint),
+    middle: xyz(edge.pointAt(0.5)),
+    closed: edge.isClosed,
+    points,
+  };
+  if (kind === "circle") {
+    // The adaptor is replicad's own handle on the curve; the circle it describes is plain numbers once read.
+    const adaptor = (edge as unknown as { _geomAdaptor(): { Circle(): GpCircle; delete(): void } })._geomAdaptor();
+    const c = adaptor.Circle();
+    info.centre = gp(c.Location());
+    info.radius = c.Radius();
+    info.axis = gp(c.Axis().Direction());
+    c.delete();
+    adaptor.delete();
+  }
+  return info;
+}
+
+interface GpXYZ {
+  X(): number;
+  Y(): number;
+  Z(): number;
+}
+interface GpCircle {
+  Location(): GpXYZ;
+  Radius(): number;
+  Axis(): { Location(): GpXYZ; Direction(): GpXYZ };
+  delete(): void;
+}
+
+/** One face for snapping and picking: its centre of area, and for a cylinder its axis and which side is solid. */
+function faceInfo(face: Face): FaceInfo {
+  const type = face.geomType;
+  const info: FaceInfo = {
+    kind: type === "PLANE" ? "plane" : type === "CYLINDRE" ? "cylinder" : "other",
+    centre: xyz(face.center),
+  };
+  if (info.kind === "cylinder") {
+    const adaptor = (face as unknown as { _geomAdaptor(): { Cylinder(): GpCylinder; delete(): void } })._geomAdaptor();
+    const cyl = adaptor.Cylinder();
+    const ax = cyl.Axis();
+    const point = gp(ax.Location());
+    const direction = gp(ax.Direction());
+    info.axis = { point, direction };
+    info.radius = cyl.Radius();
+    cyl.delete();
+    adaptor.delete();
+    // On a hole the face's outward normal points back towards the axis.
+    const b = face.UVBounds;
+    const on = xyz(face.pointOnSurface((b.uMin + b.uMax) / 2, (b.vMin + b.vMax) / 2));
+    const n = xyz(face.normalAt(on));
+    const t = (on[0] - point[0]) * direction[0] + (on[1] - point[1]) * direction[1] + (on[2] - point[2]) * direction[2];
+    const out = [0, 1, 2].map((i) => on[i]! - point[i]! - t * direction[i]!);
+    info.inside = out[0]! * n[0] + out[1]! * n[1] + out[2]! * n[2] < 0;
+  }
+  return info;
+}
+interface GpCylinder {
+  Axis(): { Location(): GpXYZ; Direction(): GpXYZ };
+  Radius(): number;
+  delete(): void;
 }
 
 export async function exportStl(shape: Shape3D): Promise<ArrayBuffer> {

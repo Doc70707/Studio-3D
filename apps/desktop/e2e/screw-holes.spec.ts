@@ -69,7 +69,7 @@ test("an inch thread part way down, then simplified to its tap drill", async ({ 
   await expect(page.getByText("needs at least two turns: make it at least 2.54 mm deep")).toBeVisible();
   await field(page, "Hole 1 thread depth").fill("10");
 
-  await page.getByRole("button", { name: "Simplified" }).click();
+  await page.getByRole("button", { name: "Cosmetic" }).click();
   await expect(page.getByText("Drawn as the 5.11 mm tap drill for 1/4-20 UNC")).toBeVisible();
   await current(page);
   await expect(volume(page)).toHaveText(cm3(72000 - cyl(0.201 * 25.4, 30)));

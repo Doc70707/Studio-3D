@@ -159,6 +159,18 @@ What works today:
   to 3 decimals until clicked; a round shape shows one Ø label; 3D size labels step aside or hide instead of piling
   up; sketch sizes and offsets sit outside the shape; the top bar stays on one row down to 1024 px wide. A layout
   test (`e2e/ui-audit.spec.ts`) checks 12 screens at 4 window sizes for clipped, escaping or overlapping text.
+- Right-click menu and snaps: right-click in a sketch or the 3D view names what is under the pointer (a corner, a
+  side, a Ø6 mm circle, a hole) and offers the snaps that fit it: End, Middle, Centre, Shape centre, Quadrant,
+  Crossing, Square to, Tangent, Nearest, Point and Grid, greyed out with the reason when nothing is near. A snap
+  picked there is used for the next point only; the ticks beside each keep it on. F3 turns snaps on and off. The
+  3D snaps read the solid's real edges and circles from the geometry kernel. A right drag still pans.
+- Measure (D, or View > Measure distance): click two snapped points on the part for the exact distance and how far
+  apart they are left/right, front/back and up.
+- Thread an existing hole: right-click its rim or use "Thread this hole…" in Properties. The size is suggested from
+  the hole (a 4.2 mm hole is an M5 tap drill), the 3D view previews the thread live, and checks explain a size that
+  doesn't suit the hole with the right one a click away. Metric, fine, UNC and UNF; right- or left-hand; through or
+  blind; part-way threads; a Snug, Normal or Loose fit for printing; Modelled, or Cosmetic (a tap-drill hole marked
+  with dashed rings). Apply is one undo step; Cancel leaves the hole as it was.
 - Text contrast is checked by a test for every theme and accent, and the app respects Windows' reduced motion, reduced transparency and high
   contrast settings.
 

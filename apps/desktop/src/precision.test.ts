@@ -16,6 +16,8 @@ import {
   regularPolygon,
   sideOf,
   snapScene,
+  centroid,
+  tangentPoints,
 } from "./precision";
 
 /** 10 screen pixels per mm, origin at the top-left, y up. */
@@ -184,6 +186,65 @@ describe("object snaps", () => {
     // The diagonal's middle (15, 5) isn't a snap; the bottom edge's middle is.
     expect(findSnap(face, [15, 5], null, 10, toScreen)).toBeNull();
     expect(findSnap(face, [15, 0.4], null, 10, toScreen)).toEqual({ kind: "middle", point: [15, 0] });
+  });
+});
+
+describe("more snaps: shape centre, tangent, point and grid", () => {
+  const L: Point2[] = [
+    [0, 0],
+    [30, 0],
+    [30, 10],
+    [10, 10],
+    [10, 30],
+    [0, 30],
+  ];
+  const scene = snapScene(
+    [
+      { kind: "polygon", points: L },
+      { kind: "rectangle", x: 50, y: 0, width: 20, height: 10 },
+      { kind: "circle", x: 100, y: 0, diameter: 10 },
+    ],
+    [],
+    [],
+  );
+
+  it("a closed shape's centre of area, worked out by hand for an L", () => {
+    // 30x10 (centre 15,5) + 10x20 (centre 5,20): area 300 + 200 -> (11, 11).
+    expect(centroid(L)).toEqual([11, 11].map((v) => expect.closeTo(v, 9)));
+    expect(findSnap(scene, [11.3, 10.8], null, 10, toScreen)).toEqual({ kind: "geometric", point: [11, 11] });
+    expect(findSnap(scene, [60.2, 5.3], null, 10, toScreen)).toEqual({ kind: "geometric", point: [60, 5] });
+  });
+
+  it("tangent points from the last corner just touch the circle, square to its radius", () => {
+    const from: Point2 = [100, 20];
+    const ts = tangentPoints(from, [100, 0], 5);
+    expect(ts).toHaveLength(2);
+    for (const t of ts) {
+      expect(Math.hypot(t[0] - 100, t[1])).toBeCloseTo(5, 9);
+      // The radius to the touching point is square to the line from the corner.
+      expect((t[0] - 100) * (from[0] - t[0]) + t[1] * (from[1] - t[1])).toBeCloseTo(0, 9);
+    }
+    const right = ts.find((t) => t[0] > 100)!;
+    const s = findSnap(scene, [right[0] + 0.2, right[1] - 0.2], from, 10, toScreen, ["tangent"])!;
+    expect(s.kind).toBe("tangent");
+    expect(s.point).toEqual(right.map((v) => expect.closeTo(v, 5)));
+    // No last corner, or a corner inside the circle: no tangent.
+    expect(findSnap(scene, right, null, 10, toScreen, ["tangent"])).toBeNull();
+    expect(tangentPoints([101, 1], [100, 0], 5)).toEqual([]);
+  });
+
+  it("the origin is a point to snap to", () => {
+    expect(findSnap(snapScene([], [], []), [0.3, -0.2], null, 10, toScreen)).toEqual({ kind: "node", point: [0, 0] });
+  });
+
+  it("with nothing near, the grid snap goes to the nearest grid point; turned off, nothing does", () => {
+    expect(findSnap(scene, [42.4, 47.6], null, 10, toScreen, DEFAULT_SNAPS, 5)).toEqual({
+      kind: "grid",
+      point: [40, 50],
+    });
+    expect(findSnap(scene, [42.4, 47.6], null, 10, toScreen, ["end"], 5)).toBeNull();
+    // Something near still wins over the grid.
+    expect(findSnap(scene, [29.6, 0.3], null, 10, toScreen, DEFAULT_SNAPS, 5)!.kind).toBe("end");
   });
 });
 

@@ -85,7 +85,7 @@ const knownKeys = (type: Feature["type"]) =>
     ...(type === "mirror" ? ["source", "axis"] : []),
     ...(type === "hollow" ? ["open"] : []),
     ...(type === "fillet" || type === "chamfer" ? ["edges"] : []),
-    ...(type === "cylinder" || type === "hole" ? ["thread", "fit"] : []),
+    ...(type === "cylinder" || type === "hole" ? ["thread", "fit", "hand"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles", "revolve"] : []),
     ...(type === "hole" ? ["face", "threadDepth", "simplified", "clearance", "head"] : []),
     ...NUMBERS[type],
@@ -295,7 +295,8 @@ export function parseProject(text: string): ParseResult {
     if (
       (type === "cylinder" || type === "hole") &&
       ((f.thread !== undefined && !isThreadSize(f.thread)) ||
-        (f.fit !== undefined && (typeof f.fit !== "number" || !Number.isFinite(f.fit))))
+        (f.fit !== undefined && (typeof f.fit !== "number" || !Number.isFinite(f.fit))) ||
+        (f.hand !== undefined && f.hand !== "left"))
     ) {
       return {
         ok: false,
