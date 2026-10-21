@@ -20,6 +20,9 @@ export function NumberField(props: {
   compact?: boolean;
   /** Unit shown after the box, for a box that isn't a size: "°", or "" for none. */
   unit?: string;
+  /** A position along this axis: labelled with the axis letter in its colour (as on the arrows in the 3D view), with
+   * the full name in its tooltip and read out with the box, so three fit side by side in a narrow palette. */
+  axis?: "x" | "y" | "z";
 }) {
   const id = useId();
   const units = useUnits();
@@ -64,9 +67,16 @@ export function NumberField(props: {
   const severity = typingError ? "error" : props.issue?.severity;
   return (
     <div className={props.compact ? "field compact" : "field"}>
-      <label htmlFor={id} title={props.help}>
-        {props.label}
-      </label>
+      {props.axis ? (
+        <label htmlFor={id} title={props.help ? `${props.label}: ${props.help}` : props.label}>
+          <span className={`axis-letter ${props.axis}`}>{props.axis.toUpperCase()}</span>
+          <span className="axis-name">{props.label}</span>
+        </label>
+      ) : (
+        <label htmlFor={id} title={props.help}>
+          {props.label}
+        </label>
+      )}
       <div className="input-row">
         <input
           ref={input}
@@ -76,7 +86,7 @@ export function NumberField(props: {
           title={shown !== text ? `${text} ${unitLabel}`.trim() : undefined}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          aria-label={props.name}
+          aria-label={props.name ?? (props.axis ? props.label : undefined)}
           aria-invalid={severity === "error"}
           aria-description={props.help}
           onChange={(e) => {

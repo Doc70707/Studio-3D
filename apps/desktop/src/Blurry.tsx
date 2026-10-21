@@ -1,9 +1,8 @@
-// Blurry, the built-in helper: a small round character in the corner of the 3D view. Click him (or press Ctrl+K)
-// and ask in your own words. On his own he answers from the app's own how-tos and offers the real commands as
+// Blurry, the built-in helper: a little glowing ghost in the status bar. Click him (or press Ctrl+K) and ask in your own words. On his own he answers from the app's own how-tos and offers the real commands as
 // buttons, with no internet. With Claude turned on (the person's own Anthropic key, in his settings) he answers
 // anything about the part and can add shapes, holes, threads and finishes himself. Either way, what he does is an
 // ordinary step, undone with Ctrl+Z.
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
 import { answer, type Answer } from "./helperAnswers";
 import { askClaude, problemText, type HelperContext } from "./helperAI";
@@ -44,6 +43,10 @@ export interface BlurryProps {
   context: () => HelperContext;
   /** Makes one checked change to the part (one undo step). */
   apply: (change: HelperChange) => void;
+  /** Told when Claude starts and stops answering, so his button can glow meanwhile. */
+  onBusy: (busy: boolean) => void;
+  /** His open panel, which the 3D view keeps the part clear of. */
+  panelRef: RefObject<HTMLElement | null>;
 }
 
 export function Blurry(props: BlurryProps) {
@@ -58,6 +61,8 @@ export function Blurry(props: BlurryProps) {
   const next = useRef(1);
   const history = useRef<Anthropic.Beta.BetaMessageParam[]>([]);
   const stopper = useRef<AbortController | null>(null);
+  const { onBusy } = props;
+  useEffect(() => onBusy(busy), [busy, onBusy]);
 
   // The key the person saved last time, from the computer's key store.
   useEffect(() => {
@@ -156,9 +161,15 @@ export function Blurry(props: BlurryProps) {
   return (
     <div className={`blurry${open ? " open" : ""}`} data-testid="blurry">
       {open && (
-        <section className="blurry-panel glass" role="dialog" aria-label="Blurry" aria-modal="false">
+        <section
+          ref={props.panelRef}
+          className="blurry-panel glass"
+          role="dialog"
+          aria-label="Blurry"
+          aria-modal="false"
+        >
           <header className="blurry-head">
-            <BlurryFace size={28} />
+            <BlurryFace size={30} />
             <h2>Blurry</h2>
             <span className="blurry-sub">{key ? "Helper · with Claude" : "Helper · works offline"}</span>
             <button
@@ -186,6 +197,11 @@ export function Blurry(props: BlurryProps) {
           ) : (
             <>
               <div className="blurry-messages" ref={list} role="log" aria-live="polite">
+                {said.length === 1 && (
+                  <div className="blurry-hero">
+                    <BlurryFace size={64} waving />
+                  </div>
+                )}
                 {said.map((m) => (
                   <div
                     key={m.id}
@@ -287,16 +303,6 @@ export function Blurry(props: BlurryProps) {
           )}
         </section>
       )}
-      <button
-        type="button"
-        className={`blurry-button${busy ? " busy" : ""}`}
-        aria-label={open ? "Close Blurry" : "Ask Blurry"}
-        aria-expanded={open}
-        title="Blurry, your helper (Ctrl+K)"
-        onClick={() => onOpen(!open)}
-      >
-        <BlurryFace size={40} />
-      </button>
     </div>
   );
 }
@@ -380,24 +386,63 @@ function HelperSettings(props: {
 }
 
 /**
- * Blurry himself: a soft round body with two eyes. A stand-in drawn here until his own design (shane's "Blurry
- * Prototype v11") is brought in.
+ * Blurry himself, from shane's "Blurry Prototype v11": a little ghost drawn in a glowing white line, smiling, with
+ * one arm up in a wave and a warm glow round him. His body is dark, so the line glows on light themes too.
  */
-export function BlurryFace({ size }: { size: number }) {
+export function BlurryFace({ size, waving }: { size: number; waving?: boolean }) {
   const body = useId();
   return (
-    <svg className="blurry-face" width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
+    <svg
+      className={`blurry-face${waving ? " waving" : ""}`}
+      width={size}
+      height={size}
+      viewBox="0 0 40 40"
+      aria-hidden="true"
+    >
       <defs>
-        <radialGradient id={body} cx="38%" cy="32%" r="70%">
-          <stop offset="0%" stopColor="#bfe0ff" />
-          <stop offset="55%" stopColor="#6cb4ff" />
-          <stop offset="100%" stopColor="#3d7fe0" />
+        <radialGradient id={body} cx="50%" cy="42%" r="62%">
+          <stop offset="0%" stopColor="#6e4a32" />
+          <stop offset="65%" stopColor="#33261d" />
+          <stop offset="100%" stopColor="#1e1814" />
         </radialGradient>
       </defs>
-      <circle cx="20" cy="20" r="18" fill={`url(#${body})`} />
-      <ellipse className="blurry-eye" cx="14.5" cy="19" rx="2.4" ry="3.2" fill="#0d1b33" />
-      <ellipse className="blurry-eye" cx="25.5" cy="19" rx="2.4" ry="3.2" fill="#0d1b33" />
-      <path d="M15.5 26c2.6 2.2 6.4 2.2 9 0" fill="none" stroke="#0d1b33" strokeWidth="1.8" strokeLinecap="round" />
+      <g transform="rotate(-6 20 20)" fill="none" stroke="#fffaf4" strokeLinecap="round" strokeLinejoin="round">
+        <path
+          d="M10.5 31V18.5c0-6.3 4.1-11 10-11s10 4.7 10 11V31q-2.5 2.8-5 0-2.5 2.8-5 0-2.5 2.8-5 0-2.5 2.8-5 0z"
+          fill={`url(#${body})`}
+          strokeWidth="2"
+        />
+        {/* Drawn over his side: its fill hides the body's line where it joins, so he is one outline, arm and all. */}
+        <path
+          className="blurry-arm"
+          d="M11 24C8.3 23.3 6.2 20.7 6.3 18.2c.1-1.2 1.2-1.6 2.1-.8 1 1 1.7 1.8 2.6 2.3"
+          fill={`url(#${body})`}
+          strokeWidth="2"
+        />
+        <path d="M25.6 21.2c1.8.2 2.6 2.3 1 3.7" strokeWidth="1.7" />
+        <g className="blurry-eyes" fill="#fffaf4" stroke="none">
+          <circle cx="17.3" cy="15.6" r="1.3" />
+          <circle cx="23.7" cy="15.6" r="1.3" />
+        </g>
+        <path d="M17.8 19.2c1.6 1.6 4.2 1.6 5.8 0" strokeWidth="1.6" />
+      </g>
     </svg>
+  );
+}
+
+/** Blurry's place in the status bar: out of the 3D view, beside the command line, and where his panel grows from. */
+export function BlurryButton(props: { open: boolean; busy: boolean; onOpen: (open: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      className={`statusbar-toggle blurry-button${props.busy ? " busy" : ""}`}
+      aria-label={props.open ? "Close Blurry" : "Ask Blurry"}
+      aria-expanded={props.open}
+      title="Blurry, your helper (Ctrl+K)"
+      onClick={() => props.onOpen(!props.open)}
+    >
+      <BlurryFace size={20} />
+      <span className="toggle-label">Blurry</span>
+    </button>
   );
 }

@@ -103,7 +103,7 @@ import { toggleUnits, useUnits } from "./unitsSetting";
 import { UnitsSwitch } from "./UnitsSwitch";
 import { Icon } from "./Icon";
 import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
-import { Blurry } from "./Blurry";
+import { Blurry, BlurryButton } from "./Blurry";
 import type { HelperContext } from "./helperAI";
 import type { HelperChange } from "./helperTools";
 import { indexCommands, type Command } from "./commands";
@@ -216,6 +216,7 @@ export function App() {
   const [commandPrompt, setCommandPrompt] = useState<CommandPrompt | null>(null);
   /** Blurry's panel is open. */
   const [helperOpen, setHelperOpen] = useState(false);
+  const [helperBusy, setHelperBusy] = useState(false);
   /** What Blurry with Claude sees and does, kept current on every render (his answers outlive a render). */
   const helperNow = useRef<{ context: HelperContext; apply: (c: HelperChange) => void } | null>(null);
   const helperContext = useCallback(() => helperNow.current!.context, []);
@@ -305,6 +306,10 @@ export function App() {
   // The 3D view fills the window and the bars and palettes sit over its edges, so keep the scene centred in the space
   // they leave open.
   const [safeArea, setSafeArea] = useState("");
+  // Blurry's open panel takes a column on the right, as a palette would, so the part moves over and stays in view.
+  const helperPanel = useRef<HTMLElement>(null);
+  const helperShown = helperOpen && !draft && !focus;
+  const helperRoomWas = useRef(0);
   useEffect(() => {
     const update = () => {
       const vp = viewportRef.current;
@@ -321,25 +326,31 @@ export function App() {
       const right = rect(rightRef.current);
       const status = rect(statusRef.current);
       const command = rect(commandBox.current);
+      const paletteRight = right ? h.right - right.left : 0;
+      // Its layout width, not its drawn box, which is still growing while it opens.
+      const helperRoom = helperShown && helperPanel.current ? helperPanel.current.offsetWidth + 16 : 0;
       const area = {
         top,
         left: left ? left.right - h.left : 0,
         bottom: Math.max(status ? h.bottom - status.top : 0, command ? h.bottom - command.top : 0),
-        right: right ? h.right - right.left : 0,
+        right: paletteRight + helperRoom,
       };
-      vp.setSafeArea(area);
+      // The part glides over when Blurry opens or closes, rather than jumping.
+      vp.setSafeArea(area, helperRoom !== helperRoomWas.current);
+      helperRoomWas.current = helperRoom;
       // The status bar's own room too: the command line sits just above it.
       const statusRoom = status ? h.bottom - status.top : 0;
-      setSafeArea([area.top, area.left, area.bottom, area.right, statusRoom].map(Math.round).join(","));
+      setSafeArea([area.top, area.left, area.bottom, area.right, statusRoom, paletteRight].map(Math.round).join(","));
     };
     const ro = new ResizeObserver(update);
     for (const el of [hostRef.current, topbarRef.current, ribbonRef.current, leftRef.current, rightRef.current])
       if (el) ro.observe(el);
     if (statusRef.current) ro.observe(statusRef.current);
     if (commandBox.current) ro.observe(commandBox.current);
+    if (helperPanel.current) ro.observe(helperPanel.current);
     update();
     return () => ro.disconnect();
-  }, [printing, layout, panelShown, focus, draft]);
+  }, [printing, layout, panelShown, focus, draft, helperShown]);
 
   // Geometry engine
   useEffect(() => {
@@ -1981,7 +1992,6 @@ export function App() {
       className={[
         "app",
         draft && "sketching",
-        !draft && !focus && "has-blurry",
         threadEdit && "threading",
         picking && "picking",
         focus && "focus",
@@ -2109,6 +2119,8 @@ export function App() {
           hidden={!!draft || focus}
           context={helperContext}
           apply={helperApply}
+          onBusy={setHelperBusy}
+          panelRef={helperPanel}
         />
         {layout.commandLine && !draft && (
           <div className="command-dock" ref={commandBox}>
@@ -2370,6 +2382,7 @@ export function App() {
             </span>
           </span>
         </span>
+        {!draft && !focus && <BlurryButton open={helperOpen} busy={helperBusy} onOpen={setHelperOpen} />}
         <button
           type="button"
           className="statusbar-toggle"
@@ -2599,7 +2612,7 @@ function SelectionBar(props: {
 
 /** The open part of the 3D view as CSS variables, so bars that float over it sit below the ribbon, between palettes. */
 function safeAreaStyle(area: string): CSSProperties | undefined {
-  const [top, left, bottom, right, status] = area.split(",").map(Number);
+  const [top, left, bottom, right, status, palette] = area.split(",").map(Number);
   if (top === undefined || left === undefined || right === undefined || Number.isNaN(top)) return undefined;
   return {
     "--safe-top": `${top}px`,
@@ -2607,6 +2620,8 @@ function safeAreaStyle(area: string): CSSProperties | undefined {
     "--safe-bottom": `${bottom ?? 0}px`,
     "--safe-right": `${right}px`,
     "--status-room": `${status ?? 0}px`,
+    // The right palette alone, without Blurry's panel: where his panel sits.
+    "--palette-right": `${palette ?? right}px`,
   } as CSSProperties;
 }
 

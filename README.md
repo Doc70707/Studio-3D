@@ -188,12 +188,12 @@ What works today:
   let go of all. Then Fillet or Chamfer on the bar that appears, the ribbon, the menu, or FILLET in the command line,
   rounds just those. The edges are kept by where their middles are, so an earlier change that moves one says so
   plainly instead of rounding the wrong edge.
-- Blurry, the built-in helper: the round character in the bottom-right corner of the 3D view (or Ctrl+K). Ask in
-  your own words ("how do I thread a hole?", "make a cube", "work in inches"); he answers with short steps from the
-  app's own how-tos and offers the real commands as buttons, each showing where it lives on the ribbon so you learn
-  it. A button runs the same step the menus make, undone with Ctrl+Z. He works with no internet and no account, says
-  plainly when he doesn't know, sits beside the camera views instead of over the part, and steps aside while you
-  sketch. Esc or Ctrl+K puts him away. (His face is a stand-in until the final character design is brought in.)
+- Blurry, the built-in helper: the little glowing ghost in the status bar (or Ctrl+K). Ask in your own words ("how
+  do I thread a hole?", "make a cube", "work in inches"); he answers with short steps from the app's own how-tos and
+  offers the real commands as buttons, each showing where it lives on the ribbon so you learn it. A button runs the
+  same step the menus make, undone with Ctrl+Z. He works with no internet and no account, and says plainly when he
+  doesn't know. Nothing of his sits over the 3D view until asked: his panel opens above the status bar, and the part
+  slides aside to stay in full view. He steps aside while you sketch; Esc or Ctrl+K puts him away.
 - Blurry with Claude (optional, your own Anthropic API key, entered under the key button in his panel): he then
   answers anything about your part in plain words and makes what you ask for, such as "add a 20 mm cube" or "put an
   M5 thread in Hole 1". He works only through a short list of tools (add a shape, add a hole, round or chamfer

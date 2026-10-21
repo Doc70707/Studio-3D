@@ -11,10 +11,21 @@ test.beforeEach(async ({ page }) => {
   await current(page);
 });
 
-test("Blurry opens from his corner, explains how to thread a hole, and adds the hole when asked", async ({ page }) => {
+test("Blurry opens from the status bar, explains how to thread a hole, and adds the hole when asked", async ({
+  page,
+}) => {
+  // Nothing of his is over the 3D view until asked: his button is in the status bar.
+  await expect(page.locator("footer.statusbar").getByRole("button", { name: "Ask Blurry" })).toBeVisible();
+  const before = Number((await host(page).getAttribute("data-safe-area"))!.split(",")[3]);
   await page.getByRole("button", { name: "Ask Blurry" }).click();
   await expect(panel(page)).toBeVisible();
   await expect(panel(page)).toContainText("Hi, I'm Blurry");
+  // Open, his panel takes a column on the right and the part slides over, clear of it.
+  const right = async () => Number((await host(page).getAttribute("data-safe-area"))!.split(",")[3]);
+  await expect.poll(right).toBeGreaterThan(before + 300);
+  const box = (await panel(page).boundingBox())!;
+  const view = (await host(page).boundingBox())!;
+  expect(view.x + view.width - (await right())).toBeLessThanOrEqual(box.x + 1);
 
   await panel(page).getByRole("button", { name: "How do I thread a hole?" }).click();
   await expect(panel(page).getByRole("listitem").first()).toContainText("Add a hole");

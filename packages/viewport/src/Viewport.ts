@@ -172,6 +172,9 @@ export class Viewport {
   private labels: { el: HTMLElement; at: THREE.Vector3 }[] = [];
   private readonly labelLayer: HTMLDivElement;
   private safeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
+  /** Where the open area is gliding to, while it is. */
+  private safeAreaGoal: SafeArea | null = null;
+  private areaFrame = 0;
   /** Vertical field of view and aspect of the uncovered area, used to fit standard views. */
   private fit = { fov: FOV, aspect: 1 };
 
@@ -962,15 +965,41 @@ export class Viewport {
     if (width > 0) this.setPlate(width, depth, volume);
   }
 
-  /** Keeps the scene centred in the part of the view that floating panels don't cover. */
-  setSafeArea(area: SafeArea): void {
-    const same = (Object.keys(area) as (keyof SafeArea)[]).every(
-      (k) => Math.round(area[k]) === Math.round(this.safeArea[k]),
-    );
+  /**
+   * Keeps the scene centred in the part of the view that floating panels don't cover. With `slide`, the scene glides
+   * over to the new centre (a panel opening beside it), starting from wherever it is now, so it can be reversed.
+   */
+  setSafeArea(area: SafeArea, slide = false): void {
+    const goal = this.safeAreaGoal ?? this.safeArea;
+    const same = (Object.keys(area) as (keyof SafeArea)[]).every((k) => Math.round(area[k]) === Math.round(goal[k]));
     if (same) return;
-    this.safeArea = { ...area };
-    this.resize();
-    if (this.view !== "custom") this.setView(this.view);
+    if (this.areaFrame) cancelAnimationFrame(this.areaFrame);
+    this.areaFrame = 0;
+    this.safeAreaGoal = null;
+    const settle = () => {
+      this.safeArea = { ...area };
+      this.safeAreaGoal = null;
+      delete this.container.dataset.areaSliding;
+      this.resize();
+      if (this.view !== "custom") this.setView(this.view);
+    };
+    if (!slide || !this.ready || prefersReducedMotion()) return settle();
+    const from = { ...this.safeArea };
+    const start = performance.now();
+    this.safeAreaGoal = { ...area };
+    this.container.dataset.areaSliding = "true";
+    const step = (now: number) => {
+      const k = springProgress((now - start) / 1000);
+      if (settled(k)) {
+        this.areaFrame = 0;
+        return settle();
+      }
+      const at = (key: keyof SafeArea) => from[key] + (area[key] - from[key]) * k;
+      this.safeArea = { top: at("top"), right: at("right"), bottom: at("bottom"), left: at("left") };
+      this.resize();
+      this.areaFrame = requestAnimationFrame(step);
+    };
+    this.areaFrame = requestAnimationFrame(step);
   }
 
   getCameraState(): CameraState {
@@ -993,6 +1022,7 @@ export class Viewport {
 
   dispose(): void {
     this.stopGlide();
+    if (this.areaFrame) cancelAnimationFrame(this.areaFrame);
     this.textures.forEach((t) => t.texture.dispose());
     this.resizeObserver.disconnect();
     this.controls.dispose();

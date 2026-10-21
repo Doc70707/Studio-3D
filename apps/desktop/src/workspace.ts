@@ -24,7 +24,7 @@ export interface Workspace {
   commandLine: boolean;
 }
 
-export const PALETTE_MIN_WIDTH = 220;
+export const PALETTE_MIN_WIDTH = 260;
 export const PALETTE_MAX_WIDTH = 520;
 
 export const DEFAULT_WORKSPACE: Workspace = {

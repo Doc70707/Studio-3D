@@ -111,6 +111,19 @@ export function findLayoutProblems(page: Page): Promise<LayoutProblem[]> {
         el.scrollWidth > el.clientWidth + 1
       )
         problems.push({ kind: "clipped", what: describe(el), detail: `${el.scrollWidth} > ${el.clientWidth}` });
+      // Text that wraps onto more lines than its box is tall, and spills out of the bottom onto what is under it.
+      if (
+        el instanceof HTMLElement &&
+        !el.matches("input, select, textarea") &&
+        s.overflowY === "visible" &&
+        el.clientHeight > 0 &&
+        el.scrollHeight > el.clientHeight + 2
+      )
+        problems.push({
+          kind: "escapes",
+          what: describe(el),
+          detail: `spills out: ${el.scrollHeight} > ${el.clientHeight} px tall`,
+        });
       // Numbers too long for their box (while typing, a box scrolls as usual).
       if (
         el instanceof HTMLInputElement &&

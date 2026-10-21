@@ -37,6 +37,19 @@ for (const [width, height] of SIZES)
     await page.goto("/");
     await current(page);
     await look(page, "start");
+    // The Properties palette as narrow as it goes, on the left, with a piece picked: its labels, the add/cut switch
+    // and the measurements must still fit on their lines.
+    await page.getByRole("tab", { name: "View", exact: true }).click();
+    await page.getByTestId("ribbon").getByRole("button", { name: "Swap sides" }).click();
+    const resize = page.getByRole("separator", { name: "Resize Properties" });
+    await resize.focus();
+    for (let i = 0; i < 30; i++) await page.keyboard.press("Shift+ArrowLeft");
+    await expect(resize).toHaveAttribute("aria-valuenow", "260");
+    await page.getByRole("complementary", { name: "Browser" }).getByRole("listitem").first().click();
+    await look(page, "narrow-properties");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("ribbon").getByRole("button", { name: "Swap sides" }).click();
+    await page.getByRole("tab", { name: "Home", exact: true }).click();
     await page.getByRole("button", { name: "Add cylinder" }).click();
     await current(page);
     await page.getByLabel("Cylinder 1 thread").selectOption("M8");

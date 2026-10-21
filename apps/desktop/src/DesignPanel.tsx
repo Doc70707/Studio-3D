@@ -652,6 +652,7 @@ function ShapeProps(props: { shape: ShapeFeature; first: boolean; issues: Issue[
             <NumberField
               key={k}
               label={FIELD_LABELS[k]!}
+              axis={k}
               value={value(k)}
               issue={issueFor(k)}
               onCommit={(v) => onChange({ [k]: v })}
@@ -702,6 +703,7 @@ function HoleProps(props: {
         <div className="hole-grid">
           <NumberField
             label="Left / right"
+            axis="x"
             name={`${hole.name} left / right position`}
             value={hole.x}
             issue={issueFor("x")}
@@ -710,6 +712,7 @@ function HoleProps(props: {
           />
           <NumberField
             label="Front / back"
+            axis="y"
             name={`${hole.name} front / back position`}
             value={hole.y}
             issue={issueFor("y")}
