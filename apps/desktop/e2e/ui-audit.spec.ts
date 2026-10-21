@@ -53,7 +53,8 @@ for (const [width, height] of SIZES)
     await page.getByRole("button", { name: "Add cylinder" }).click();
     await current(page);
     await page.getByLabel("Cylinder 1 thread").selectOption("M8");
-    await current(page);
+    // The first thread of a run is built from scratch, which a slow test machine can take well over 15 s to do.
+    await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 60_000 });
     await look(page, "threaded-cylinder");
     await page.getByRole("button", { name: "Add hole" }).click();
     await current(page);

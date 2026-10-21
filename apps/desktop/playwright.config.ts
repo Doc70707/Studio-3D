@@ -7,6 +7,9 @@ export default defineConfig({
   // Rebuilds run the real geometry engine in WebAssembly beside software-rendered WebGL. With two test workers
   // and thread builds taking seconds, 5 s is too tight for "the model is up to date", so allow 15 s.
   expect: { timeout: 15_000 },
+  // CI's shared machines vary: the same run has been half as fast again from one day to the next, and the longer
+  // tests (drawing, restarting, threads) take 20-28 s on a good day. 60 s each keeps a slow machine from failing them.
+  timeout: 60_000,
   // A failed test keeps a trace (in the HTML report on CI), so a rare failure can be looked at afterwards.
   // Tests run with the system's "reduce motion" setting, so the camera and panels jump instead of gliding and each
   // check sees the final state at once. The glides themselves are tested with motion on (e2e/motion.spec.ts).
