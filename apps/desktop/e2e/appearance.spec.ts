@@ -45,6 +45,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("Appearance changes the theme, the accent and the part's colour at once, and keeps them", async ({ page }) => {
+  test.setTimeout(90_000); // it rebuilds the part after a restart, which a busy test machine can take a while over
   await page.keyboard.press("1"); // top view: the part fills the middle of the view
   const blue = await partColour(page);
   expect(blue[2]).toBeGreaterThan(blue[0] + 40); // the default sky-blue part

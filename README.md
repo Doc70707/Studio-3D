@@ -194,6 +194,14 @@ What works today:
   it. A button runs the same step the menus make, undone with Ctrl+Z. He works with no internet and no account, says
   plainly when he doesn't know, sits beside the camera views instead of over the part, and steps aside while you
   sketch. Esc or Ctrl+K puts him away. (His face is a stand-in until the final character design is brought in.)
+- Blurry with Claude (optional, your own Anthropic API key, entered under the key button in his panel): he then
+  answers anything about your part in plain words and makes what you ask for, such as "add a 20 mm cube" or "put an
+  M5 thread in Hole 1". He works only through a short list of tools (add a shape, add a hole, round or chamfer
+  edges, hollow out, change or remove a step, run one of the app's commands), and every change is checked exactly
+  as a typed step is before it touches the part, so a bad request is refused with the reason and nothing half-done
+  is left. Each change is one undo step; each answer shows roughly what it cost on your Anthropic account. The key
+  is kept in Windows Credential Manager, never in a file, and is sent only to Anthropic. Without a key, or with no
+  internet, he answers from his own how-tos as before. Model: Claude Opus 5.5.
 - Feel: the camera glides to a new view on a critically damped spring and can be grabbed mid-way; on/off and
   choice switches slide their highlight; menus grow from where they were opened; buttons give a little when pressed.
   Softer studio lighting, a contact shadow under the part, a rounded plate whose grid fades out at the edges, and

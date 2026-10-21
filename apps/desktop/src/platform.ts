@@ -66,9 +66,19 @@ export interface Platform {
     set(on: boolean): Promise<void>;
     onChange(listener: (on: boolean) => void): () => void;
   };
+  /**
+   * The user's own Anthropic key, for Blurry to ask Claude. The desktop app keeps it in the computer's credential
+   * store (Windows Credential Manager); the browser build only holds it until the tab is closed.
+   */
+  helperKey: {
+    read(): Promise<string | null>;
+    write(key: string): Promise<void>;
+    clear(): Promise<void>;
+  };
 }
 
 const RECOVERY_KEY = "studio3d.recovery";
+let browserKey: string | null = null;
 const PROJECT_FILTER = { name: "Studio 3D project", extensions: [FILE_EXTENSION] };
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const withExt = (name: string, ext: string) => (name.toLowerCase().endsWith(`.${ext}`) ? name : `${name}.${ext}`);
@@ -161,8 +171,19 @@ const desktop: Platform = {
     clear: () => invoke("clear_recovery"),
   },
 
+  helperKey: {
+    read: () => invoke<string | null>("helper_key_read"),
+    write: (key) => invoke("helper_key_write", { key }),
+    clear: () => invoke("helper_key_clear"),
+  },
+
   confirmDiscard(message) {
-    return ask(message, { title: "Unsaved changes", kind: "warning", okLabel: "Discard changes", cancelLabel: "Keep working" });
+    return ask(message, {
+      title: "Unsaved changes",
+      kind: "warning",
+      okLabel: "Discard changes",
+      cancelLabel: "Keep working",
+    });
   },
 
   setTitle(title) {
@@ -242,6 +263,19 @@ const browser: Platform = {
       } catch {
         // nothing to clear
       }
+    },
+  },
+
+  // Never written to the browser's storage: a key there would outlive the tab and be readable by anything on the page.
+  helperKey: {
+    read: async () => browserKey,
+    async write(key) {
+      if (!/^sk-ant-[\x21-\x7e]{1,505}$/.test(key))
+        throw new Error("That doesn't look like an Anthropic API key. Keys start with sk-ant-.");
+      browserKey = key;
+    },
+    async clear() {
+      browserKey = null;
     },
   },
 

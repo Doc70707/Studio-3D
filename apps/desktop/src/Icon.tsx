@@ -55,6 +55,9 @@ const PATHS = {
   cube: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9",
   command: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM7 9l3 3-3 3M12 15h5",
   edge: "M4 18L18 4M4 18h4M18 4v4",
+  key: "M15 4a5 5 0 1 1-4.6 7L4 17.4V20h3v-2h2v-2h2l1.4-1.4A5 5 0 0 1 15 4zM16 8h.01",
+  send: "M12 19V5M6 11l6-6 6 6",
+  stop: "M8 8h8v8H8z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

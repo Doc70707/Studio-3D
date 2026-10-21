@@ -104,6 +104,8 @@ import { UnitsSwitch } from "./UnitsSwitch";
 import { Icon } from "./Icon";
 import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
 import { Blurry } from "./Blurry";
+import type { HelperContext } from "./helperAI";
+import type { HelperChange } from "./helperTools";
 import { indexCommands, type Command } from "./commands";
 import { type Tool as SketchTool } from "./SketchEditor";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
@@ -214,6 +216,10 @@ export function App() {
   const [commandPrompt, setCommandPrompt] = useState<CommandPrompt | null>(null);
   /** Blurry's panel is open. */
   const [helperOpen, setHelperOpen] = useState(false);
+  /** What Blurry with Claude sees and does, kept current on every render (his answers outlive a render). */
+  const helperNow = useRef<{ context: HelperContext; apply: (c: HelperChange) => void } | null>(null);
+  const helperContext = useCallback(() => helperNow.current!.context, []);
+  const helperApply = useCallback((c: HelperChange) => helperNow.current!.apply(c), []);
   const waitingStep = useRef<{ title: string; count: number } | null>(null);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
@@ -1940,6 +1946,22 @@ export function App() {
       reason: "Sketches are drawn in Design",
     })),
   );
+  // Blurry with Claude reads the app as it is at each step of an answer, and makes changes as ordinary steps.
+  helperNow.current = {
+    context: {
+      doc,
+      units,
+      picked: edgePicks,
+      selected: selected?.name ?? null,
+      commands: commands.filter((c) => !c.disabled).map((c) => c.title),
+    },
+    apply: (change) => {
+      if (change.kind === "add") addAndSelect(change.feature);
+      else if (change.kind === "update") project.updateFeature(change.id, change.patch);
+      else if (change.kind === "remove") project.removeFeature(change.id);
+      else commands.find((c) => c.title === change.title && !c.disabled)?.run();
+    },
+  };
   /** After a typed command, the size it asks for (see the effect that sets the prompt). */
   const onCommandRan = (c: Command) => {
     setCommandPrompt(null);
@@ -2080,7 +2102,14 @@ export function App() {
             </button>
           </div>
         )}
-        {!draft && !focus && <Blurry commands={commands} open={helperOpen} onOpen={setHelperOpen} />}
+        <Blurry
+          commands={commands}
+          open={helperOpen}
+          onOpen={setHelperOpen}
+          hidden={!!draft || focus}
+          context={helperContext}
+          apply={helperApply}
+        />
         {layout.commandLine && !draft && (
           <div className="command-dock" ref={commandBox}>
             <CommandLine

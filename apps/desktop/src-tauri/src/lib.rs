@@ -2,8 +2,10 @@
 // geometry all run in the webview. The shell adds native file dialogs and
 // safe file reads/writes, limited to project (.s3d) and export (.stl, .3mf) files,
 // a crash-recovery copy of unsaved work in the app's own data folder, and handing
-// a part to a slicer the user installed (run as its own program, never linked).
+// a part to a slicer the user installed (run as its own program, never linked), and keeping the
+// user's own Anthropic key for Blurry in the computer's credential store.
 mod files;
+mod helper_key;
 mod slicers;
 
 use std::collections::HashMap;
@@ -82,6 +84,21 @@ fn open_in_slicer(
     Ok(file.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+fn helper_key_read() -> Result<Option<String>, String> {
+    helper_key::read()
+}
+
+#[tauri::command]
+fn helper_key_write(key: String) -> Result<(), String> {
+    helper_key::write(key.trim())
+}
+
+#[tauri::command]
+fn helper_key_clear() -> Result<(), String> {
+    helper_key::clear()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -94,7 +111,10 @@ pub fn run() {
             write_recovery,
             clear_recovery,
             find_slicers,
-            open_in_slicer
+            open_in_slicer,
+            helper_key_read,
+            helper_key_write,
+            helper_key_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running Studio 3D");

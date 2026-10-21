@@ -122,5 +122,6 @@ test("floating palettes are glass over the view, and the part still centres in t
   expect(top).toBeGreaterThan(60);
   expect(bottom).toBeGreaterThanOrEqual(0);
   // Floating palettes stand clear of the window's edge.
-  expect((await palette(page, "Browser").boundingBox())!.x).toBeGreaterThan(4);
+  // (They move off the edge just after the switch, as the layout settles.)
+  await expect.poll(async () => (await palette(page, "Browser").boundingBox())!.x).toBeGreaterThan(4);
 });
