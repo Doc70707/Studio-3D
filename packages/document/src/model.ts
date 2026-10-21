@@ -11,10 +11,12 @@ import {
   SPIN_PLANE,
   dot,
   length3,
+  type Vec3,
 } from "./sketch";
 import { currentFace, faceEdgeIssues, type HoleFace } from "./holeFace";
 import type { ReferenceImage } from "./reference";
 import type { PrintSetup } from "./print";
+import { lengthText } from "./units";
 import {
   CLEARANCE,
   CLEARANCE_SERIES,
@@ -179,26 +181,36 @@ export interface HollowFeature {
   open: OpenSide;
 }
 
-/** Which edges of the part a fillet or chamfer goes on. Rules, not picked edges, so they survive any change. */
-export type EdgeSet = "all" | "vertical" | "top" | "bottom";
+/**
+ * Which edges of the part a fillet or chamfer goes on: a rule, which survives any change to the part, or edges picked
+ * in the 3D view, found again by where their middles are (an earlier change that moves a picked edge leaves it out,
+ * and says so).
+ */
+export type EdgeSet = "all" | "vertical" | "top" | "bottom" | "picked";
 
 export const EDGE_SETS: { edges: EdgeSet; label: string; help: string }[] = [
   { edges: "all", label: "All edges", help: "Every edge of the part" },
   { edges: "vertical", label: "Upright edges", help: "Straight edges that point straight up, like a box's corners" },
   { edges: "top", label: "Top edges", help: "Edges around the very top of the part" },
   { edges: "bottom", label: "Bottom edges", help: "Edges on the plate; a small chamfer here stops elephant's foot" },
+  { edges: "picked", label: "Picked edges", help: "The edges you clicked in the 3D view" },
 ];
 
 /**
  * Rounds (fillet) or bevels (chamfer) edges of the part built so far. `size` is the radius of a fillet, or how far
  * a chamfer cuts back along each face.
  */
+/** How far (mm) a picked edge's middle may be from where it was picked and still be that edge. */
+export const PICK_TOLERANCE = 0.01;
+
 export interface EdgeFeature {
   id: string;
   type: "fillet" | "chamfer";
   name: string;
   size: number;
   edges: EdgeSet;
+  /** For picked edges: the middle of each, in mm. */
+  picked?: Vec3[];
 }
 
 /**
@@ -408,11 +420,17 @@ export function newHollow(doc: ProjectDocument): HollowFeature {
   return { id: newId(), type: "hollow", name: nextName(doc, "Hollow"), wall: 2, open: "top" };
 }
 
-/** A new fillet (1 mm, every edge) or chamfer (0.6 mm on the bottom edges, which stops elephant's foot). */
-export function newEdgeStep(doc: ProjectDocument, type: EdgeFeature["type"]): EdgeFeature {
-  return type === "fillet"
-    ? { id: newId(), type, name: nextName(doc, "Fillet"), size: 1, edges: "all" }
-    : { id: newId(), type, name: nextName(doc, "Chamfer"), size: 0.6, edges: "bottom" };
+/**
+ * A new fillet (1 mm, every edge) or chamfer (0.6 mm on the bottom edges, which stops elephant's foot), or either on
+ * just the edges picked in the 3D view.
+ */
+export function newEdgeStep(doc: ProjectDocument, type: EdgeFeature["type"], picked: Vec3[] = []): EdgeFeature {
+  const step: EdgeFeature =
+    type === "fillet"
+      ? { id: newId(), type, name: nextName(doc, "Fillet"), size: 1, edges: "all" }
+      : { id: newId(), type, name: nextName(doc, "Chamfer"), size: 0.6, edges: "bottom" };
+  // Edges picked in the 3D view first: the step goes on just those.
+  return picked.length ? { ...step, edges: "picked", picked: picked.map((p) => [...p] as Vec3) } : step;
 }
 
 /**
@@ -514,7 +532,7 @@ export interface Issue {
   message: string;
 }
 
-const fmt = (n: number) => `${Math.round(n * 100) / 100} mm`;
+const fmt = (n: number) => lengthText(n);
 
 /** Plain-language names for every number a shape can have. */
 export const FIELD_LABELS: Record<string, string> = {
@@ -821,6 +839,7 @@ export function validateEdgeStep(e: EdgeFeature): Issue[] {
   if (e.size < 0.1) return add("size", `${what} needs to be at least ${fmt(0.1)}.`);
   if (e.size > LIMITS.maxSize) return add("size", `${what} can be at most ${fmt(LIMITS.maxSize)}.`);
   if (!EDGE_SETS.some((x) => x.edges === e.edges)) return add("edges", "Choose which edges to change.");
+  if (e.edges === "picked" && !e.picked?.length) return add("edges", "Pick at least one edge in the 3D view.");
   return [];
 }
 
@@ -1021,15 +1040,13 @@ export const headOf = (h: HoleFeature): HoleHead | undefined => (h.thread ? unde
 /** The widest a hole cuts, at its face: the head recess when it has one, else its bore. */
 export const holeDiameter = (h: HoleFeature): number => Math.max(boreDiameter(h), headOf(h)?.diameter ?? 0);
 
-const short = (n: number) => `${Math.round(n * 100) / 100 + 0}`;
-
 /** What kind of hole it is, in a few words: "Ø5 mm", "M5 thread", "M6 tapped, Ø5 mm drill", "M5 clearance Ø5.5 mm". */
 export function holeKindLabel(h: HoleFeature): string {
   const lh = h.hand === "left" ? " left-hand" : "";
   if (h.thread)
-    return h.simplified ? `${h.thread}${lh} tapped, Ø${short(boreDiameter(h))} mm drill` : `${h.thread}${lh} thread`;
-  if (h.clearance) return `${h.clearance.screw} clearance Ø${short(boreDiameter(h))} mm`;
-  return `Ø${short(h.diameter)} mm`;
+    return h.simplified ? `${h.thread}${lh} tapped, Ø${lengthText(boreDiameter(h))} drill` : `${h.thread}${lh} thread`;
+  if (h.clearance) return `${h.clearance.screw} clearance Ø${lengthText(boreDiameter(h))}`;
+  return `Ø${lengthText(h.diameter)}`;
 }
 
 /** How deep a head recess reaches below the face: a counterbore's depth, or a 90° countersink's cone. */

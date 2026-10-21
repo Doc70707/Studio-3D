@@ -143,6 +143,8 @@ async function findSnap(page: Page, kind: string, from: [number, number], to: [n
 }
 
 test("3D: Measure snaps to the part's real corners and gives the exact distance", async ({ page }) => {
+  // Hundreds of small pointer moves, each drawn by software graphics: slow on a busy test machine.
+  test.setTimeout(240_000);
   // Looking straight down, without perspective: the block's top is a 60 x 40 rectangle on screen.
   await topView(page);
   await page.getByRole("tab", { name: "View" }).click();

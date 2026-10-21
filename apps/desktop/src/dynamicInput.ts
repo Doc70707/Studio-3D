@@ -2,6 +2,7 @@
 // small boxes at the pointer (Tab moves to the next box) and Enter finishes the shape with them. A box you haven't
 // typed in follows the pointer. Pure functions, so they are unit-tested without a screen.
 import type { Point2 } from "@studio3d/document";
+import { fromDisplay, lengthNumber } from "@studio3d/document";
 import { exact, isPointKey, parsePoint } from "./precision";
 
 export type DrawKind = "rectangle" | "circle" | "polygon";
@@ -82,14 +83,20 @@ export function typedPoint(kind: DrawKind, from: Point2, pointer: Point2 | null,
   const p = pointer ?? [from[0] + 1, from[1] + 1];
   const dx = p[0] - from[0];
   const dy = p[1] - from[1];
-  const v = (i: number) => (t ? typedNumber(t.values[i]) : null);
+  /** A typed size, in millimetres (typed in the units shown). */
+  const v = (i: number) => {
+    const n = t ? typedNumber(t.values[i]) : null;
+    return n === null ? null : fromDisplay(n);
+  };
   if (kind === "rectangle") {
     const w = v(0);
     const h = v(1);
     // A negative typed size draws to the other side; otherwise the pointer says which side.
     const x = w === null ? p[0] : from[0] + (w < 0 ? w : (dx < 0 ? -1 : 1) * w);
     const y = h === null ? p[1] : from[1] + (h < 0 ? h : (dy < 0 ? -1 : 1) * h);
-    return [round(x), round(y)];
+    // A typed size is kept exact (1/16 inch isn't a whole number of hundredths of a millimetre); the pointer's
+    // position is rounded as before.
+    return [w === null ? round(x) : exact(x), h === null ? round(y) : exact(y)];
   }
   const dist = Math.hypot(dx, dy);
   if (kind === "circle") {
@@ -102,7 +109,7 @@ export function typedPoint(kind: DrawKind, from: Point2, pointer: Point2 | null,
   }
   if (t?.point !== undefined) return parsePoint(t.point, from) ?? p;
   const len = v(0) ?? dist;
-  const typedAngle = v(1);
+  const typedAngle = t ? typedNumber(t.values[1]) : null; // degrees, not a size
   const angle = typedAngle !== null ? (typedAngle * Math.PI) / 180 : dist > 1e-9 ? Math.atan2(dy, dx) : 0;
   if (v(0) === null && typedAngle === null) return p;
   // Kept to 6 decimals, not 2, so a chain of typed sides adds up exactly.
@@ -113,8 +120,10 @@ export function typedPoint(kind: DrawKind, from: Point2, pointer: Point2 | null,
 export function liveValues(kind: DrawKind, from: Point2, to: Point2): string[] {
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
-  if (kind === "rectangle") return [String(round(Math.abs(dx))), String(round(Math.abs(dy)))];
-  if (kind === "circle") return [String(round(2 * Math.hypot(dx, dy)))];
+  // Sizes in the units shown (millimetres or inches); the angle in degrees.
+  const len = (n: number) => String(lengthNumber(n));
+  if (kind === "rectangle") return [len(Math.abs(dx)), len(Math.abs(dy))];
+  if (kind === "circle") return [len(2 * Math.hypot(dx, dy))];
   const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
-  return [String(round(Math.hypot(dx, dy))), String(round(deg < 0 ? deg + 360 : deg))];
+  return [len(Math.hypot(dx, dy)), String(round(deg < 0 ? deg + 360 : deg))];
 }

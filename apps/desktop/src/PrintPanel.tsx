@@ -8,13 +8,15 @@ import {
   PRINTERS,
   type PrintCheck,
   type Printer,
+  getDisplayUnits,
+  lengthNumber,
+  volumeText,
 } from "@studio3d/document";
 import { PLA, type SlicedLayer, type SlicerSettings } from "@studio3d/geometry";
 import { Icon } from "./Icon";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { defaultSlicer, readSlicerMemory, slicerList, writeSlicerMemory, type SlicerMemory } from "./slicerChoice";
 
-const round = (n: number) => Math.round(n * 10) / 10 + 0;
 /** What the maker publishes about the printer, leaving out anything they don't state. */
 export function printerSummary(p: Printer): string {
   const parts = [`Build volume ${p.volume.join(" × ")} mm.`];
@@ -403,9 +405,11 @@ export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(
       {state.kind === "checked" && (
         <dl className="facts" data-testid="print-facts">
           <dt>Part size</dt>
-          <dd>{state.size.map(round).join(" × ")} mm</dd>
+          <dd>
+            {state.size.map((n) => lengthNumber(n)).join(" × ")} {getDisplayUnits()}
+          </dd>
           <dt>Material volume</dt>
-          <dd>{(state.volume / 1000).toFixed(2)} cm³</dd>
+          <dd>{volumeText(state.volume)}</dd>
         </dl>
       )}
       <div className="print-actions">

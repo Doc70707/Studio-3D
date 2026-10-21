@@ -2,6 +2,7 @@
 // ends and middles of edges, centres and quadrants of circles and arcs, the centre of a flat face, a point square
 // to an edge, the nearest point on an edge, and the plate's grid. Pure functions, unit-tested without a screen.
 import type { EdgeInfo, FaceInfo } from "@studio3d/geometry";
+import { lengthText } from "@studio3d/document";
 import type { SnapKind } from "./precision";
 
 export type Vec3 = [number, number, number];
@@ -170,24 +171,35 @@ function nearestOnScreen(a: Vec3, b: Vec3, q: SnapQuery): Vec3 | null {
 
 /** What an edge or face is, in words, for the right-click menu. */
 export function describeEdge(e: EdgeInfo): string {
-  const mm = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+  const mm = (n: number) => lengthText(n);
   if (e.kind === "line") return `Edge, ${mm(distance(e.start, e.end))} long`;
   if (e.kind === "circle") return `${e.closed ? "Circle" : "Arc"}, Ø${mm(2 * (e.radius ?? 0))}`;
   return "Curved edge";
 }
 
-/** The edge under the pointer (within `radius` pixels on screen), if any. */
-export function edgeAt(model: SnapModel, q: Pick<SnapQuery, "pointer" | "toScreen" | "radius">): number | null {
+/**
+ * The edge under the pointer (within `radius` pixels on screen), if any. With `visible`, an edge hidden behind the
+ * part there is left out, so a click picks the edge that is seen.
+ */
+export function edgeAt(
+  model: SnapModel,
+  q: Pick<SnapQuery, "pointer" | "toScreen" | "radius"> & { visible?: (p: Vec3) => boolean },
+): number | null {
   let best: number | null = null;
   let bestD = q.radius;
+  let bestDepth = Infinity;
   model.edges.forEach((e, i) => {
     for (let j = 0; j + 1 < e.points.length; j++) {
       const p = nearestOnScreen(e.points[j]!, e.points[j + 1]!, { ...q, kinds: [] });
       const s = p && q.toScreen(p);
       if (!s) continue;
       const d = Math.hypot(s[0] - q.pointer[0], s[1] - q.pointer[1]);
-      if (d < bestD) {
-        bestD = d;
+      // Edges drawn on top of each other (a block's top and bottom edges, seen from above): the nearer one wins.
+      const depth = s[2] ?? 0;
+      const closer = d < bestD - 0.5 || (d <= bestD + 0.5 && depth < bestDepth);
+      if (d < q.radius && closer && (!q.visible || q.visible(p))) {
+        bestD = Math.min(d, bestD);
+        bestDepth = depth;
         best = i;
       }
     }

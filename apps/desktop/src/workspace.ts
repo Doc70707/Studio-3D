@@ -20,6 +20,8 @@ export interface Workspace {
   ribbonMinimized: boolean;
   /** Docked: solid palettes against the window's edges. Floating: frosted glass over the 3D view. */
   style: "docked" | "floating";
+  /** The command line under the 3D view (Ctrl+9), for typing commands by name as in AutoCAD. */
+  commandLine: boolean;
 }
 
 export const PALETTE_MIN_WIDTH = 220;
@@ -31,6 +33,7 @@ export const DEFAULT_WORKSPACE: Workspace = {
   properties: { shown: true, collapsed: false, width: 300 },
   ribbonMinimized: false,
   style: "docked",
+  commandLine: false,
 };
 
 export const WORKSPACE_KEY = "studio3d.workspace";
@@ -64,6 +67,7 @@ export function parseWorkspace(text: string | null): Workspace {
     browser: palette(r.browser, d.browser),
     properties: palette(r.properties, d.properties),
     ribbonMinimized: typeof r.ribbonMinimized === "boolean" ? r.ribbonMinimized : d.ribbonMinimized,
+    commandLine: typeof r.commandLine === "boolean" ? r.commandLine : d.commandLine,
     style: r.style === "floating" ? "floating" : "docked",
   };
 }

@@ -58,6 +58,7 @@ import {
   type HoleFeature,
   type HollowFeature,
   type EdgeFeature,
+  PICK_TOLERANCE,
   type MirrorFeature,
   type PatternFeature,
   type Issue,
@@ -591,11 +592,21 @@ export function hollow(part: Part, h: HollowFeature): Part {
   return { shape: result, volume, pieces: result.solids.length };
 }
 
-/** Whether an edge belongs to a fillet's or chamfer's set, judged from where it lies on the part. */
-function edgeChooser(set: EdgeFeature["edges"], partMin: number[], partMax: number[]): (e: Edge) => boolean {
+/**
+ * Whether an edge belongs to a fillet's or chamfer's set, judged from where it lies on the part. A picked edge is the
+ * one whose middle is where the picked edge's middle was.
+ */
+function edgeChooser(f: EdgeFeature, partMin: number[], partMax: number[]): (e: Edge) => boolean {
+  const set = f.edges;
   const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
   return (e) => {
     if (set === "all") return true;
+    if (set === "picked") {
+      const m = e.pointAt(0.5);
+      const at = [m.x, m.y, m.z];
+      m.delete();
+      return (f.picked ?? []).some((p) => Math.hypot(p[0] - at[0]!, p[1] - at[1]!, p[2] - at[2]!) < PICK_TOLERANCE);
+    }
     const [lo, hi] = e.boundingBox.bounds;
     if (set === "top") return near(lo[2]!, partMax[2]!) && near(hi[2]!, partMax[2]!);
     if (set === "bottom") return near(lo[2]!, partMin[2]!) && near(hi[2]!, partMin[2]!);
@@ -611,13 +622,22 @@ function edgeChooser(set: EdgeFeature["edges"], partMin: number[], partMax: numb
  */
 export function edgeStep(part: Part, f: EdgeFeature): Part {
   const [min, max] = part.shape.boundingBox.bounds;
-  const chosen = edgeChooser(f.edges, min, max);
+  const chosen = edgeChooser(f, min, max);
   const edges = part.shape.edges;
   const picked = edges.filter(chosen);
   const length = picked.reduce((a, e) => a + e.length, 0);
   edges.forEach((e) => e.delete());
   const what = f.type === "fillet" ? "round" : "bevel";
   const set = EDGE_SETS.find((x) => x.edges === f.edges)!.label.toLowerCase();
+  if (f.edges === "picked" && picked.length < (f.picked?.length ?? 0)) {
+    const lost = (f.picked?.length ?? 0) - picked.length;
+    throw new ShapeCheckFailed(
+      `${lost === 1 ? "A picked edge has" : `${lost} picked edges have`} moved or gone after an earlier change. ` +
+        `Pick the edges again.`,
+      f.id,
+      "edges",
+    );
+  }
   if (!picked.length)
     throw new ShapeCheckFailed(`The part has no ${set} to ${what}. Choose other edges.`, f.id, "edges");
 
@@ -957,9 +977,21 @@ export function tessellate(shape: Shape3D): MeshData {
     edges: new Float32Array(e.lines),
     faces: new Uint32Array(m.faceGroups.flatMap((g) => [g.start, g.count])),
     owners: [],
-    edgeInfo: shape.edges.map(edgeInfo),
+    edgeInfo: edgesWithSeams(shape),
     faceInfo: shape.faces.map(faceInfo),
   };
+}
+
+/** Every edge for snapping and picking, with the seams of round faces marked. */
+function edgesWithSeams(shape: Shape3D): EdgeInfo[] {
+  const oc = getOC();
+  const seams: Edge[] = [];
+  for (const face of shape.faces)
+    for (const edge of face.edges) if (oc.BRep_Tool.IsClosed(edge.wrapped, face.wrapped)) seams.push(edge);
+  return shape.edges.map((edge) => {
+    const info = edgeInfo(edge);
+    return seams.some((s) => s.isSame(edge)) ? { ...info, seam: true } : info;
+  });
 }
 
 type P3 = [number, number, number];

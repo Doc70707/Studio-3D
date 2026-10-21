@@ -28,6 +28,8 @@ export interface EdgeInfo {
   middle: Point3;
   /** True for a whole circle or any edge that ends where it starts. */
   closed: boolean;
+  /** Where a round face meets itself (the line down a cylinder's side): drawn, but not a corner to round off. */
+  seam?: boolean;
   /** Points along the edge, start to end, close enough together to find the nearest point on it. */
   points: Point3[];
   /** Circles only. */

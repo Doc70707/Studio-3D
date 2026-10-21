@@ -26,6 +26,9 @@ import {
   type SketchPlane,
   type HoleFace,
   newId,
+  lengthText,
+  getDisplayUnits,
+  MM_PER_INCH,
 } from "@studio3d/document";
 import type { DraftHole } from "./faceHoles";
 import {
@@ -62,6 +65,8 @@ import { Icon } from "./Icon";
 import { NumberField } from "./NumberField";
 import { ContextMenu, SnapGlyph, snapShape, type SnapChoice } from "./ContextMenu";
 import { toggleSnap, useSnaps } from "./snapSettings";
+import { UnitsSwitch } from "./UnitsSwitch";
+import { useUnits } from "./unitsSetting";
 
 /** What is being drawn: the sketch itself, plus the face it sits on (in sketch coordinates). */
 export interface SketchDraft {
@@ -75,9 +80,11 @@ export interface SketchDraft {
   holeFace?: HoleFace | null;
   /** Holes placed while sketching; they become hole steps when the sketch is done. */
   holes?: DraftHole[];
+  /** The tool to start with (the command line's RECTANGLE, CIRCLE, LINE, POLYGON); a rectangle when not given. */
+  tool?: Tool;
 }
 
-type Tool = "select" | "rectangle" | "circle" | "polygon" | "regular" | "hole";
+export type Tool = "select" | "rectangle" | "circle" | "polygon" | "regular" | "hole";
 type Pending =
   /** `sides`: a regular polygon, drawn like a circle from its centre out to the middle of a flat. */
   | { kind: "rectangle" | "circle"; start: Point2; pressed: boolean; sides?: number }
@@ -131,7 +138,8 @@ const SNAP_PX = 10;
 /** Angle steps the outline tool can click to, in degrees (0 = off). */
 const ANGLE_STEPS = [0, 15, 30, 45, 90];
 const round = (n: number) => Math.round(n * 100) / 100 + 0;
-const mm = (n: number) => `${round(n)} mm`;
+const exactLength = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
+const mm = (n: number) => lengthText(n);
 const same = (a: Point2, b: Point2) => Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9;
 
 export function SketchEditor(props: {
@@ -157,7 +165,7 @@ export function SketchEditor(props: {
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [cam, setCam] = useState<{ cx: number; cy: number; k: number } | null>(null);
-  const [tool, setTool] = useState<Tool>("rectangle");
+  const [tool, setTool] = useState<Tool>(draft.tool ?? "rectangle");
   const [selected, setSelectedShape] = useState<number | null>(null);
   /** Holes can go in only when sketching on a face of the part. */
   const holeFace = draft.holeFace ?? null;
@@ -183,6 +191,7 @@ export function SketchEditor(props: {
   const [ortho, setOrtho] = useState(false);
   const [angleStep, setAngleStep] = useState(0);
   const [snaps, setSnaps] = useSnaps();
+  const inches = useUnits() === "in";
   /** A snap picked from the right-click menu for the next point only (AutoCAD's snap override). */
   const [once, setOnce] = useState<SnapKind | null>(null);
   /** The right-click menu: where it opened, in window pixels and in sketch millimetres. */
@@ -278,8 +287,11 @@ export function SketchEditor(props: {
       cam ? [cam.cx + (px - size.w / 2) / cam.k, cam.cy - (py - size.h / 2) / cam.k] : [0, 0],
     [cam, size],
   );
-  /** The grid the pointer snaps to: finer when zoomed in. */
-  const step = k >= 12 ? 0.5 : k >= 2.5 ? 1 : 5;
+  /** The grid the pointer snaps to: finer when zoomed in; 1/32, 1/16 and 1/4 inch when sizes are in inches. */
+  const step = inches ? (k >= 12 ? 1 / 32 : k >= 2.5 ? 1 / 16 : 1 / 4) * MM_PER_INCH : k >= 12 ? 0.5 : k >= 2.5 ? 1 : 5;
+  /** A grid point, kept exact: a 1/16 inch grid isn't a whole number of hundredths of a millimetre. */
+  const onGrid = (v: number) =>
+    inches ? exactLength(Math.round(v / step) * step) : round(Math.round(v / step) * step);
 
   /** Everything worth snapping to: the face's outline, every shape drawn, and the outline being drawn. */
   const faceEdges = useMemo(() => (draft.face ? boundaryEdges(draft.face.triangles) : []), [draft.face]);
@@ -315,7 +327,7 @@ export function SketchEditor(props: {
         if (held.angle !== null) return { point: held.point, snap: null, angle: held.angle };
       }
       const point: Point2 = snaps.kinds.includes("grid")
-        ? [round(Math.round(raw[0] / step) * step), round(Math.round(raw[1] / step) * step)]
+        ? [onGrid(raw[0]), onGrid(raw[1])]
         : [round(raw[0]), round(raw[1])];
       return { point, ...free };
     },
@@ -930,7 +942,7 @@ export function SketchEditor(props: {
         >
           {cam && (
             <>
-              <Grid cam={cam} size={size} />
+              <Grid cam={cam} size={size} inches={inches} />
               {(props.references ?? []).map((r) => (
                 <Underlay key={r.id} reference={r} plane={s.plane} k={cam.k} toScreen={toScreen} />
               ))}
@@ -1121,6 +1133,7 @@ export function SketchEditor(props: {
               : `${s.profiles.length} shape${s.profiles.length === 1 ? "" : "s"} drawn` +
                 (holes.length ? ` · ${holes.length} hole${holes.length === 1 ? "" : "s"}` : "")}
           </span>
+          <UnitsSwitch />
         </div>
         {(tool === "hole" || tool === "regular") && props.view === "2d" && (
           <div
@@ -1301,9 +1314,13 @@ function nearOutline(q: Point2, pts: Point2[], tolerance: number): boolean {
   });
 }
 
-function Grid({ cam, size }: { cam: { cx: number; cy: number; k: number }; size: { w: number; h: number } }) {
-  const minor = [1, 5, 10, 50, 100].find((g) => g * cam.k >= 8) ?? 100;
-  const major = minor * 10;
+function Grid(props: { cam: { cx: number; cy: number; k: number }; size: { w: number; h: number }; inches: boolean }) {
+  const { cam, size } = props;
+  // In inches: lines every 1/16, 1/8, 1/4 or 1 inch, with a heavier line every inch (every 4 inches zoomed out).
+  const minor = props.inches
+    ? ([1 / 16, 1 / 8, 1 / 4, 1, 4].find((g) => g * MM_PER_INCH * cam.k >= 8) ?? 4) * MM_PER_INCH
+    : ([1, 5, 10, 50, 100].find((g) => g * cam.k >= 8) ?? 100);
+  const major = props.inches ? Math.max(MM_PER_INCH, minor * 4) : minor * 10;
   const x0 = cam.cx - size.w / 2 / cam.k;
   const x1 = cam.cx + size.w / 2 / cam.k;
   const y0 = cam.cy - size.h / 2 / cam.k;
@@ -1794,7 +1811,7 @@ function TypedBoxes(props: { pending: NonNullable<Pending>; typed: Typed; from: 
       {labels.map((label, i) => {
         const value = props.typed.values[i] ?? "";
         const active = i === props.typed.active;
-        const unit = label === "Angle" ? "°" : " mm";
+        const unit = label === "Angle" ? "°" : ` ${getDisplayUnits()}`;
         return (
           <g
             key={label}

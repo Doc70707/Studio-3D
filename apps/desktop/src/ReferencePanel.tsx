@@ -11,6 +11,10 @@ import {
   type Point2,
   type ReferenceImage,
   type ReferencePlane,
+  getDisplayUnits,
+  lengthNumber,
+  lengthText,
+  toDisplay,
 } from "@studio3d/document";
 import { NumberField } from "./NumberField";
 
@@ -74,7 +78,8 @@ export function ReferenceProps(props: {
   return (
     <>
       <p className="props-note" data-testid="reference-size">
-        {round(w)} × {round(h)} mm ({round(r.scale, 4)} mm per pixel).{" "}
+        {lengthNumber(w)} × {lengthNumber(h)} {getDisplayUnits()} (
+        {round(toDisplay(r.scale), getDisplayUnits() === "in" ? 5 : 4)} {getDisplayUnits()} per pixel).{" "}
         {r.calibrated ? "Sized from a known distance." : "Not calibrated yet: the size is a guess."}
       </p>
       <button type="button" className="link calibrate-link" onClick={props.onCalibrate}>
@@ -285,8 +290,8 @@ export function CalibrateDialog(props: {
         )}
         {scale && (
           <p className="props-note" data-testid="calibrate-result">
-            {round(pixels, 1)} pixels = {round(distance)} mm, so the picture is {round(r.pixels[0] * scale)} ×{" "}
-            {round(r.pixels[1] * scale)} mm.
+            {round(pixels, 1)} pixels = {lengthText(distance)}, so the picture is {lengthNumber(r.pixels[0] * scale)} ×{" "}
+            {lengthText(r.pixels[1] * scale)}.
           </p>
         )}
         <div className="actions">

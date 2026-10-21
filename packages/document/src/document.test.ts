@@ -318,6 +318,29 @@ describe("fillets and chamfers", () => {
     const bad = parseProject(serializeProject(doc, app).replace('"edges": "vertical"', '"edges": "some"'));
     expect(!bad.ok && bad.error).toContain("which edges");
   });
+
+  it("picked edges are saved by their middles, need at least one, and damaged picks are refused", () => {
+    const doc = withEdges("fillet", { size: 2, edges: "picked", picked: [[30, -20, 15]] });
+    expect(validateDocument(doc)).toEqual([]);
+    const r = parseProject(serializeProject(doc, app));
+    expect(r.ok && r.document).toEqual(doc);
+    expect(validateDocument(withEdges("fillet", { edges: "picked", picked: [] }))[0]!.message).toBe(
+      "Pick at least one edge in the 3D view.",
+    );
+    const text = serializeProject(doc, app);
+    // Only the picks are damaged: ids and the save time can hold any digits, so "15" alone isn't safe to replace.
+    const picks = text.slice(text.indexOf('"picked": ['));
+    const at = text.length - picks.length;
+    const damaged = [
+      text.slice(0, at) + picks.replace("15", '"x"'),
+      text.slice(0, at) + picks.replace('"picked": [', '"picked": [[1], '),
+    ];
+    for (const d of damaged) expect(d).not.toBe(text);
+    for (const d of damaged) {
+      const bad = parseProject(d);
+      expect(!bad.ok && bad.error).toContain("picked edges");
+    }
+  });
 });
 
 describe("threads", () => {

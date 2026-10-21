@@ -3,6 +3,7 @@ import {
   Viewport,
   isWebGLAvailable,
   partDimensions,
+  setDimensionFormat,
   type CameraState,
   type Projection,
   type StandardView,
@@ -24,6 +25,7 @@ import {
   type PrintJobResult,
   type SlicedPart,
   type SlicerSettings,
+  type EdgeInfo,
   type MeshData,
   type StlReport,
 } from "@studio3d/geometry";
@@ -41,6 +43,7 @@ import {
   movableAxes,
   newHole,
   newEdgeStep,
+  PICK_TOLERANCE,
   newHollow,
   newMirror,
   newPattern,
@@ -65,6 +68,9 @@ import {
   DEFAULT_WALLS,
   DEFAULT_INFILL,
   LINE_WIDTH,
+  getDisplayUnits,
+  lengthNumber,
+  lengthText,
 } from "@studio3d/document";
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { SHAPE_ORDER, copySource, placeNew, useDesignPanel } from "./DesignPanel";
@@ -93,7 +99,12 @@ import { SKETCH_ONLY, SNAPS_3D, describeEdge, distance, edgeAt, findSnap3, type 
 import { SNAP_KINDS, SNAP_LABELS, type SnapKind } from "./precision";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
+import { toggleUnits, useUnits } from "./unitsSetting";
+import { UnitsSwitch } from "./UnitsSwitch";
 import { Icon } from "./Icon";
+import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
+import { indexCommands, type Command } from "./commands";
+import { type Tool as SketchTool } from "./SketchEditor";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { PrintPanel, type LayerPreview, type PrintState, type SliceSummary } from "./PrintPanel";
 import { escapeLeaves, focusPanelAfterSelection, type FocusPanel } from "./screen";
@@ -174,6 +185,7 @@ export function App() {
   /** Where the pointer would put the next measuring point, shown as a live line from the first. */
   const [measureCursor, setMeasureCursor] = useState<Vec3 | null>(null);
   const [snaps, setSnaps] = useSnaps();
+  const units = useUnits();
   /** A snap picked from the right-click menu for the next point only (AutoCAD's snap override). */
   const [snapOnce, setSnapOnce] = useState<SnapKind | null>(null);
   /** The snap the pointer is on, drawn at its place in the 3D view. */
@@ -191,6 +203,15 @@ export function App() {
     measuring: measure !== null,
   });
   const hovered = useRef<string | null>(null);
+  /** Edges clicked in the 3D view (their middles), for a fillet or chamfer on just those. */
+  const [edgePicks, setEdgePicks] = useState<Vec3[]>([]);
+  /** The edge under the pointer, that a click would pick. */
+  const hoverEdge = useRef<number | null>(null);
+  const commandLine = useRef<CommandLineHandle>(null);
+  const commandBox = useRef<HTMLDivElement>(null);
+  /** A value the last typed command asks for (a fillet's radius), and the command waiting for its new step. */
+  const [commandPrompt, setCommandPrompt] = useState<CommandPrompt | null>(null);
+  const waitingStep = useRef<{ title: string; count: number } | null>(null);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
   /** The reference picture being calibrated, if any. */
@@ -234,6 +255,10 @@ export function App() {
     if (focus) setFocusPanel((p) => (p === "closed" ? "open" : "closed"));
     else setPanelOpen((v) => !v);
   }, [focus]);
+  const toggleCommandLine = useCallback(() => {
+    setCommandPrompt(null);
+    arrange((w) => ({ ...w, commandLine: !w.commandLine }));
+  }, [arrange]);
   const toggleFocus = useCallback(() => {
     setFocus((f) => !f);
     setFocusPanel("closed");
@@ -286,22 +311,26 @@ export function App() {
       const left = rect(leftRef.current);
       const right = rect(rightRef.current);
       const status = rect(statusRef.current);
+      const command = rect(commandBox.current);
       const area = {
         top,
         left: left ? left.right - h.left : 0,
-        bottom: status ? h.bottom - status.top : 0,
+        bottom: Math.max(status ? h.bottom - status.top : 0, command ? h.bottom - command.top : 0),
         right: right ? h.right - right.left : 0,
       };
       vp.setSafeArea(area);
-      setSafeArea([area.top, area.left, area.bottom, area.right].map(Math.round).join(","));
+      // The status bar's own room too: the command line sits just above it.
+      const statusRoom = status ? h.bottom - status.top : 0;
+      setSafeArea([area.top, area.left, area.bottom, area.right, statusRoom].map(Math.round).join(","));
     };
     const ro = new ResizeObserver(update);
     for (const el of [hostRef.current, topbarRef.current, ribbonRef.current, leftRef.current, rightRef.current])
       if (el) ro.observe(el);
     if (statusRef.current) ro.observe(statusRef.current);
+    if (commandBox.current) ro.observe(commandBox.current);
     update();
     return () => ro.disconnect();
-  }, [printing, layout, panelShown, focus]);
+  }, [printing, layout, panelShown, focus, draft]);
 
   // Geometry engine
   useEffect(() => {
@@ -645,14 +674,67 @@ export function App() {
     return { point: snap?.point ?? hit ?? plate, snap };
   };
 
-  /** What is under the pointer, for the right-click menu's title and commands. */
-  const underPointer = (x: number, y: number) => {
+  /**
+   * The part's edge under the pointer (within 8 px), leaving out edges hidden behind the part; `pickable` leaves out
+   * the seams of round faces too, which are drawn but are no corner to round off.
+   */
+  const edgeUnder = (x: number, y: number, pickable = false): number | null => {
     const vp = viewportRef.current;
     const mesh = meshRef.current;
-    const edge =
-      vp && mesh
-        ? edgeAt({ edges: mesh.edgeInfo, faces: [] }, { pointer: [x, y], toScreen: (p) => vp.toClient(p), radius: 8 })
+    if (!vp || !mesh) return null;
+    const eye = vp.getCameraState().position;
+    const visible = (p: Vec3) => {
+      const s = vp.toClient(p);
+      const hit = s && vp.pickPoint(s[0], s[1]);
+      const far = distance(eye, p);
+      return !hit || distance(eye, hit) >= far - Math.max(0.2, far * 0.002);
+    };
+    const edges = pickable ? mesh.edgeInfo.map((e) => (e.seam ? { ...e, points: [] } : e)) : mesh.edgeInfo;
+    return edgeAt({ edges, faces: [] }, { pointer: [x, y], toScreen: (p) => vp.toClient(p), radius: 8, visible });
+  };
+
+  /** Picks the edge for a fillet or chamfer, or lets go of it when it is already picked. */
+  const pickEdge = (edge: number) => {
+    const m = meshRef.current?.edgeInfo[edge]?.middle;
+    if (!m) return;
+    setSelection(null);
+    setEdgePicks((ps) =>
+      ps.some((p) => distance(p, m) < PICK_TOLERANCE)
+        ? ps.filter((p) => distance(p, m) >= PICK_TOLERANCE)
+        : [...ps, [m[0], m[1], m[2]]],
+    );
+  };
+  const showHoverEdge = (edge: number | null) => {
+    if (hoverEdge.current === edge) return;
+    hoverEdge.current = edge;
+    // Said on the view too (set directly, as it changes with every move), for tests and tools to find edges by.
+    const e = edge !== null ? meshRef.current?.edgeInfo[edge] : undefined;
+    if (e)
+      hostRef.current?.setAttribute("data-edge-hover", e.middle.map((v) => Math.round(v * 1000) / 1000 + 0).join(","));
+    else hostRef.current?.removeAttribute("data-edge-hover");
+    drawEdgePicks();
+  };
+  /** Draws the picked edges, and the one a click would pick. */
+  const drawEdgePicks = (picks = edgePicks) => {
+    const vp = viewportRef.current;
+    const mesh = meshRef.current;
+    if (!vp) return;
+    const lines = (es: EdgeInfo[]) =>
+      es.length
+        ? new Float32Array(es.flatMap((e) => e.points.slice(1).flatMap((p, i) => [...e.points[i]!, ...p])))
         : null;
+    const picked = mesh ? picks.map((p) => mesh.edgeInfo.find((e) => distance(e.middle, p) < PICK_TOLERANCE)) : [];
+    const hover = hoverEdge.current !== null ? mesh?.edgeInfo[hoverEdge.current] : undefined;
+    vp.setEdgePicks(
+      lines(picked.filter((e): e is EdgeInfo => !!e)),
+      lines(hover && !picked.includes(hover) ? [hover] : []),
+    );
+  };
+
+  /** What is under the pointer, for the right-click menu's title and commands. */
+  const underPointer = (x: number, y: number) => {
+    const mesh = meshRef.current;
+    const edge = edgeUnder(x, y);
     const hit = faceAt(x, y);
     const info = hit && mesh ? mesh.faceInfo[hit.face] : undefined;
     // A circle edge at the mouth of a hole belongs to the hole's wall: the same radius, centred on its axis.
@@ -669,7 +751,7 @@ export function App() {
           ? `Flat face${of}`
           : info?.kind === "cylinder"
             ? info.inside
-              ? `Inside of a hole, Ø${Math.round(2 * info.radius! * 100) / 100 + 0} mm${of}`
+              ? `Inside of a hole, Ø${lengthText(2 * info.radius!)}${of}`
               : `Round face${of}`
             : hit
               ? `Curved face${of}`
@@ -743,7 +825,9 @@ export function App() {
     if (!allows(mode, "pick-face")) {
       const still = !e.buttons && !viewportRef.current?.moving;
       showPointer(still ? (viewportRef.current?.pickPoint(e.clientX, e.clientY) ?? null) : null);
-      const over = still && allows(mode, "hover") ? ownerAt(e.clientX, e.clientY) : null;
+      const edge = still && allows(mode, "select") ? edgeUnder(e.clientX, e.clientY, true) : null;
+      showHoverEdge(edge);
+      const over = still && edge === null && allows(mode, "hover") ? ownerAt(e.clientX, e.clientY) : null;
       hoverPiece(over && over.id !== selection?.id ? over.id : null);
       return;
     }
@@ -776,10 +860,14 @@ export function App() {
     if (!down || e.button !== 0 || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return; // a drag orbits
     if (!(e.target instanceof HTMLCanvasElement)) return; // a click on a floating panel, not the part
     if (allows(mode, "select")) {
-      // A click picks the piece under the pointer; a click on empty space lets go of it.
+      // A click on an edge picks it (more clicks pick more, for one fillet or chamfer on all of them); a click
+      // elsewhere picks the piece under the pointer, and a click on empty space lets go.
+      const edge = edgeUnder(e.clientX, e.clientY, true);
+      hoverPiece(null);
+      if (edge !== null) return pickEdge(edge);
+      setEdgePicks([]);
       const hit = ownerAt(e.clientX, e.clientY);
       setSelection(hit ? { id: hit.id, face: hit.face } : null);
-      hoverPiece(null);
       return;
     }
     if (!allows(mode, "pick-face")) return;
@@ -822,14 +910,41 @@ export function App() {
   const showPointer = (p: [number, number, number] | null) => {
     const el = pointerReadout.current;
     if (!el) return;
-    const n = (v: number) => (Math.round(v * 10) / 10 + 0).toFixed(1);
+    const inches = getDisplayUnits() === "in";
+    const n = (v: number) => lengthNumber(v).toFixed(inches ? 3 : 1);
     el.textContent = p
-      ? `Pointer on the part: left/right ${n(p[0])} · front/back ${n(p[1])} · height ${n(p[2])} mm`
+      ? `Pointer on the part: left/right ${n(p[0])} · front/back ${n(p[1])} · height ${n(p[2])} ${getDisplayUnits()}`
       : "";
     el.parentElement?.classList.toggle("showing-pointer", !!p);
   };
 
   useEffect(() => viewportRef.current?.setColors(viewportColors(appearance)), [appearance]);
+  useEffect(() => viewportRef.current?.setGridUnits(units), [units]);
+
+  // Picked edges: drawn over the part. After a change to the part, an edge that is no longer there is let go.
+  useEffect(() => {
+    const mesh = meshRef.current;
+    const kept = mesh ? edgePicks.filter((p) => mesh.edgeInfo.some((e) => distance(e.middle, p) < PICK_TOLERANCE)) : [];
+    if (kept.length !== edgePicks.length) return setEdgePicks(kept);
+    hoverEdge.current = null;
+    drawEdgePicks(draft || printing ? [] : edgePicks);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgePicks, built, draft, printing]);
+
+  // A command typed in the command line that adds a step asks for its main size there, as AutoCAD's FILLET asks
+  // for the radius; Enter keeps the size it starts with.
+  useEffect(() => {
+    const w = waitingStep.current;
+    if (!w || doc.features.length <= w.count) return;
+    waitingStep.current = null;
+    const f = doc.features[doc.features.length - 1]!;
+    const ask = (label: string, value: number, key: "size" | "diameter" | "wall") =>
+      setCommandPrompt({ label, value, apply: (v) => project.updateFeature(f.id, { [key]: v }) });
+    if (f.type === "fillet") ask("Fillet radius", f.size, "size");
+    else if (f.type === "chamfer") ask("Chamfer size", f.size, "size");
+    else if (f.type === "hole" && !f.thread && !f.clearance) ask("Hole diameter", f.diameter, "diameter");
+    else if (f.type === "hollow") ask("Wall thickness", f.wall, "wall");
+  }, [doc, project]);
 
   // Measurement lines and labels in the 3D view.
   useEffect(() => {
@@ -850,7 +965,7 @@ export function App() {
     // Print Studio is about the whole part on its plate: only its overall size.
     const own = focused && !printing ? featureDimensions(focused, m, built.doc) : [];
     vp.setDimensions(own.length ? own : partDimensions(m.min, m.max));
-  }, [built, showSizes, focusId, draft, printing, measure, measureCursor]);
+  }, [built, showSizes, focusId, draft, printing, measure, measureCursor, units]);
 
   // Cosmetic threads: dashed circles at the thread's full size where it starts and ends.
   useEffect(() => {
@@ -898,25 +1013,31 @@ export function App() {
     });
   }, [selectedId, moveFeature]);
 
-  const sketchOnPlate = useCallback(() => {
-    const m = built?.measurements;
-    const area: [number, number, number, number] = m
-      ? [
-          Math.min(m.min[0], -20) - 20,
-          Math.min(m.min[1], -20) - 20,
-          Math.max(m.max[0], 20) + 20,
-          Math.max(m.max[1], 20) + 20,
-        ]
-      : [-60, -60, 60, 60];
-    stopPicking();
-    setSketchView("2d");
-    setDraft({
-      feature: newSketch(doc, PLATE_PLANE, "plate", [], "add", 10),
-      isNew: true,
-      face: null,
-      area,
-    });
-  }, [built, doc, stopPicking]);
+  /** Starts a sketch on the plate, with a drawing tool picked (the command line's REC, CIRCLE, PLINE, POLYGON). */
+  const plateSketch = useCallback(
+    (tool?: SketchTool) => {
+      const m = built?.measurements;
+      const area: [number, number, number, number] = m
+        ? [
+            Math.min(m.min[0], -20) - 20,
+            Math.min(m.min[1], -20) - 20,
+            Math.max(m.max[0], 20) + 20,
+            Math.max(m.max[1], 20) + 20,
+          ]
+        : [-60, -60, 60, 60];
+      stopPicking();
+      setSketchView("2d");
+      setDraft({
+        feature: newSketch(doc, PLATE_PLANE, "plate", [], "add", 10),
+        isNew: true,
+        face: null,
+        area,
+        tool,
+      });
+    },
+    [built, doc, stopPicking],
+  );
+  const sketchOnPlate = useCallback(() => plateSketch(), [plateSketch]);
 
   /** A revolve is drawn on the upright plane through the plate's centre, as half of the part's outline. */
   const startRevolve = useCallback(() => {
@@ -1124,6 +1245,12 @@ export function App() {
         toggleFocus();
         return;
       }
+      // Ctrl+9 shows and hides the command line, as in AutoCAD.
+      if (mod && !e.shiftKey && !e.altKey && (e.code === "Digit9" || e.code === "Numpad9")) {
+        e.preventDefault();
+        toggleCommandLine();
+        return;
+      }
       if (mod && !e.shiftKey && !e.altKey && key === "b") {
         e.preventDefault();
         togglePanel();
@@ -1143,6 +1270,17 @@ export function App() {
       }
       if (digit === PROJECTION_KEY && !e.shiftKey) {
         toggleProjection();
+        return;
+      }
+      if (edgePicks.length && e.key === "Escape") {
+        setEdgePicks([]);
+        return;
+      }
+      // With the command line on, letters typed over the view go to it, as in AutoCAD (M and D are typed as
+      // commands too: M Enter shows sizes, D Enter measures).
+      if (layout.commandLine && mode === "model" && !draft && /^[a-z]$/i.test(e.key)) {
+        e.preventDefault();
+        commandLine.current?.focus(e.key);
         return;
       }
       if (selection && selected && allows(mode, "edit-keys")) {
@@ -1213,6 +1351,10 @@ export function App() {
     calibrating,
     fullScreen,
     focus,
+    edgePicks,
+    layout.commandLine,
+    draft,
+    toggleCommandLine,
   ]);
 
   // Window title and close guard
@@ -1247,8 +1389,13 @@ export function App() {
   // The menu bar: every command in one place, with its shortcut. Items are greyed out (with the reason) when they
   // can't run right now, never hidden, so the menus always look the same.
   const noView = webglError ? "The 3D view isn't available" : undefined;
-  const addAndSelect = (f: Parameters<typeof project.addFeature>[0]) => {
+  /** Adds a step; a fillet or chamfer on the picked edges uses the picks up. */
+  const addStep = (f: Parameters<typeof project.addFeature>[0]) => {
     project.addFeature(f);
+    if ((f.type === "fillet" || f.type === "chamfer") && f.edges === "picked") setEdgePicks([]);
+  };
+  const addAndSelect = (f: Parameters<typeof project.addFeature>[0]) => {
+    addStep(f);
     setSelection({ id: f.id, face: null });
   };
   const where = placeNew(built?.measurements ?? null);
@@ -1324,6 +1471,7 @@ export function App() {
           reason: noView,
         },
         { label: "Show sizes", shortcut: "M", checked: showSizes, onSelect: () => setShowSizes((v) => !v) },
+        { label: "Sizes in inches", checked: units === "in", onSelect: toggleUnits },
         {
           label: "Measure distance",
           shortcut: "D",
@@ -1355,6 +1503,7 @@ export function App() {
           checked: layout.ribbonMinimized,
           onSelect: () => arrange((w) => ({ ...w, ribbonMinimized: !w.ribbonMinimized })),
         },
+        { label: "Command line", shortcut: "Ctrl+9", checked: layout.commandLine, onSelect: toggleCommandLine },
         { label: "Reset workspace", onSelect: () => arrange(() => DEFAULT_WORKSPACE) },
         { label: "Appearance…", onSelect: () => setAppearanceOpen(true) },
         "separator" as const,
@@ -1402,13 +1551,13 @@ export function App() {
         "separator",
         {
           label: "Fillet (round edges)",
-          onSelect: () => addAndSelect(newEdgeStep(doc, "fillet")),
+          onSelect: () => addAndSelect(newEdgeStep(doc, "fillet", edgePicks)),
           disabled: !built,
           reason: "Add a shape first",
         },
         {
           label: "Chamfer (bevel edges)",
-          onSelect: () => addAndSelect(newEdgeStep(doc, "chamfer")),
+          onSelect: () => addAndSelect(newEdgeStep(doc, "chamfer", edgePicks)),
           disabled: !built,
           reason: "Add a shape first",
         },
@@ -1486,7 +1635,7 @@ export function App() {
     builtDoc: built?.doc ?? null,
     stale: !upToDate && built !== null,
     onChange: project.updateFeature,
-    onAdd: project.addFeature,
+    onAdd: addStep,
     onRemove: project.removeFeature,
     onSketchOnFace: startPicking,
     onPickHoleFace: startHolePicking,
@@ -1501,6 +1650,7 @@ export function App() {
     onChangeReference: (id, patch) => project.updateReference(id, patch),
     onRemoveReference: project.removeReference,
     onCalibrate: setCalibrating,
+    edgePicks,
   });
   /** The palette on one side of the window: Print Studio's settings, or the Browser or Properties. */
   const docked = (side: "left" | "right") => {
@@ -1763,11 +1913,46 @@ export function App() {
     ? [printTab, { ...viewTab, groups: viewTab.groups.filter((g) => g.label !== "Palettes") }]
     : [{ id: "home", label: "Home", groups: design.ribbon }, viewTab];
 
+  // The command line knows every menu and ribbon command, and the sketch tools, which start a sketch on the plate.
+  const sketchTools: [string, SketchTool][] = [
+    ["Rectangle", "rectangle"],
+    ["Circle", "circle"],
+    ["Outline", "polygon"],
+    ["Polygon", "regular"],
+  ];
+  const commands = layout.commandLine
+    ? indexCommands(
+        menus,
+        ribbonTabs,
+        sketchTools.map(([title, tool]) => ({
+          title,
+          where: ["Home › Sketch"],
+          run: () => plateSketch(tool),
+          disabled: printing,
+          reason: "Sketches are drawn in Design",
+        })),
+      )
+    : [];
+  /** After a typed command, the size it asks for (see the effect that sets the prompt). */
+  const onCommandRan = (c: Command) => {
+    setCommandPrompt(null);
+    waitingStep.current = ["Fillet", "Chamfer", "Hole", "Hollow out"].includes(c.title)
+      ? { title: c.title, count: doc.features.length }
+      : null;
+  };
+  const picks = edgePicks.length;
+  const commandHint = picks
+    ? `${picks} edge${picks === 1 ? "" : "s"} picked: type FILLET or CHAMFER`
+    : selected
+      ? `${selected.name} picked: type a command, like ERASE or MIRROR`
+      : "Type a command: BOX, HOLE, FILLET, REC, or what you want to do";
+
   return (
     <div
       className={[
         "app",
         draft && "sketching",
+        threadEdit && "threading",
         picking && "picking",
         focus && "focus",
         fullScreen && "full-screen",
@@ -1795,6 +1980,7 @@ export function App() {
         data-camera-position={camera ? camera.position.join(",") : ""}
         data-camera-target={camera ? camera.target.join(",") : ""}
         data-references={shownPictures.length}
+        data-edge-picks={edgePicks.map((p) => p.map((v) => Math.round(v * 1000) / 1000 + 0).join(",")).join(" ")}
         data-plate={printing ? printer.volume.join(",") : "256,256"}
         data-safe-area={safeArea}
         data-layers={sliced ? `${layer + 1}/${layerCount}` : layerPreview ? layerPreview.status : undefined}
@@ -1856,6 +2042,47 @@ export function App() {
             <button type="button" onClick={stopPicking}>
               Cancel
             </button>
+          </div>
+        )}
+        {picks > 0 && !draft && !picking && mode === "model" && (
+          <div className="selection-bar edge-bar glass" role="status" aria-label="Picked edges" data-testid="edge-bar">
+            <Icon name="edge" />
+            <span className="selection-name">
+              <strong>
+                {picks} edge{picks === 1 ? "" : "s"} picked
+              </strong>
+            </span>
+            <span className="selection-help">Click more edges, or one again to let it go</span>
+            <button type="button" onClick={() => addAndSelect(newEdgeStep(doc, "fillet", edgePicks))}>
+              <Icon name="fillet" />
+              Fillet
+            </button>
+            <button type="button" onClick={() => addAndSelect(newEdgeStep(doc, "chamfer", edgePicks))}>
+              <Icon name="chamfer" />
+              Chamfer
+            </button>
+            <button
+              type="button"
+              className="icon-only"
+              aria-label="Let go of the edges"
+              title="Let go of the edges (Esc)"
+              onClick={() => setEdgePicks([])}
+            >
+              <Icon name="close" />
+            </button>
+          </div>
+        )}
+        {layout.commandLine && !draft && (
+          <div className="command-dock" ref={commandBox}>
+            <CommandLine
+              ref={commandLine}
+              commands={commands}
+              prompt={commandPrompt}
+              onPromptDone={() => setCommandPrompt(null)}
+              onRan={onCommandRan}
+              placeholder={commandHint}
+              onClose={toggleCommandLine}
+            />
           </div>
         )}
         {selection && selected && !draft && !picking && (
@@ -2105,6 +2332,18 @@ export function App() {
             </span>
           </span>
         </span>
+        <button
+          type="button"
+          className="statusbar-toggle"
+          aria-label="Command line"
+          aria-pressed={layout.commandLine}
+          title={`${layout.commandLine ? "Hide" : "Show"} the command line, to type commands by name (Ctrl+9)`}
+          onClick={toggleCommandLine}
+        >
+          <Icon name="command" />
+          <span className="toggle-label">Command line</span>
+        </button>
+        <UnitsSwitch />
         {!focus && screenModes}
       </footer>
 
@@ -2136,6 +2375,8 @@ const SHORTCUTS: [string, string][] = [
   ["Orthographic on or off", "5"],
   ["Show or hide sizes", "M"],
   ["Select a piece", "Click it"],
+  ["Pick edges for a fillet or chamfer", "Click each edge (again to let it go); Esc lets go of them all"],
+  ["Command line on or off", "Ctrl+9; then type a command (FILLET, F, REC…), Enter runs it, Enter again repeats it"],
   ["Move the selected piece", "Drag its arrows, or arrow keys (Shift = 10 mm), Page Up / Page Down"],
   ["Delete the selected piece", "Delete"],
   ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
@@ -2271,7 +2512,7 @@ function middleOf(points: Float32Array): [number, number, number] {
   return [0, 1, 2].map((k) => (lo[k]! + hi[k]!) / 2) as [number, number, number];
 }
 
-const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.round(Math.abs(n) * 10) / 10} mm`;
+const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${lengthText(Math.abs(n))}`;
 
 /** What is selected, how far it is being moved, and what can be done with it. */
 function SelectionBar(props: {
@@ -2320,12 +2561,21 @@ function SelectionBar(props: {
 
 /** The open part of the 3D view as CSS variables, so bars that float over it sit below the ribbon, between palettes. */
 function safeAreaStyle(area: string): CSSProperties | undefined {
-  const [top, left, , right] = area.split(",").map(Number);
+  const [top, left, bottom, right, status] = area.split(",").map(Number);
   if (top === undefined || left === undefined || right === undefined || Number.isNaN(top)) return undefined;
-  return { "--safe-top": `${top}px`, "--safe-left": `${left}px`, "--safe-right": `${right}px` } as CSSProperties;
+  return {
+    "--safe-top": `${top}px`,
+    "--safe-left": `${left}px`,
+    "--safe-bottom": `${bottom ?? 0}px`,
+    "--safe-right": `${right}px`,
+    "--status-room": `${status ?? 0}px`,
+  } as CSSProperties;
 }
 
-const mmText = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+const mmText = (n: number) => lengthText(n);
+
+// Sizes drawn on the part follow the units picked, like every other size.
+setDimensionFormat(mmText);
 
 /** The hole wall (an inside cylinder face) whose mouth a circle edge is, or -1. */
 function holeWallOfRim(mesh: MeshData, edge: number): number {

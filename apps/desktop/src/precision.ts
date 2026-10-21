@@ -1,7 +1,7 @@
 // Precise drafting for outlines, like AutoCAD: typed coordinates (x,y  @dx,dy  @length<angle), ortho lock and angle
 // steps, object snaps (end, middle, centre, quadrant, crossing, square to, on the line), sides by length and bearing,
 // and editing one side of an outline so the sides after it follow. Pure functions, so they are unit-tested without a screen.
-import type { Point2, Profile } from "@studio3d/document";
+import { fromDisplay, type Point2, type Profile } from "@studio3d/document";
 
 /** Points worked out from typed lengths and angles keep 6 decimals, so a chain of sides doesn't drift. */
 export const exact = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
@@ -18,13 +18,15 @@ const POLAR = new RegExp(`^@${NUM}<${NUM}$`);
  * Null while it isn't a complete point yet.
  */
 export function parsePoint(text: string, last: Point2): Point2 | null {
+  // Coordinates and lengths are typed in the units shown (millimetres or inches); angles in degrees.
+  const n = (s: string | undefined) => fromDisplay(Number(s));
   let m = ABSOLUTE.exec(text);
-  if (m) return exactPoint([Number(m[1]), Number(m[2])]);
+  if (m) return exactPoint([n(m[1]), n(m[2])]);
   m = RELATIVE.exec(text);
-  if (m) return exactPoint([last[0] + Number(m[1]), last[1] + Number(m[2])]);
+  if (m) return exactPoint([last[0] + n(m[1]), last[1] + n(m[2])]);
   m = POLAR.exec(text);
   if (m) {
-    const len = Number(m[1]);
+    const len = n(m[1]);
     const a = (Number(m[2]) * Math.PI) / 180;
     return exactPoint([last[0] + len * Math.cos(a), last[1] + len * Math.sin(a)]);
   }

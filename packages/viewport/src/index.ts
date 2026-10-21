@@ -20,4 +20,4 @@ export {
   type Bounds,
   type Vec3,
 } from "./views";
-export { dimensionLines, labelPoint, partDimensions, type Dimension } from "./dimensions";
+export { dimensionLines, labelPoint, partDimensions, setDimensionFormat, type Dimension } from "./dimensions";

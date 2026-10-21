@@ -62,6 +62,10 @@ import {
   type ShapeType,
   type SketchFeature,
   type ThreadSize,
+  getDisplayUnits,
+  lengthNumber,
+  volumeText,
+  type Vec3,
 } from "@studio3d/document";
 import type { Measurements } from "@studio3d/geometry";
 import { Icon, type IconName } from "./Icon";
@@ -115,6 +119,8 @@ interface Props {
   onChangeReference: (id: string, patch: Partial<ReferenceImage>) => void;
   onRemoveReference: (id: string) => void;
   onCalibrate: (id: string) => void;
+  /** Edges picked in the 3D view (their middles): Fillet and Chamfer go on just these. */
+  edgePicks?: Vec3[];
 }
 
 /** The test id each kind of step's row carries (kept from the card layout, which tests and tools look for). */
@@ -142,6 +148,7 @@ export function useDesignPanel({
   onChangeReference,
   onRemoveReference,
   onCalibrate,
+  edgePicks = [],
   ...sketching
 }: Props): { browser: ReactNode; properties: ReactNode; ribbon: RibbonGroup[] } {
   const features = doc.features;
@@ -231,16 +238,16 @@ export function useDesignPanel({
         {
           icon: "fillet",
           label: "Fillet",
-          title: "Fillet: round edges",
-          onClick: () => add(newEdgeStep(doc, "fillet")),
+          title: edgePicks.length ? `Fillet the ${edgePicks.length} picked edge${edgePicks.length === 1 ? "" : "s"}` : "Fillet: round edges",
+          onClick: () => add(newEdgeStep(doc, "fillet", edgePicks)),
           disabled: !measurements,
           reason: "Add a shape first",
         },
         {
           icon: "chamfer",
           label: "Chamfer",
-          title: "Chamfer: bevel edges",
-          onClick: () => add(newEdgeStep(doc, "chamfer")),
+          title: edgePicks.length ? `Chamfer the ${edgePicks.length} picked edge${edgePicks.length === 1 ? "" : "s"}` : "Chamfer: bevel edges",
+          onClick: () => add(newEdgeStep(doc, "chamfer", edgePicks)),
           disabled: !measurements,
           reason: "Add a shape first",
         },
@@ -322,7 +329,8 @@ export function useDesignPanel({
                       {referenceSize(r)
                         .map((v) => mm(v))
                         .join(" × ")}{" "}
-                      mm{r.calibrated ? "" : " · not calibrated"}
+                      {unit()}
+                      {r.calibrated ? "" : " · not calibrated"}
                     </span>
                   </button>
                   <span className="step-row-actions">
@@ -498,22 +506,24 @@ export function placeNew(measurements: Measurements | null): { x: number; y: num
     z: round(measurements.max[2]),
   };
 }
-const mm = (n: number) => `${round(n)}`;
+/** A size as shown: in millimetres or inches, whichever is picked. */
+const mm = (n: number) => `${lengthNumber(n)}`;
+const unit = () => getDisplayUnits();
 
 /** A short description of a shape's size. */
 function summary(s: ShapeFeature): string {
   switch (s.type) {
     case "box":
-      return `${mm(s.width)} × ${mm(s.depth)} × ${mm(s.height)} mm${s.wall > 0 ? `, ${mm(s.wall)} walls` : ""}`;
+      return `${mm(s.width)} × ${mm(s.depth)} × ${mm(s.height)} ${unit()}${s.wall > 0 ? `, ${mm(s.wall)} walls` : ""}`;
     case "cylinder":
-      if (s.thread) return `${s.thread} ${s.mode === "add" ? "threaded rod" : "thread"} × ${mm(s.height)} mm`;
-      return `Ø${mm(s.diameter)} × ${mm(s.height)} mm`;
+      if (s.thread) return `${s.thread} ${s.mode === "add" ? "threaded rod" : "thread"} × ${mm(s.height)} ${unit()}`;
+      return `Ø${mm(s.diameter)} × ${mm(s.height)} ${unit()}`;
     case "tube":
-      return `Ø${mm(s.outerDiameter)} / Ø${mm(s.innerDiameter)} × ${mm(s.height)} mm`;
+      return `Ø${mm(s.outerDiameter)} / Ø${mm(s.innerDiameter)} × ${mm(s.height)} ${unit()}`;
     case "cone":
-      return `Ø${mm(s.bottomDiameter)} to Ø${mm(s.topDiameter)} × ${mm(s.height)} mm`;
+      return `Ø${mm(s.bottomDiameter)} to Ø${mm(s.topDiameter)} × ${mm(s.height)} ${unit()}`;
     case "sphere":
-      return `Ø${mm(s.diameter)} mm`;
+      return `Ø${mm(s.diameter)} ${unit()}`;
   }
 }
 
@@ -526,10 +536,10 @@ function sketchSummary(sk: SketchFeature): string {
     sk.revolve !== undefined
       ? `${sk.mode === "add" ? "spun" : "cut"} ${mm(sk.revolve)}°`
       : sk.mode === "add"
-        ? `out ${mm(sk.depth)} mm`
+        ? `out ${mm(sk.depth)} ${unit()}`
         : sk.depth === 0
           ? "cut through"
-          : `cut ${mm(sk.depth)} mm deep`;
+          : `cut ${mm(sk.depth)} ${unit()} deep`;
   return `On the ${sk.surface} · ${what} · ${how}`;
 }
 
@@ -541,16 +551,16 @@ function stepSummary(f: Feature, doc: ProjectDocument): string {
       return [
         holeKindLabel(f),
         ...(headOf(f) ? [`${headOf(f)!.kind} Ø${mm(headOf(f)!.diameter)}`] : []),
-        f.depth === 0 ? "through" : `${mm(f.depth)} mm deep`,
+        f.depth === 0 ? "through" : `${mm(f.depth)} ${unit()} deep`,
         ...(f.face ? [f.face.surface] : []),
       ].join(" · ");
     case "sketch":
       return sketchSummary(f);
     case "hollow":
-      return `${mm(f.wall)} mm walls · ${f.open === "none" ? "closed inside" : `open at the ${f.open}`}`;
+      return `${mm(f.wall)} ${unit()} walls · ${f.open === "none" ? "closed inside" : `open at the ${f.open}`}`;
     case "fillet":
     case "chamfer":
-      return `${mm(f.size)} mm · ${EDGE_SETS.find((x) => x.edges === f.edges)?.label.toLowerCase() ?? "edges"}`;
+      return `${mm(f.size)} ${unit()} · ${EDGE_SETS.find((x) => x.edges === f.edges)?.label.toLowerCase() ?? "edges"}`;
     case "pattern":
     case "mirror": {
       const src = doc.features.find((x) => x.id === f.source)?.name ?? "?";
@@ -802,7 +812,7 @@ function TappedOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (p
       </div>
       {hole.simplified && (
         <p className="props-note">
-          Drawn as the {mm(tapDrill(size))} mm tap drill for {threadLabel(size)}; the thread isn't modelled.
+          Drawn as the {mm(tapDrill(size))} {unit()} tap drill for {threadLabel(size)}; the thread isn't modelled.
         </p>
       )}
     </div>
@@ -852,7 +862,7 @@ function ScrewOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (pa
                 });
               }}
             >
-              <option value="">No screw (type a size)</option>
+              <option value="">No screw</option>
               {SCREW_SIZES.map((s) => (
                 <option key={s} value={s}>
                   {s} screw
@@ -886,7 +896,7 @@ function ScrewOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (pa
       </div>
       {screw && (
         <p className="props-note" data-testid="clearance-size">
-          {mm(boreDiameter(hole))} mm across, the ISO 273 {hole.clearance!.series} size for an {screw} screw.
+          {mm(boreDiameter(hole))} {unit()} across, the ISO 273 {hole.clearance!.series} size for an {screw} screw.
         </p>
       )}
       <div className="field compact">
@@ -1012,7 +1022,7 @@ function FacePosition(props: {
         />
       </div>
       <p className="props-note" aria-label="Face size (measured)">
-        The {face.surface} is {round(face.width)} × {round(face.height)} mm
+        The {face.surface} is {mm(face.width)} × {mm(face.height)} {unit()}
         {hole.face!.on ? "; the hole follows it when the shape changes." : "."}
       </p>
     </div>
@@ -1213,18 +1223,18 @@ function Facts({ box, measurements }: { box: BoxFeature | null; measurements: Me
     <dl className="facts" data-testid="measurements" aria-label="Part size (measured)">
       <dt>Outside size</dt>
       <dd>
-        {mm(x)} × {mm(y)} × {mm(z)} mm
+        {mm(x)} × {mm(y)} × {mm(z)} {unit()}
       </dd>
       {box && box.wall > 0 && (
         <>
           <dt>Inside space</dt>
           <dd>
-            {mm(box.width - 2 * box.wall)} × {mm(box.depth - 2 * box.wall)} × {mm(box.height - box.wall)} mm
+            {mm(box.width - 2 * box.wall)} × {mm(box.depth - 2 * box.wall)} × {mm(box.height - box.wall)} {unit()}
           </dd>
         </>
       )}
       <dt>Material volume</dt>
-      <dd data-testid="volume">{(measurements.volume / 1000).toFixed(2)} cm³</dd>
+      <dd data-testid="volume">{volumeText(measurements.volume)}</dd>
     </dl>
   );
 }
@@ -1256,14 +1266,20 @@ function EdgeProps(props: { step: EdgeFeature; issues: Issue[]; onChange: (patch
             aria-invalid={edgesIssue ? true : undefined}
             onChange={(ev) => onChange({ edges: ev.target.value })}
           >
-            {EDGE_SETS.map((x) => (
+            {EDGE_SETS.filter((x) => x.edges !== "picked" || e.picked?.length).map((x) => (
               <option key={x.edges} value={x.edges}>
-                {x.label}
+                {x.edges === "picked" ? `${x.label} (${e.picked!.length})` : x.label}
               </option>
             ))}
           </select>
         </div>
       </div>
+      {e.edges === "picked" && (
+        <p className="props-note">
+          Click an edge in the 3D view, then type {fillet ? "FILLET" : "CHAMFER"} in the command line, to round or
+          bevel just that edge.
+        </p>
+      )}
       <Messages issues={issues.filter((i) => i.field !== "size")} />
     </>
   );

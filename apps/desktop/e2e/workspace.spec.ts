@@ -109,7 +109,7 @@ test("the arranged workspace comes back after a restart, and Reset puts it back 
   await expect(page.locator(".app")).toHaveClass(/style-docked/);
   await expect(ribbon(page).getByRole("tabpanel")).toBeVisible();
   await expect(palette(page, "Properties").getByRole("button", { name: "Collapse Properties" })).toBeVisible();
-  expect((await palette(page, "Browser").boundingBox())!.x).toBeCloseTo(0, 0);
+  await expect.poll(async () => (await palette(page, "Browser").boundingBox())!.x).toBeCloseTo(0, 0);
 });
 
 test("floating palettes are glass over the view, and the part still centres in the open space", async ({ page }) => {

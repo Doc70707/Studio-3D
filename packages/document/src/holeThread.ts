@@ -12,6 +12,7 @@ import {
   type ThreadSize,
   type ThreadStandard,
 } from "./threads";
+import { lengthText } from "./units";
 
 export interface ThreadSettings {
   thread: ThreadSize;
@@ -34,7 +35,7 @@ export const PRINT_FITS = [
 ] as const;
 
 const near = (a: number, b: number, within: number) => Math.abs(a - b) <= within;
-const mm = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+const mm = (n: number) => lengthText(n);
 
 /**
  * The thread that suits a hole of this diameter: the one whose screw size or tap drill is closest to it (as a share

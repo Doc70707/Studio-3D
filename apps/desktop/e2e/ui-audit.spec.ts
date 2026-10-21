@@ -47,6 +47,11 @@ for (const [width, height] of SIZES)
     await page.getByLabel("Hole 1 diameter", { exact: true }).fill("12.3456789");
     await current(page);
     await look(page, "hole-long-number");
+    await page.getByRole("button", { name: "Thread this hole…" }).click();
+    await look(page, "thread-dialog");
+    await page.getByRole("dialog", { name: "Thread Hole 1" }).getByRole("button", { name: "Cancel" }).click();
+    // The dialog's preview of an M12 thread may still be building; it is dropped once done.
+    await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 120_000 });
     await page.getByRole("menubar").getByRole("menuitem", { name: "File", exact: true }).click();
     await look(page, "file-menu");
     await page.keyboard.press("Escape");
@@ -98,6 +103,11 @@ for (const [width, height] of SIZES)
       .getByRole("button", { name: /Floating/ })
       .click();
     await look(page, "floating");
+    // The command line with its list of matches open, between the palettes and over the status bar.
+    await page.keyboard.press("Control+9");
+    await page.getByTestId("command-line").getByRole("combobox").fill("round the edges");
+    await expect(page.getByRole("listbox", { name: "Matching commands" })).toBeVisible();
+    await look(page, "command-line");
     const here = Object.entries(found).filter(([k, v]) => k.startsWith(`${width}x${height} `) && v.length);
     expect(Object.fromEntries(here)).toEqual({});
   });

@@ -171,6 +171,27 @@ What works today:
   doesn't suit the hole with the right one a click away. Metric, fine, UNC and UNF; right- or left-hand; through or
   blind; part-way threads; a Snug, Normal or Loose fit for printing; Modelled, or Cosmetic (a tap-drill hole marked
   with dashed rings). Apply is one undo step; Cancel leaves the hole as it was.
+- Millimetres or inches, one click: the mm | in switch at the end of the status bar (and in the sketch's bottom
+  bar while drawing), or View > Sizes in inches. Every box, label, measurement, grid and typed size follows it; the
+  part itself is always kept in millimetres, so switching changes nothing about it. Inch boxes take decimals,
+  fractions (`1/4`, `2 1/2`) and sizes with their own unit (`6 mm`, `1"`); the sketch grid steps in 1/16, 1/8, 1/4
+  and 1 inch. The choice is remembered.
+- Command line, as in AutoCAD and Civil 3D (Ctrl+9, View > Command line, or the switch in the status bar): type a
+  command's name or short name (BOX, HOLE, FILLET or F, CHAMFER, SHELL, ARRAY, MIRROR, REC, CIRCLE, PLINE, POLYGON,
+  DIST, ZE, UNITS, STL, PRINT…) or what you want in plain words ("round the edges"). Matches list above the line with
+  where the button lives on the ribbon; Enter runs one, and Enter on an empty line runs the last one again. Commands
+  that add a step ask for its size right there (`Fillet radius <1 mm>:`), and Enter keeps it. With the line shown,
+  typing over the 3D view goes straight to it. REC, CIRCLE, PLINE and POLYGON start a sketch on the plate with that
+  tool. Everything it runs is the same step the menus make, undone with Ctrl+Z.
+- Pick edges for a fillet or chamfer: click an edge in the 3D view (it lights up under the pointer; edges hidden
+  behind the part and the seams of round faces are left out). Click more to add them, again to let one go, Esc to
+  let go of all. Then Fillet or Chamfer on the bar that appears, the ribbon, the menu, or FILLET in the command line,
+  rounds just those. The edges are kept by where their middles are, so an earlier change that moves one says so
+  plainly instead of rounding the wrong edge.
+- Feel: the camera glides to a new view on a critically damped spring and can be grabbed mid-way; on/off and
+  choice switches slide their highlight; menus grow from where they were opened; buttons give a little when pressed.
+  Softer studio lighting, a contact shadow under the part, a rounded plate whose grid fades out at the edges, and
+  sizes on the part as small glass chips. Windows' reduced-motion setting turns the movement off.
 - Text contrast is checked by a test for every theme and accent, and the app respects Windows' reduced motion, reduced transparency and high
   contrast settings.
 

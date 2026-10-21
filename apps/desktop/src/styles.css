@@ -3581,3 +3581,462 @@ button.link:hover {
 .thread-open:hover {
   background: rgb(var(--accent-rgb) / 0.22);
 }
+
+/* ---------- Refined (v0.38): Apple-quality feel ---------- */
+/*
+ * Everything responds the moment it is pressed, menus and panels grow out of what opened them, segmented controls
+ * have one thumb that slides, and type is tracked by size. Motion uses one curve: a fast start and a long, gentle
+ * settle, with no overshoot (nothing here is thrown, so nothing bounces).
+ */
+:root {
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --t-fast: 110ms;
+  --t-med: 200ms;
+  --t-slow: 300ms;
+  --display:
+    "Segoe UI Variable Display",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+/* Type: bigger text is set tighter, small text a touch looser, so each size reads as well as it can. */
+h1,
+h2,
+h3,
+.brand,
+.props-title,
+.notice h2 {
+  font-family: var(--display);
+  letter-spacing: -0.012em;
+}
+
+.facts dd[data-testid="volume"],
+.figure {
+  letter-spacing: -0.01em;
+}
+
+.panel-title,
+.ribbon-button,
+.context-menu .context-heading,
+.dimension-label {
+  letter-spacing: 0.01em;
+}
+
+/* Press: the control gives under the pointer at once, and springs back when let go. */
+button {
+  transition:
+    background-color var(--t-fast) var(--ease-out),
+    color var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out),
+    opacity var(--t-fast) var(--ease-out),
+    transform var(--t-med) var(--ease-out);
+}
+
+button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+}
+
+/* Menus and the right-click menu grow out of the spot that opened them. */
+.menu-list {
+  transform-origin: top left;
+  animation: pop-in var(--t-med) var(--ease-out);
+}
+
+.context-menu {
+  transform-origin: top left;
+  animation: pop-in var(--t-med) var(--ease-out);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+    filter: blur(2px);
+  }
+}
+
+/* Segmented controls: one thumb that slides to the option picked (placed by slidingThumbs.ts). */
+.segmented-small.has-thumb,
+.segmented.has-thumb {
+  position: relative;
+  isolation: isolate;
+}
+
+.segmented-small.has-thumb::before,
+.segmented.has-thumb::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: var(--thumb-w);
+  height: var(--thumb-h);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.22),
+    0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  transform: translate(var(--thumb-x), var(--thumb-y));
+  transition:
+    transform var(--t-slow) var(--ease-out),
+    width var(--t-slow) var(--ease-out);
+}
+
+.segmented.has-thumb::before {
+  border-radius: var(--radius-md);
+}
+
+.has-thumb.thumb-still::before {
+  transition: none;
+}
+
+.segmented-small.has-thumb > button[aria-pressed="true"],
+.segmented.has-thumb > button[aria-pressed="true"],
+.segmented.has-thumb > button[aria-pressed="true"]:hover:not(:disabled),
+:root[data-theme="light"] .segmented.has-thumb > button[aria-pressed="true"] {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Long panels: content fades under the panel's edge instead of being cut off by it. */
+.palette-body > .panel-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+}
+
+/* Room to breathe under a hole's "drilled from" line. */
+.hole-on {
+  margin-bottom: 12px;
+}
+
+/* Browser steps: a soft accent fill for the current one, rather than an outline. */
+.step.current {
+  background: rgb(var(--accent-rgb) / 0.16);
+  border-color: transparent;
+}
+
+.step.current.picked {
+  border-color: rgba(255, 201, 77, 0.7);
+}
+
+/* Sizes on the part: quiet glass chips with a hairline edge. */
+.dimension-label {
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: rgba(14, 18, 30, 0.78);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  font-weight: 600;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 0 0 0.5px rgba(255, 255, 255, 0.2) inset;
+}
+
+.dimension-label.feature {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 0 0 0.5px rgba(255, 201, 77, 0.55) inset;
+}
+
+/* Ribbon tools: a soft pill under the pointer. */
+.ribbon-button {
+  border-radius: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-list,
+  .context-menu {
+    animation: fade 120ms ease;
+  }
+  button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) {
+    transform: none;
+  }
+  .segmented-small.has-thumb::before,
+  .segmented.has-thumb::before {
+    transition: none;
+  }
+}
+
+/* Segmented controls lay their options out in one row, however many there are. */
+.segmented-small {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
+
+/* The Thread dialog fits between the ribbon and the status bar: its settings scroll inside if the window is short,
+   with Cancel and Apply always in view below them. */
+.thread-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - var(--safe-top, 76px) - var(--safe-bottom, 40px) - 24px);
+  overflow: hidden;
+}
+
+.thread-dialog .thread-body {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  margin: 0 -16px;
+  padding: 0 16px 4px;
+  overflow-y: auto;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+}
+
+.thread-dialog > footer {
+  flex: none;
+}
+
+/* While the Thread dialog is open it is the task: the selection bar steps out of its way. */
+.app.threading .selection-bar {
+  display: none;
+}
+
+/* Millimetres or inches, at the end of the status bar where Civil 3D keeps its drawing units. */
+.statusbar .units-switch,
+.sketch-readout .units-switch {
+  flex: none;
+  margin: 0 4px 0 8px;
+  padding: 2px;
+  border-radius: 9px;
+}
+
+.statusbar .units-switch button,
+.sketch-readout .units-switch button {
+  height: 22px;
+  min-width: 34px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: var(--fs-small);
+}
+
+.statusbar .units-switch.has-thumb::before,
+.sketch-readout .units-switch.has-thumb::before {
+  border-radius: 7px;
+}
+
+/* While drawing the status bar is put away, so the units switch sits at the end of the sketch's readout. */
+.sketch-readout {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+}
+
+.sketch-readout > span {
+  grid-column: 1;
+}
+
+.sketch-readout .units-switch {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  margin: 0;
+}
+
+/* The command line: a slim glass bar just above the status bar, centred in the open part of the view, as Civil 3D
+   floats its command line. What matches what is typed rises above it; what happened last sits just over the line. */
+.command-dock {
+  position: absolute;
+  z-index: 6;
+  left: calc(var(--safe-left, 0px) + var(--gap));
+  right: calc(var(--safe-right, 0px) + var(--gap));
+  bottom: calc(var(--status-room, 54px) + 8px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.command-line {
+  position: relative;
+  width: min(100%, 720px);
+  padding: 4px 6px 4px 12px;
+  border-radius: 14px;
+  background: var(--glass-strong);
+  pointer-events: auto;
+  animation: materialize 220ms var(--ease-out);
+}
+
+.command-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.command-row > .icon {
+  flex: none;
+  color: var(--muted);
+}
+
+.command-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-body);
+  letter-spacing: 0.01em;
+  outline: none;
+}
+
+.command-row input::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.command-line:focus-within {
+  box-shadow:
+    0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.command-prompt {
+  flex: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.command-row button.icon-only {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.command-said {
+  margin: 2px 0 0;
+  padding: 2px 4px 0;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-said.error {
+  color: var(--error);
+}
+
+.command-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border-radius: 14px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+  transform-origin: bottom left;
+  animation: pop-in var(--t-med) var(--ease-out);
+}
+
+.command-suggestions li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.command-suggestions li[aria-selected="true"] {
+  background: var(--fill-hover);
+}
+
+.command-suggestions li[aria-disabled="true"] .command-title {
+  opacity: 0.55;
+}
+
+.command-title {
+  font-weight: 600;
+}
+
+.command-alias {
+  color: var(--accent);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.command-where {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-suggestions kbd {
+  font-size: var(--fs-caption);
+}
+
+/* The status bar's command line switch: an icon and its name, lit while the line is shown. */
+.statusbar .statusbar-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.statusbar .statusbar-toggle:hover {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.statusbar .statusbar-toggle[aria-pressed="true"] {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+/* On a narrow window the switch is just its icon; its tooltip still names it. */
+@media (max-width: 1279px) {
+  .statusbar .statusbar-toggle .toggle-label {
+    display: none;
+  }
+  .statusbar .statusbar-toggle {
+    padding: 0 6px;
+  }
+}
+
+.edge-bar > .icon {
+  flex: none;
+  color: #ffc94d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .command-line,
+  .command-suggestions {
+    animation: fade 120ms ease;
+  }
+}
+
+.command-row button.icon-only {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.command-row button.icon-only:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}

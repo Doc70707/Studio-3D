@@ -84,7 +84,7 @@ const knownKeys = (type: Feature["type"]) =>
     ...(type === "pattern" ? ["source", "kind"] : []),
     ...(type === "mirror" ? ["source", "axis"] : []),
     ...(type === "hollow" ? ["open"] : []),
-    ...(type === "fillet" || type === "chamfer" ? ["edges"] : []),
+    ...(type === "fillet" || type === "chamfer" ? ["edges", "picked"] : []),
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit", "hand"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles", "revolve"] : []),
     ...(type === "hole" ? ["face", "threadDepth", "simplified", "clearance", "head"] : []),
@@ -313,6 +313,17 @@ export function parseProject(text: string): ParseResult {
       return {
         ok: false,
         error: `This project file is damaged: ${where} doesn't say which edges to change.`,
+      };
+    }
+    const point = (p: unknown) => Array.isArray(p) && p.length === 3 && p.every((n) => Number.isFinite(n));
+    if (
+      (type === "fillet" || type === "chamfer") &&
+      ((f.picked !== undefined && (!Array.isArray(f.picked) || !f.picked.every(point))) ||
+        (f.edges === "picked" && !(Array.isArray(f.picked) && f.picked.length > 0)))
+    ) {
+      return {
+        ok: false,
+        error: `This project file is damaged: the picked edges of ${where} aren't readable.`,
       };
     }
     if (

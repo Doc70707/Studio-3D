@@ -14,6 +14,7 @@ import {
   type SketchPlane,
   type Vec3,
 } from "./sketch";
+import { lengthText } from "./units";
 
 export type BoxSide = "top" | "bottom" | "front" | "back" | "left" | "right";
 /** Which edge a hole's position across the face is measured from; "centre" measures from the middle. */
@@ -110,7 +111,7 @@ export function holeAxis(face: HoleFace, x: number, y: number): { point: Vec3; d
   return { point: toWorld(face.plane, holeCentre(face, x, y)), direction: scale(face.plane.normal, -1) };
 }
 
-const fmt = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+const fmt = (n: number) => lengthText(n);
 /** Thinner than this between a hole and an edge, and the edge may not print (the same rule as top holes). */
 const MIN_WALL = 0.4;
 

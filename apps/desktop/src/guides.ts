@@ -13,10 +13,11 @@ import {
   toWorld,
   type Feature,
   type ProjectDocument,
+  lengthText,
 } from "@studio3d/document";
 import type { Dimension, Vec3 } from "@studio3d/viewport";
 
-const fmt = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+const fmt = (n: number) => lengthText(n);
 const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
 /** The width line across a hole's mouth: the head recess when there is one, else what kind of hole it is. */
 const mouth = (h: HoleFeature) => {

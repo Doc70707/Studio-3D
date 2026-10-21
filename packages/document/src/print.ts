@@ -1,5 +1,7 @@
 // Print Studio: which printer the part is going to, and the checks run on the exact file that would be handed to a
 // slicer. Print settings are kept beside the design, never in it: changing them never changes or rebuilds the part.
+import { lengthText } from "./units";
+
 export interface Printer {
   id: string;
   maker: string;
@@ -494,7 +496,7 @@ export interface PrintCheck {
   text: string;
 }
 
-const mm = (n: number) => `${Math.round(n * 10) / 10 + 0} mm`;
+const mm = (n: number) => lengthText(n);
 const AXES = ["wide", "deep", "tall"] as const;
 /** How far off the plate (or into it) the lowest point may be and still count as sitting on it. */
 const ON_PLATE = 0.01;

@@ -1056,6 +1056,39 @@ describe("fillets and chamfers", () => {
     expect(rel(r.measurements.volume, cyl(20, 10) - 2 * Math.PI * (10 - 1 / 3) * 0.5)).toBeLessThan(1e-6);
   });
 
+  it("a picked edge is rounded on its own, found again by its middle", () => {
+    // The block's front-right upright edge runs up the corner at (30, -20); its middle is half way up.
+    const one = designed({
+      units: "mm",
+      features: [block(), edges("fillet", { size: 5, edges: "picked", picked: [[30, -20, 15]] })],
+    });
+    expect(rel(one.measurements.volume, 72000 - (1 - Math.PI / 4) * 25 * 30)).toBeLessThan(1e-6);
+    // Two picks: that edge and the top front edge, bevelled 2 mm (a 2 mm² triangle along each, mitred at the corner).
+    const two = designed({
+      units: "mm",
+      features: [
+        block(),
+        edges("chamfer", {
+          size: 2,
+          edges: "picked",
+          picked: [
+            [30, -20, 15],
+            [0, -20, 30],
+          ],
+        }),
+      ],
+    });
+    expect(two.measurements.volume).toBeLessThan(72000 - 2 * 30 - 2 * 60 + 8);
+    expect(two.measurements.volume).toBeGreaterThan(72000 - 2 * 30 - 2 * 60 - 8);
+  });
+
+  it("a picked edge that an earlier change moved is explained, not silently skipped", () => {
+    const wider = { ...block(), width: 70 } as ShapeFeature; // the corner is now at x = 35
+    expect(fails([wider, edges("fillet", { size: 5, edges: "picked", picked: [[30, -20, 15]] })])).toContain(
+      "A picked edge has moved or gone after an earlier change",
+    );
+  });
+
   it("too big a size, or edges the part doesn't have, are explained and the last good part is kept", () => {
     expect(fails([block(), edges("fillet", { size: 20, edges: "all" })])).toContain("try a smaller size");
     const ball = shape("sphere", { diameter: 20 }) as ShapeFeature;
@@ -1901,6 +1934,11 @@ describe("edges and faces for snapping", () => {
     const circles = mesh.edgeInfo.filter((e) => e.kind === "circle");
     // The block's 12, plus the hole wall's seam (a real kernel edge, where the cylinder's surface joins itself).
     expect(lines).toHaveLength(13);
+    // The seam is marked, so a click picks the block's corners and never the seam for a fillet.
+    const seams = mesh.edgeInfo.filter((e) => e.seam);
+    expect(seams).toHaveLength(1);
+    expect(seams[0]!.kind).toBe("line");
+    expect(Math.hypot(seams[0]!.middle[0] - 5, seams[0]!.middle[1] + 4)).toBeCloseTo(5, 6);
     for (const e of lines) e.middle.forEach((v, i) => expect(v).toBeCloseTo((e.start[i]! + e.end[i]!) / 2, 9));
     // The hole goes through the top and bottom: one circle at each, centred on the hole.
     expect(circles.length).toBeGreaterThanOrEqual(2);
