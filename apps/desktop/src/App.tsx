@@ -103,6 +103,7 @@ import { toggleUnits, useUnits } from "./unitsSetting";
 import { UnitsSwitch } from "./UnitsSwitch";
 import { Icon } from "./Icon";
 import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
+import { Blurry } from "./Blurry";
 import { indexCommands, type Command } from "./commands";
 import { type Tool as SketchTool } from "./SketchEditor";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
@@ -211,6 +212,8 @@ export function App() {
   const commandBox = useRef<HTMLDivElement>(null);
   /** A value the last typed command asks for (a fillet's radius), and the command waiting for its new step. */
   const [commandPrompt, setCommandPrompt] = useState<CommandPrompt | null>(null);
+  /** Blurry's panel is open. */
+  const [helperOpen, setHelperOpen] = useState(false);
   const waitingStep = useRef<{ title: string; count: number } | null>(null);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
@@ -1245,6 +1248,12 @@ export function App() {
         toggleFocus();
         return;
       }
+      // Ctrl+K opens Blurry, the helper (and closes him).
+      if (mod && !e.shiftKey && !e.altKey && key === "k") {
+        e.preventDefault();
+        setHelperOpen((o) => !o);
+        return;
+      }
       // Ctrl+9 shows and hides the command line, as in AutoCAD.
       if (mod && !e.shiftKey && !e.altKey && (e.code === "Digit9" || e.code === "Numpad9")) {
         e.preventDefault();
@@ -1920,19 +1929,17 @@ export function App() {
     ["Outline", "polygon"],
     ["Polygon", "regular"],
   ];
-  const commands = layout.commandLine
-    ? indexCommands(
-        menus,
-        ribbonTabs,
-        sketchTools.map(([title, tool]) => ({
-          title,
-          where: ["Home › Sketch"],
-          run: () => plateSketch(tool),
-          disabled: printing,
-          reason: "Sketches are drawn in Design",
-        })),
-      )
-    : [];
+  const commands = indexCommands(
+    menus,
+    ribbonTabs,
+    sketchTools.map(([title, tool]) => ({
+      title,
+      where: ["Home › Sketch"],
+      run: () => plateSketch(tool),
+      disabled: printing,
+      reason: "Sketches are drawn in Design",
+    })),
+  );
   /** After a typed command, the size it asks for (see the effect that sets the prompt). */
   const onCommandRan = (c: Command) => {
     setCommandPrompt(null);
@@ -1952,6 +1959,7 @@ export function App() {
       className={[
         "app",
         draft && "sketching",
+        !draft && !focus && "has-blurry",
         threadEdit && "threading",
         picking && "picking",
         focus && "focus",
@@ -2072,6 +2080,7 @@ export function App() {
             </button>
           </div>
         )}
+        {!draft && !focus && <Blurry commands={commands} open={helperOpen} onOpen={setHelperOpen} />}
         {layout.commandLine && !draft && (
           <div className="command-dock" ref={commandBox}>
             <CommandLine

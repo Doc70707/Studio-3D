@@ -1,6 +1,6 @@
 [package]
 name = "studio3d"
-version = "0.38.0"
+version = "0.39.0"
 description = "Studio 3D: beginner-first 3D design for printing"
 edition = "2021"
 rust-version = "1.80"

@@ -188,6 +188,12 @@ What works today:
   let go of all. Then Fillet or Chamfer on the bar that appears, the ribbon, the menu, or FILLET in the command line,
   rounds just those. The edges are kept by where their middles are, so an earlier change that moves one says so
   plainly instead of rounding the wrong edge.
+- Blurry, the built-in helper: the round character in the bottom-right corner of the 3D view (or Ctrl+K). Ask in
+  your own words ("how do I thread a hole?", "make a cube", "work in inches"); he answers with short steps from the
+  app's own how-tos and offers the real commands as buttons, each showing where it lives on the ribbon so you learn
+  it. A button runs the same step the menus make, undone with Ctrl+Z. He works with no internet and no account, says
+  plainly when he doesn't know, sits beside the camera views instead of over the part, and steps aside while you
+  sketch. Esc or Ctrl+K puts him away. (His face is a stand-in until the final character design is brought in.)
 - Feel: the camera glides to a new view on a critically damped spring and can be grabbed mid-way; on/off and
   choice switches slide their highlight; menus grow from where they were opened; buttons give a little when pressed.
   Softer studio lighting, a contact shadow under the part, a rounded plate whose grid fades out at the edges, and

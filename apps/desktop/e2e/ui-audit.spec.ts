@@ -108,6 +108,12 @@ for (const [width, height] of SIZES)
     await page.getByTestId("command-line").getByRole("combobox").fill("round the edges");
     await expect(page.getByRole("listbox", { name: "Matching commands" })).toBeVisible();
     await look(page, "command-line");
+    // Blurry open beside it, answering with steps and command buttons.
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Ask Blurry" }).click();
+    await page.getByRole("dialog", { name: "Blurry" }).getByRole("button", { name: "How do I thread a hole?" }).click();
+    await expect(page.getByRole("dialog", { name: "Blurry" }).getByRole("listitem").first()).toBeVisible();
+    await look(page, "blurry");
     const here = Object.entries(found).filter(([k, v]) => k.startsWith(`${width}x${height} `) && v.length);
     expect(Object.fromEntries(here)).toEqual({});
   });

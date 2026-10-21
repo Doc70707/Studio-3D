@@ -1024,6 +1024,22 @@ input:focus-visible {
 .hint {
   margin-left: auto;
   text-align: right;
+  /* The hint gives way first when the bar is short of room: it ends in "…" rather than running under the switches. */
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.hint > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusbar > :not(.hint) {
+  flex-shrink: 0;
 }
 
 /* ---------- Toasts and notices ---------- */
@@ -4039,4 +4055,257 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
 .command-row button.icon-only:hover {
   background: var(--fill-hover);
   color: var(--text);
+}
+
+/* Blurry: a round button in the bottom-right corner of the open view, just above the status bar. His panel grows
+   out of him (and shrinks back into him), a parallel helper with no dimming, so the part stays in view and in reach. */
+.blurry {
+  position: absolute;
+  z-index: 7;
+  right: calc(var(--safe-right, 0px) + var(--gap));
+  bottom: calc(var(--status-room, 54px) + 8px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.blurry-button {
+  width: 48px;
+  height: 48px;
+  padding: 4px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  filter: drop-shadow(0 6px 14px rgba(20, 60, 140, 0.35));
+  transition: transform var(--t-med) var(--ease-out);
+}
+
+.blurry-button:hover {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.blurry-button:active {
+  transform: scale(0.94);
+}
+
+.blurry-face {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* He blinks now and then: a short, rare movement, never a slow loop. */
+.blurry-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: blurry-blink 7s infinite;
+}
+
+@keyframes blurry-blink {
+  0%,
+  96%,
+  100% {
+    transform: scaleY(1);
+  }
+  98% {
+    transform: scaleY(0.1);
+  }
+}
+
+.blurry-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - 2 * var(--gap)));
+  max-height: min(520px, calc(100vh - var(--safe-top, 76px) - var(--status-room, 54px) - 90px));
+  border-radius: 18px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  /* Beside the camera views column rather than over it, so both stay in reach. */
+  margin-right: 84px;
+  pointer-events: auto;
+  transform-origin: bottom right;
+  animation: blurry-in 320ms var(--ease-out);
+}
+
+.blurry-head button.icon-only {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.blurry-head button.icon-only:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.blurry-ask button {
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 600;
+  transition:
+    background var(--t-fast) ease,
+    color var(--t-fast) ease;
+}
+
+.blurry-ask button:disabled {
+  background: var(--fill);
+  color: var(--muted);
+  opacity: 1;
+}
+
+@keyframes blurry-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.92);
+    filter: blur(6px);
+  }
+}
+
+.blurry-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px 10px 14px;
+}
+
+.blurry-head .blurry-face {
+  width: 28px;
+  height: 28px;
+}
+
+.blurry-head h2 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.blurry-sub {
+  flex: 1;
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+.blurry-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 14px 10px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+}
+
+.blurry-message {
+  margin: 8px 0;
+  animation: materialize 220ms var(--ease-out);
+}
+
+.blurry-message p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.blurry-message.from-you {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.blurry-message.from-you p {
+  max-width: 85%;
+  padding: 7px 12px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--accent);
+  color: #07162e;
+  font-weight: 550;
+}
+
+.blurry-steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  line-height: 1.45;
+}
+
+.blurry-steps li + li {
+  margin-top: 4px;
+}
+
+.blurry-actions,
+.blurry-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.blurry-actions button,
+.blurry-starters button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fill-hover);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.blurry-starters button {
+  font-weight: 500;
+}
+
+.blurry-actions button:hover:not(:disabled),
+.blurry-starters button:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.blurry-where {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+}
+
+.blurry-ask {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid rgb(var(--ink-rgb) / 0.08);
+}
+
+.blurry-ask input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  color: var(--text);
+}
+
+/* The command line leaves Blurry's corner free. */
+.app.has-blurry .command-dock {
+  right: calc(var(--safe-right, 0px) + var(--gap) + 60px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blurry-panel,
+  .blurry-message {
+    animation: fade 160ms ease;
+  }
+  .blurry-eye {
+    animation: none;
+  }
+  .blurry-button:hover {
+    transform: none;
+  }
 }
