@@ -86,6 +86,7 @@ const knownKeys = (type: Feature["type"]) =>
     ...(type === "hollow" ? ["open"] : []),
     ...(type === "fillet" || type === "chamfer" ? ["edges", "picked"] : []),
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit", "hand"] : []),
+    ...(type === "box" ? ["rotation"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles", "revolve"] : []),
     ...(type === "hole" ? ["face", "threadDepth", "simplified", "clearance", "head"] : []),
     ...NUMBERS[type],
@@ -291,6 +292,16 @@ export function parseProject(text: string): ParseResult {
           error: `This project file is damaged: the ${k} of ${where} isn't a number.`,
         };
       }
+    }
+    if (
+      type === "box" &&
+      f.rotation !== undefined &&
+      (typeof f.rotation !== "number" || !Number.isFinite(f.rotation))
+    ) {
+      return {
+        ok: false,
+        error: `This project file is damaged: the rotation of ${where} isn't a number.`,
+      };
     }
     if (
       (type === "cylinder" || type === "hole") &&

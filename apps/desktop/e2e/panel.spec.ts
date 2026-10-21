@@ -16,6 +16,7 @@ test.beforeEach(async ({ page }) => {
 
 test("the panel lists every step on one line and shows the settings of one step at a time", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await page.getByRole("button", { name: "Add cylinder" }).click();
   await current(page);
   // Box, hole and cylinder each have one line; only the new cylinder's settings are open.
@@ -39,6 +40,7 @@ test("the panel lists every step on one line and shows the settings of one step 
 
 test("rarely needed settings stay folded under More until asked for", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await page.getByLabel("Hole 1 thread").selectOption("M5");
   const fit = field(page, "Hole 1 fit clearance");
   await expect(fit).toBeHidden();
@@ -49,6 +51,7 @@ test("rarely needed settings stay folded under More until asked for", async ({ p
 
 test("a problem in a step that isn't open still shows on its line", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await field(page, "Hole 1 left / right position").fill("-29");
   await step(page, "Box").click();
   const row = page.getByTestId("hole");

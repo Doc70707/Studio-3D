@@ -29,7 +29,7 @@ test("a hole on the front face, measured from the right edge, follows the box wh
   await page.getByRole("button", { name: "Front", exact: true }).click();
   await page.getByRole("menuitem", { name: "Create" }).click();
   await page.getByRole("menuitem", { name: "Hole on a face…" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "put the hole on" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "where the hole goes" })).toBeVisible();
   const [x, y] = await middleOfView(page);
   await page.mouse.move(x, y);
   await page.mouse.click(x, y);

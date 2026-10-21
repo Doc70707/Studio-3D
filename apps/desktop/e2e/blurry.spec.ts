@@ -32,6 +32,8 @@ test("Blurry opens from the status bar, explains how to thread a hole, and adds 
   await page.screenshot({ path: `${OUT}blurry-thread.png` });
   // His button runs the real command: an ordinary step, in the list like any other.
   await panel(page).getByRole("button", { name: "Hole Home › Shapes", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "where the hole goes" })).toBeVisible();
+  await page.keyboard.press("Enter"); // in the middle of the part
   await expect(steps(page).filter({ hasText: "Hole 1" })).toHaveCount(1);
   await expect(panel(page)).toContainText("Done: Hole. Ctrl+Z takes it back.");
   await current(page);

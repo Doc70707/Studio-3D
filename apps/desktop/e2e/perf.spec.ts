@@ -52,6 +52,7 @@ test("edit to up-to-date times", async ({ page }) => {
   await measure("open box: change width", "Width", ["61", "62", "63", "64", "65", "66"]);
   await field(page, "Wall thickness").fill("0");
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await page.getByLabel("Hole 1 thread").selectOption("M6");
   await measure("block + M6 thread: move the hole", "Hole 1 left / right position", ["1", "2", "3", "4", "5", "6"]);
   console.table(rows);

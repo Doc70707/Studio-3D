@@ -53,9 +53,17 @@ const SIDE_NORMALS: Record<BoxSide, Vec3> = {
 const tidy = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
 const tidy3 = (v: Vec3): Vec3 => [tidy(v[0]), tidy(v[1]), tidy(v[2])];
 
-/** Which side of a box a face pointing along `normal` is, if it's one of the six. */
-export function boxSideOf(normal: Vec3): BoxSide | null {
-  for (const [side, n] of Object.entries(SIDE_NORMALS) as [BoxSide, Vec3][]) if (dot(n, normal) > 0.999) return side;
+/** A direction turned about the upright axis, anticlockwise seen from above. */
+export function turnZ(v: Vec3, deg: number): Vec3 {
+  if (!deg) return v;
+  const a = (deg * Math.PI) / 180;
+  return [v[0] * Math.cos(a) - v[1] * Math.sin(a), v[0] * Math.sin(a) + v[1] * Math.cos(a), v[2]];
+}
+
+/** Which side of a box (turned by `turn` degrees) a face pointing along `normal` is, if it's one of the six. */
+export function boxSideOf(normal: Vec3, turn = 0): BoxSide | null {
+  const own = turnZ(normal, -turn);
+  for (const [side, n] of Object.entries(SIDE_NORMALS) as [BoxSide, Vec3][]) if (dot(n, own) > 0.999) return side;
   return null;
 }
 
@@ -75,9 +83,12 @@ export function boxSideFace(box: BoxFeature, side: BoxSide): Pick<HoleFace, "pla
   const centre = add3([box.x, box.y, box.z + box.height / 2], scale(normal, along(normal)));
   const [hw, hh] = [along(xDir), along(yDir)];
   const origin = add3(centre, add3(scale(xDir, -hw), scale(yDir, -hh)));
+  // A turned box: the side turns with it, about the box's upright middle line.
+  const turn = box.rotation ?? 0;
+  const about = (p: Vec3): Vec3 => add3(turnZ([p[0] - box.x, p[1] - box.y, p[2]], turn), [box.x, box.y, 0]);
   return {
-    plane: { origin: tidy3(origin), xDir, normal },
-    surface: faceLabel(normal),
+    plane: { origin: tidy3(about(origin)), xDir: tidy3(turnZ(xDir, turn)), normal: tidy3(turnZ(normal, turn)) },
+    surface: faceLabel(turnZ(normal, turn)),
     width: tidy(2 * hw),
     height: tidy(2 * hh),
   };

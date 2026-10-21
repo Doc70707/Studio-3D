@@ -57,6 +57,7 @@ for (const [width, height] of SIZES)
     await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 60_000 });
     await look(page, "threaded-cylinder");
     await page.getByRole("button", { name: "Add hole" }).click();
+    await page.keyboard.press("Enter"); // the hole goes in the middle
     await current(page);
     await page.getByLabel("Hole 1 diameter", { exact: true }).fill("12.3456789");
     await current(page);

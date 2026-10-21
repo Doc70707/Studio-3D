@@ -123,6 +123,17 @@ describe("box geometry", () => {
     expect(r.issues[0]?.message).toContain("fill the whole box");
   });
 
+  it("a turned box keeps its volume and turns about its middle (ROTATE)", () => {
+    const quarter = built(box({ width: 60, depth: 20, height: 10, wall: 0, x: 5, rotation: 90 }));
+    expect(quarter.measurements.volume).toBeCloseTo(12000, 6);
+    expect(quarter.measurements.size[0]).toBeCloseTo(20, 6);
+    expect(quarter.measurements.size[1]).toBeCloseTo(60, 6);
+    expect((quarter.measurements.min[0] + quarter.measurements.max[0]) / 2).toBeCloseTo(5, 6);
+    const slant = built(box({ width: 60, depth: 20, height: 10, wall: 0, rotation: 45 }));
+    expect(slant.measurements.volume).toBeCloseTo(12000, 6);
+    expect(slant.measurements.size[0]).toBeCloseTo(80 / Math.SQRT2, 4);
+  });
+
   it("produces a display mesh with matching buffers", () => {
     const m = tessellate(built(box()).shape);
     expect(m.positions.length % 3).toBe(0);

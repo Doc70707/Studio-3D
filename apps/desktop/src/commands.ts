@@ -63,7 +63,7 @@ export const COMMAND_WORDS: Record<string, { aliases: string[]; words: string[] 
   "Right view": { aliases: ["RIGHT"], words: ["from the side", "side view"] },
   Orthographic: { aliases: ["ORTHO", "PARALLEL"], words: ["flat view", "no perspective"] },
   "Fit all": { aliases: ["ZOOMEXTENTS", "ZE", "ZOOM", "Z"], words: ["zoom to fit", "show everything", "see it all"] },
-  "Show sizes": { aliases: ["M", "DIMS", "SIZES"], words: ["dimensions", "measurements", "show measurements"] },
+  "Show sizes": { aliases: ["DIM", "DIMS", "SIZES"], words: ["dimensions", "measurements", "show measurements"] },
   "Sizes in inches": { aliases: ["UNITS", "UN", "INCHES"], words: ["imperial", "inch", "metric", "millimetres", "mm"] },
   "Measure distance": {
     aliases: ["D", "DIST", "DI", "MEASURE", "MEA"],
@@ -79,6 +79,14 @@ export const COMMAND_WORDS: Record<string, { aliases: string[]; words: string[] 
   "Focus canvas": { aliases: ["CLEANSCREEN", "CLEAN"], words: ["hide panels", "more room", "focus"] },
   "Full screen": { aliases: ["FULLSCREEN"], words: ["full screen", "bigger window"] },
   "Command line": { aliases: ["COMMANDLINE", "CMD"], words: ["command bar", "type commands"] },
+  // AutoCAD's editing commands on the picked piece.
+  Move: { aliases: ["MOVE", "M"], words: ["shift", "slide", "reposition", "move it"] },
+  Copy: { aliases: ["COPY", "CO", "CP"], words: ["duplicate", "another one", "clone"] },
+  Rotate: { aliases: ["ROTATE", "RO"], words: ["turn", "turn it", "angle it", "spin it"] },
+  Scale: { aliases: ["SCALE", "SC"], words: ["bigger", "smaller", "resize", "grow", "shrink"] },
+  Offset: { aliases: ["OFFSET", "O"], words: ["parallel copy", "inset", "outset", "grow outline", "shrink outline"] },
+  "Cut away": { aliases: ["SUBTRACT", "SU"], words: ["make it a cut", "cut this away", "subtract"] },
+  "Add material": { aliases: ["UNION", "UNI"], words: ["make it solid", "add this", "union", "join"] },
   // The sketch screen's own commands.
   Select: { aliases: ["SELECT"], words: ["pick a shape", "move a shape", "pointer"] },
   "Ortho mode": { aliases: ["ORTHO", "ORTHOMODE"], words: ["straight lines", "lock straight", "square lines"] },

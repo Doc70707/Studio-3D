@@ -20,6 +20,7 @@ test.beforeEach(async ({ page }) => {
 
 test("a hole becomes an M5 threaded hole, labelled in the 3D view", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await current(page);
   await expect(field(page, "Hole 1 diameter")).toBeVisible();
   await page.getByLabel("Hole 1 thread").click(); // as a person would, which also shows the hole's measurements

@@ -21,7 +21,7 @@ export const HOW_TOS: HowTo[] = [
     question: "How do I thread a hole?",
     words: ["thread", "threaded", "tap", "screw", "bolt", "m3", "m4", "m5", "m6", "unc", "unf", "insert"],
     steps: [
-      "Add a hole (Hole), or use one you already have.",
+      "Add a hole (Hole) and click on the part where it goes, or use one you already have.",
       "Right-click the hole's rim in the 3D view and pick Thread this hole, or use Thread this hole in Properties.",
       "Pick the size: it is suggested from the hole. Choose through or blind, and Snug, Normal or Loose for printing.",
       "Apply. One undo takes it back.",

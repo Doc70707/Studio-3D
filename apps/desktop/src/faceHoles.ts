@@ -34,7 +34,7 @@ export function faceForHoles(
   owner: string | undefined,
 ): HoleFace {
   const box = doc.features.find((f): f is BoxFeature => f.id === owner && f.type === "box");
-  const side = boxSideOf(face.plane.normal);
+  const side = boxSideOf(face.plane.normal, box?.rotation);
   if (box && side && canFollow(box, side)) {
     const own = boxSideFace(box, side);
     // Only when the picked face is that whole side, so the sketch's positions mean the same on both.

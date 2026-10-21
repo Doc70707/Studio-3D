@@ -64,6 +64,21 @@ export function featureDimensions(f: Feature, part: { min: Vec3; max: Vec3 }, do
   if (f.type === "sketch" || f.type === "hollow" || isEdgeStep(f) || isCopyStep(f)) return out;
 
   const [w, d, h] = shapeSize(f);
+  // A turned box: its own width, depth and height, turned with it (distances to the part's sides would be slanted).
+  const turn = f.type === "box" ? (f.rotation ?? 0) : 0;
+  if (turn) {
+    const a = (turn * Math.PI) / 180;
+    const t = ([x, y, z]: Vec3): Vec3 => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a), z];
+    const at = (p: Vec3): Vec3 => {
+      const [x, y, z] = t(p);
+      return [f.x + x, f.y + y, z];
+    };
+    const top = f.z + h;
+    dim(at([-w / 2, -d / 2, top]), at([w / 2, -d / 2, top]), t([0, -gap, 0]), fmt(w));
+    dim(at([w / 2, -d / 2, top]), at([w / 2, d / 2, top]), t([gap, 0, 0]), fmt(d));
+    dim(at([-w / 2, -d / 2, f.z]), at([-w / 2, -d / 2, top]), t([-gap, 0, 0]), fmt(h));
+    return out;
+  }
   const x0 = f.x - w / 2;
   const y0 = f.y - d / 2;
   const z0 = f.z;

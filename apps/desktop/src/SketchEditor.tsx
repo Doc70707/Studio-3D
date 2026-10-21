@@ -9,7 +9,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { CommandLine, type CommandLineHandle } from "./CommandLine";
+import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
 import { indexCommands, type Command } from "./commands";
 import {
   PROFILE_LABELS,
@@ -23,6 +23,7 @@ import {
   type Profile,
   type SketchFeature,
   referenceOnPlane,
+  turnProfiles,
   validateReference,
   type ReferenceImage,
   type SketchPlane,
@@ -691,6 +692,7 @@ export function SketchEditor(props: {
 
   // The command line here knows the sketch's own tools and buttons, by the names AutoCAD uses (REC, C, PL, ORTHO).
   const commandLine = useRef<CommandLineHandle>(null);
+  const [commandPrompt, setCommandPrompt] = useState<CommandPrompt | null>(null);
   const canDraw = props.view === "2d";
   const in3d = "Switch to 2D to draw";
   const startMid = () => {
@@ -754,6 +756,35 @@ export function SketchEditor(props: {
           reason: "Sketch on a face of the part to cut into it",
         },
         {
+          title: "Offset",
+          where: ["Sketch › Selected shape"],
+          run: () =>
+            setCommandPrompt({
+              kind: "distance",
+              label: "Offset by (minus shrinks)",
+              value: offsetBy,
+              apply: (v: number) => makeOffset(v),
+            }),
+          disabled: !sel,
+          reason: "Click a shape first, then type OFFSET",
+        },
+        {
+          title: "Rotate",
+          where: [],
+          run: () =>
+            setCommandPrompt({
+              kind: "angle",
+              label: `Turn ${sel ? `${PROFILE_LABELS[sel.kind]} ${selected! + 1}` : ""} by (anticlockwise)`,
+              value: 0,
+              apply: (v: number) => {
+                if (selected === null) return;
+                setProfiles(s.profiles.map((p, i) => (i === selected ? turnProfiles([p], v)[0]! : p)));
+              },
+            }),
+          disabled: !sel,
+          reason: "Click a shape first, then type ROTATE",
+        },
+        {
           title: "Done",
           where: ["Sketch › Done"],
           run: props.onDone,
@@ -778,18 +809,20 @@ export function SketchEditor(props: {
   const depths = useMemo(() => nestingDepths(s.profiles), [s.profiles]);
   useEffect(() => setOffsetError(null), [selected]);
 
-  const makeOffset = () => {
-    if (!sel) return;
-    const copy = offsetProfile(sel, offsetBy);
+  /** An offset copy of the selected outline; returns why not when it can't be made. */
+  const makeOffset = (by = offsetBy): string | void => {
+    if (!sel) return "Click a shape first, then type OFFSET";
+    const copy = offsetProfile(sel, by);
     if (!copy) {
-      setOffsetError(
-        offsetBy < 0
-          ? `${PROFILE_LABELS[sel.kind]} ${selected! + 1} is too small to shrink by ${mm(-offsetBy)}.`
-          : `Growing this outline by ${mm(offsetBy)} makes it cross over itself.`,
-      );
-      return;
+      const why =
+        by < 0
+          ? `${PROFILE_LABELS[sel.kind]} ${selected! + 1} is too small to shrink by ${mm(-by)}.`
+          : `Growing this outline by ${mm(by)} makes it cross over itself.`;
+      setOffsetError(why);
+      return why;
     }
     setOffsetError(null);
+    setOffsetBy(by);
     setProfiles([...s.profiles, copy]);
     setSelected(s.profiles.length);
   };
@@ -1184,7 +1217,7 @@ export function SketchEditor(props: {
             <button
               type="button"
               className="add"
-              onClick={makeOffset}
+              onClick={() => makeOffset()}
               title="Add a copy of this shape, grown or shrunk on every side"
             >
               Make offset copy
@@ -1214,9 +1247,9 @@ export function SketchEditor(props: {
           <CommandLine
             ref={commandLine}
             commands={[...sketchCommands(), ...props.commandLine.commands]}
-            prompt={null}
-            onPromptDone={() => {}}
-            onRan={() => {}}
+            prompt={commandPrompt}
+            onPromptDone={() => setCommandPrompt(null)}
+            onRan={() => setCommandPrompt(null)}
             placeholder="Type a command: REC, CIRCLE, PL, HOLE, ORTHO, DONE"
             onClose={props.commandLine.onClose}
           />

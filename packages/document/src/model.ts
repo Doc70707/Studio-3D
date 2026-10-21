@@ -57,6 +57,8 @@ export interface BoxFeature extends Placed {
   depth: number;
   height: number;
   wall: number;
+  /** Turned about the upright line through its middle, in degrees, anticlockwise seen from above. Unset is 0. */
+  rotation?: number;
 }
 
 /** Optional ISO thread on a cylinder or hole. With a thread, the diameter comes from the thread size. */

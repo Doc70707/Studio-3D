@@ -197,7 +197,13 @@ export function useDesignPanel({
           title: `Add a ${SHAPES[type].label.toLowerCase()}`,
           onClick: () => add(newShape(doc, type, where)),
         })),
-        { icon: "hole", label: "Hole", name: "Add hole", title: "Add a hole", onClick: () => add(newHole(doc, where)) },
+        {
+          icon: "hole",
+          label: "Hole",
+          name: "Add hole",
+          title: "Add a hole: click on the part where it goes (Enter puts it in the middle)",
+          onClick: () => (measurements ? sketching.onPickHoleFace(null) : add(newHole(doc, where))),
+        },
       ],
     },
     {
@@ -629,6 +635,17 @@ function ShapeProps(props: { shape: ShapeFeature; first: boolean; issues: Issue[
               compact
             />
           ))}
+        {s.type === "box" && (
+          <NumberField
+            label="Turn"
+            name="Box turn"
+            help="Turns the box about its middle, anticlockwise seen from above (ROTATE in the command line)"
+            unit="°"
+            value={s.rotation ?? 0}
+            onCommit={(v) => onChange({ rotation: ((v % 360) + 360) % 360 || 0 })}
+            compact
+          />
+        )}
       </div>
       {s.type === "cylinder" && (
         <ThreadPicker

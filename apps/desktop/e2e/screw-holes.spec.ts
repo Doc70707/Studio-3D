@@ -19,6 +19,7 @@ test.beforeEach(async ({ page }) => {
   await field(page, "Wall thickness").fill("0"); // a solid 60 × 40 × 30 block = 72000 mm³
   await current(page);
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await current(page);
 });
 

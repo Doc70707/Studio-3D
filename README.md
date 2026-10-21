@@ -185,7 +185,16 @@ What works today:
   tool. Everything it runs is the same step the menus make, undone with Ctrl+Z. It works everywhere: in the sketch
   screen it has the sketch's own commands (REC, C, PL, POLYGON, HOLE, SELECT, ORTHO, OSNAP, M2P, ZE, ERASE, UNDO,
   EXTRUDE, CUT, DONE, CANCEL), and any letter that isn't a tool's key goes to it; in Print Studio a design command
-  (BOX, FILLET…) takes you back to Design and runs; in Focus canvas and while measuring it stays too.
+  (BOX, FILLET…) takes you back to Design and runs; in Focus canvas and while measuring it stays too. Space works as
+  Enter, as in AutoCAD: after a command's short name, after a value, and on an empty line to repeat the last command
+  (after everyday words it stays a space). Mixed inch sizes are typed as AutoCAD writes them: 1-1/2.
+- AutoCAD's editing commands on the picked piece, each asking for its value at the command line: MOVE (M) by x,y or
+  x,y,z; COPY (CO, CP), then where the copy goes; ROTATE (RO) by an angle, anticlockwise (boxes and sketches; a box
+  also has a Turn box in Properties); SCALE (SC) by a factor; SUBTRACT (SU) and UNION (UNI) make it cut away or add
+  material. In a sketch, OFFSET (O) and ROTATE work on the picked outline. DIM shows sizes (M is MOVE, as in AutoCAD).
+- HOLE (the ribbon's Hole, Create > Hole, or H): click on the part where it goes, on the top or any flat side; snaps
+  find a face's centre and an edge's middle, and anywhere else it is rounded to 0.5 mm (1/32"). Enter puts it in the
+  middle; then its diameter is asked for at the command line.
 - Pick edges for a fillet or chamfer: click an edge in the 3D view (it lights up under the pointer; edges hidden
   behind the part and the seams of round faces are left out). Click more to add them, again to let one go, Esc to
   let go of all. Then Fillet or Chamfer on the bar that appears, the ribbon, the menu, or FILLET in the command line,

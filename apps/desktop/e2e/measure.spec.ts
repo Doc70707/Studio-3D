@@ -39,6 +39,7 @@ test("the selected shape shows its size and where it sits", async ({ page }) => 
 
 test("a hole shows its diameter and distance from the edges when it's being edited", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await page.getByLabel("Hole 1 left / right position").fill("-15");
   await current(page);
   await expect(labels(page).filter({ hasText: "Ø5 mm" })).toHaveCount(1);

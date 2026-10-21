@@ -36,6 +36,17 @@ import {
   PLATE_PLANE,
   SHAPES,
   boxSideFace,
+  measuredFrom,
+  toSketch,
+  turnStep,
+  moveStep,
+  scaleStep,
+  copyStep,
+  isCopyable,
+  isShape,
+  isSolidStep,
+  type Change,
+  type Feature,
   boxSideOf,
   canFollow,
   hasErrors,
@@ -164,7 +175,9 @@ export function App() {
   const pickPrompt =
     holeTarget === undefined
       ? "Click a flat face of the part to draw on it."
-      : "Click a flat face of the part to put the hole on. It goes in the middle; then set its distances.";
+      : holeTarget === null
+        ? "Click on the part where the hole goes; snaps find centres and edges. Enter puts it in the middle, Esc cancels."
+        : "Click a flat face of the part to move the hole onto it. It goes in the middle; then set its distances.";
   const [pickMessage, setPickMessage] = useState<string | null>(null);
   const pointerDown = useRef<{ x: number; y: number } | null>(null);
   /** The sketch being drawn, if any. Its preview is built live, but it only joins the design on Done. */
@@ -222,6 +235,10 @@ export function App() {
   const helperContext = useCallback(() => helperNow.current!.context, []);
   const helperApply = useCallback((c: HelperChange) => helperNow.current!.apply(c), []);
   const waitingStep = useRef<{ title: string; count: number } | null>(null);
+  /** The last values typed for MOVE, ROTATE and SCALE: Enter on an empty line uses them again, as AutoCAD does. */
+  const lastMove = useRef<[number, number, number]>([0, 0, 0]);
+  const lastTurn = useRef(0);
+  const lastScale = useRef(1);
   /** Help > Keyboard and mouse / About. */
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
   /** The reference picture being calibrated, if any. */
@@ -640,10 +657,15 @@ export function App() {
     setPicking(true);
     setPickMessage("Click a flat face of the part to draw on it.");
   }, []);
+  /** A new hole (null) goes where the part is clicked; an existing hole (its id) moves to the middle of a face. */
   const startHolePicking = useCallback((id: string | null) => {
     setHoleTarget(id);
     setPicking(true);
-    setPickMessage("Click a flat face of the part to put the hole on. It goes in the middle; then set its distances.");
+    setPickMessage(
+      id === null
+        ? "Click on the part where the hole goes; snaps find centres and edges. Enter puts it in the middle, Esc cancels."
+        : "Click a flat face of the part to move the hole onto it. It goes in the middle; then set its distances.",
+    );
   }, []);
   const stopPicking = useCallback(() => {
     setPicking(false);
@@ -854,6 +876,12 @@ export function App() {
     if (e.buttons) return;
     const hit = faceAt(e.clientX, e.clientY);
     viewportRef.current?.setHighlight(hit?.outline ? new Float32Array(hit.points.flat()) : null);
+    if (holeTarget === null) {
+      // Placing a new hole: object snaps (a face's centre, an edge's middle) show where it will go, as in Measure.
+      const where = hit?.outline ? snapAt(e.clientX, e.clientY, null) : { point: null, snap: null };
+      markSnap(where.snap);
+      showPointer(where.point);
+    }
     setPickMessage(hit && !hit.outline ? "That face is curved. Pick a flat one." : pickPrompt);
   };
   const onHostPointerUp = (e: React.PointerEvent) => {
@@ -894,23 +922,37 @@ export function App() {
     const hit = faceAt(e.clientX, e.clientY);
     if (!hit?.outline) return;
     if (holeTarget === undefined) sketchOnFace(hit.outline, meshRef.current?.owners[hit.face]);
-    else holeOnFace(hit.outline, meshRef.current?.owners[hit.face]);
+    else
+      holeOnFace(
+        hit.outline,
+        meshRef.current?.owners[hit.face],
+        holeTarget === null ? snapAt(e.clientX, e.clientY, null) : undefined,
+      );
   };
 
   /**
    * Puts a hole in the middle of a picked face, square to it. On a side of a box the hole follows the box when it
    * is resized or moved; on any other face it stays where the face was.
    */
-  const holeOnFace = (o: FaceOutline, owner: string | undefined) => {
+  const holeOnFace = (o: FaceOutline, owner: string | undefined, pick?: { point: Vec3 | null; snap: unknown }) => {
     stopPicking();
+    markSnap(null);
+    const at = pick?.point ?? undefined;
+    // Where no snap caught the pointer, the spot is rounded to a tidy size: 0.5 mm, or 1/32" in inches.
+    const step = units === "in" ? 25.4 / 32 : 0.5;
+    const tidy = (n: number) => (pick?.snap ? n : Math.round(n / step) * step + 0);
+    // A face that looks straight up: an ordinary hole, drilled down from the top at the spot clicked.
+    if (at && !holeTarget && o.plane.normal[2] > 0.999)
+      return addAndSelect(newHole(doc, { x: tidy(at[0]), y: tidy(at[1]) }));
     const box = doc.features.find((f): f is BoxFeature => f.id === owner && f.type === "box");
-    const side = boxSideOf(o.plane.normal);
+    const side = boxSideOf(o.plane.normal, box?.rotation);
     const face: HoleFace =
       box && side && canFollow(box, side)
         ? { ...boxSideFace(box, side), on: { shape: box.id, side }, across: "centre", up: "centre" }
         : { plane: o.plane, surface: o.label, width: o.width, height: o.height, across: "centre", up: "centre" };
-    if (holeTarget) project.updateFeature(holeTarget, { face, x: 0, y: 0 });
-    else addAndSelect({ ...newHole(doc), face });
+    if (holeTarget) return project.updateFeature(holeTarget, { face, x: 0, y: 0 });
+    const spot = at ? measuredFrom(face, toSketch(face.plane, at), face.across, face.up) : { x: 0, y: 0 };
+    addAndSelect({ ...newHole(doc), face, x: tidy(spot.x), y: tidy(spot.y) });
   };
 
   const sketchOnFace = (o: FaceOutline, owner?: string) => {
@@ -959,7 +1001,7 @@ export function App() {
     waitingStep.current = null;
     const f = doc.features[doc.features.length - 1]!;
     const ask = (label: string, value: number, key: "size" | "diameter" | "wall") =>
-      setCommandPrompt({ label, value, apply: (v) => project.updateFeature(f.id, { [key]: v }) });
+      setCommandPrompt({ label, value, apply: (v: number) => project.updateFeature(f.id, { [key]: v }) });
     if (f.type === "fillet") ask("Fillet radius", f.size, "size");
     else if (f.type === "chamfer") ask("Chamfer size", f.size, "size");
     else if (f.type === "hole" && !f.thread && !f.clearance) ask("Hole diameter", f.diameter, "diameter");
@@ -1227,6 +1269,17 @@ export function App() {
       }
       if (mode === "pick-face" && e.key === "Escape") {
         stopPicking();
+        markSnap(null);
+        waitingStep.current = null;
+        return;
+      }
+      // Placing a new hole: Enter (or Space, as in AutoCAD) puts it in the middle of the part.
+      if (mode === "pick-face" && holeTarget === null && (e.key === "Enter" || e.key === " ")) {
+        if (e.target instanceof HTMLInputElement) return;
+        e.preventDefault();
+        stopPicking();
+        markSnap(null);
+        addAndSelect(newHole(doc, where));
         return;
       }
       // Esc lets go of a snap picked for the next point first, then leaves Measure.
@@ -1381,6 +1434,8 @@ export function App() {
     layout.commandLine,
     draft,
     toggleCommandLine,
+    holeTarget,
+    built,
   ]);
 
   // Window title and close guard
@@ -1425,6 +1480,8 @@ export function App() {
     setSelection({ id: f.id, face: null });
   };
   const where = placeNew(built?.measurements ?? null);
+  /** HOLE: click on the part where it goes (with nothing built yet, it goes in the middle). */
+  const addHole = () => (built ? startHolePicking(null) : addAndSelect(newHole(doc, where)));
   const hasHollow = doc.features.some(isHollow);
   /** What Modify > Pattern / Mirror copies: the selected piece, or the last one that can be copied. */
   const copyFrom = copySource(doc, selection?.id ?? null);
@@ -1545,7 +1602,7 @@ export function App() {
           onSelect: () => addAndSelect(newShape(doc, type, where)),
         })),
         "separator" as const,
-        { label: "Hole", onSelect: () => addAndSelect(newHole(doc, where)) },
+        { label: "Hole", onSelect: addHole },
         {
           label: "Hole on a face…",
           onSelect: () => startHolePicking(null),
@@ -1939,6 +1996,107 @@ export function App() {
     ? [printTab, { ...viewTab, groups: viewTab.groups.filter((g) => g.label !== "Palettes") }]
     : [{ id: "home", label: "Home", groups: design.ribbon }, viewTab];
 
+  /**
+   * AutoCAD's editing commands on the picked piece: MOVE, COPY, ROTATE and SCALE ask for their value at the command
+   * line; SUBTRACT and UNION make a shape or sketch cut away or add material. OFFSET is a sketch command.
+   */
+  const editCommands = () => {
+    const f = selected && isCopyable(selected) ? selected : null;
+    const pickFirst = (name: string) => `Click a shape, hole or sketch first, then type ${name}`;
+    const change = (on: Feature, c: Change) => ("reason" in c ? c.reason : void project.updateFeature(on.id, c.patch));
+    const why = (c: Change | null) => (c && "reason" in c ? c.reason : null);
+    const moveIt = (on: Feature, label: string) =>
+      setCommandPrompt({
+        kind: "move",
+        label,
+        value: lastMove.current,
+        apply: (v) => {
+          lastMove.current = v;
+          return change(on, moveStep(on, v));
+        },
+      });
+    const turnWhy = f ? why(turnStep(f, 90)) : pickFirst("ROTATE");
+    const scaleWhy = f ? why(scaleStep(f, 2)) : pickFirst("SCALE");
+    const solid = f && (isShape(f) || f.type === "sketch") ? f : null;
+    const first = doc.features.find(isSolidStep)?.id === solid?.id;
+    return [
+      {
+        title: "Move",
+        where: ["Properties › Position"],
+        run: () => f && moveIt(f, `Move ${f.name} by x,y,z`),
+        disabled: !f || !!why(moveStep(f, [0, 0, 0])),
+        reason: f ? (why(moveStep(f, [0, 0, 0])) ?? undefined) : pickFirst("MOVE"),
+      },
+      {
+        title: "Copy",
+        where: [],
+        run: () => {
+          if (!f) return;
+          const copy = copyStep(doc, f);
+          if ("reason" in copy) return;
+          addAndSelect(copy);
+          moveIt(copy, `Move ${copy.name} by x,y,z`);
+        },
+        disabled: !f,
+        reason: pickFirst("COPY"),
+      },
+      {
+        title: "Rotate",
+        where: f?.type === "box" ? ["Properties › Turn"] : [],
+        run: () =>
+          f &&
+          setCommandPrompt({
+            kind: "angle",
+            label: `Turn ${f.name} by (anticlockwise)`,
+            value: lastTurn.current,
+            apply: (v) => {
+              lastTurn.current = v;
+              return change(f, turnStep(f, v));
+            },
+          }),
+        disabled: !!turnWhy,
+        reason: turnWhy ?? undefined,
+      },
+      {
+        title: "Scale",
+        where: [],
+        run: () =>
+          f &&
+          setCommandPrompt({
+            kind: "factor",
+            label: `Scale ${f.name} by`,
+            value: lastScale.current,
+            apply: (v) => {
+              lastScale.current = v;
+              return change(f, scaleStep(f, v));
+            },
+          }),
+        disabled: !!scaleWhy,
+        reason: scaleWhy ?? undefined,
+      },
+      {
+        title: "Offset",
+        where: [],
+        run: () => {},
+        disabled: true,
+        reason: "Offset works on a sketch's outlines: open the sketch (Edit in Properties), click a shape, type O",
+      },
+      {
+        title: "Cut away",
+        where: ["Properties › Cut away"],
+        run: () => solid && project.updateFeature(solid.id, { mode: "cut" }),
+        disabled: !solid || first,
+        reason: solid ? "The first shape is what the others add to or cut from" : "Click a shape or sketch first",
+      },
+      {
+        title: "Add material",
+        where: ["Properties › Add material"],
+        run: () => solid && project.updateFeature(solid.id, { mode: "add" }),
+        disabled: !solid,
+        reason: "Click a shape or sketch first",
+      },
+    ];
+  };
   // The command line knows every menu and ribbon command, and the sketch tools, which start a sketch on the plate.
   // It works the same in Print Studio: a design command typed there goes back to Design and runs (BOX adds a box).
   const sketchTools: [string, SketchTool][] = [
@@ -1948,11 +2106,10 @@ export function App() {
     ["Polygon", "regular"],
   ];
   const homeTab: RibbonTab = { id: "home", label: "Home", groups: design.ribbon };
-  const commands = indexCommands(
-    menus,
-    printing ? [...ribbonTabs, homeTab] : ribbonTabs,
-    sketchTools.map(([title, tool]) => ({ title, where: ["Home › Sketch"], run: () => plateSketch(tool) })),
-  ).map((c) =>
+  const commands = indexCommands(menus, printing ? [...ribbonTabs, homeTab] : ribbonTabs, [
+    ...sketchTools.map(([title, tool]) => ({ title, where: ["Home › Sketch"], run: () => plateSketch(tool) })),
+    ...editCommands(),
+  ]).map((c) =>
     printing && c.where.some((w) => w === "Create" || w === "Modify" || w.startsWith("Home ›"))
       ? {
           ...c,
@@ -2054,7 +2211,7 @@ export function App() {
           </div>
         )}
         {measureBar}
-        {snapMark && mode === "measure" && (
+        {snapMark && (mode === "measure" || mode === "pick-face") && (
           <svg
             className="snap-overlay"
             data-testid="snap3d"
@@ -2069,7 +2226,7 @@ export function App() {
             {snapShape(snapMark.snap.kind, 0, 0, 6)}
           </svg>
         )}
-        {snapMark && mode === "measure" && (
+        {snapMark && (mode === "measure" || mode === "pick-face") && (
           <span className="snap-overlay-label" style={{ left: snapMark.x + 12, top: snapMark.y - 26 }}>
             {SNAP_LABELS[snapMark.snap.kind]}
           </span>

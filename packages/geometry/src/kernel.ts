@@ -102,6 +102,15 @@ class ShapeCheckFailed extends Error {
   }
 }
 
+/** A shape's size along x, y and z: a turned box takes more room across and front to back. */
+function turnedSize(s: ShapeFeature): [number, number, number] {
+  const [w, d, h] = shapeSize(s);
+  if (s.type !== "box" || !s.rotation) return [w, d, h];
+  const a = (s.rotation * Math.PI) / 180;
+  const [c, n] = [Math.abs(Math.cos(a)), Math.abs(Math.sin(a))];
+  return [w * c + d * n, w * n + d * c, h];
+}
+
 /** Makes one shape in place on the plate, without any checks. */
 function makeRaw(s: ShapeFeature): Shape3D {
   switch (s.type) {
@@ -112,7 +121,8 @@ function makeRaw(s: ShapeFeature): Shape3D {
         shape = solid.shell(s.wall, (f) => f.inPlane("XY", s.height));
         solid.delete();
       }
-      return shape.translate([s.x, s.y, s.z]);
+      const placed = shape.translate([s.x, s.y, s.z]);
+      return s.rotation ? placed.rotate(s.rotation, [s.x, s.y, 0], [0, 0, 1]) : placed;
     }
     case "cylinder": {
       const thread = threadOf(s);
@@ -158,11 +168,13 @@ export function makeShape(s: ShapeFeature): Shape3D {
   const expected = shapeVolume(s);
   const bb = shape.boundingBox;
   const size = [bb.width, bb.height, bb.depth];
-  const want = shapeSize(s);
+  const want = turnedSize(s);
   const tol = tolerance(s);
+  // A turned box's bounds come from the kernel's box round its slanted sides, which isn't exact to a millionth.
+  const exact = tol === 1e-6 && !(s.type === "box" && s.rotation);
   const ok =
     Math.abs(volume - expected) <= tol * expected &&
-    size.every((v, i) => Math.abs(v - want[i]!) <= (tol === 1e-6 ? 1e-6 * Math.max(1, want[i]!) : 1e-2));
+    size.every((v, i) => Math.abs(v - want[i]!) <= (exact ? 1e-6 * Math.max(1, want[i]!) : 1e-2));
   if (!ok) {
     shape.delete();
     throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);

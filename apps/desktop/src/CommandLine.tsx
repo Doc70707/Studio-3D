@@ -8,15 +8,19 @@ import { commandsFor, type Command } from "./commands";
 import { Icon } from "./Icon";
 import { useUnits } from "./unitsSetting";
 
-/** A value the last command asks for. */
-export interface CommandPrompt {
+/**
+ * A value the last command asks for, as AutoCAD asks at its command line. A size is a length above 0; a distance
+ * may be below 0 (an offset inward); an angle is in degrees; a factor is a plain number above 0; a move is
+ * "x,y" or "x,y,z" in the shown units.
+ */
+export type CommandPrompt = {
   /** "Fillet radius" */
   label: string;
-  /** The value it has now, in mm, kept when Enter is pressed on an empty line. */
-  value: number;
-  /** Sets it (in mm); returns why it can't be used, or nothing. */
-  apply: (mm: number) => string | void;
-}
+  /** Sets it (in mm, degrees or a plain number); returns why it can't be used, or nothing. */
+} & (
+  | { kind?: "size" | "distance" | "angle" | "factor"; value: number; apply: (v: number) => string | void }
+  | { kind: "move"; value: [number, number, number]; apply: (v: [number, number, number]) => string | void }
+);
 
 export interface CommandLineHandle {
   /** Puts the cursor in the line, with these letters typed (a key pressed over the 3D view). */
@@ -69,26 +73,38 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
       return;
     }
     setLast(c.title);
-    setSaid({ text: `${c.title}  ·  ${whereIs(c)}` });
-    c.run();
+    setSaid({ text: whereIs(c) ? `${c.title}  ·  ${whereIs(c)}` : c.title });
+    // The app hears first, so a command that asks for a value (ROTATE's angle) keeps its question.
     props.onRan(c);
+    c.run();
   };
 
   const answer = () => {
     if (!prompt) return;
     const t = text.trim();
-    const v = t === "" ? prompt.value : parseLength(t, units);
-    if (v === null || v <= 0) {
-      setSaid({
-        text: `${prompt.label} needs to be a size above 0, like ${units === "in" ? "1/8" : "2"}.`,
-        error: true,
-      });
-      return;
+    const fail = (text: string) => setSaid({ text, error: true });
+    let why: string | void;
+    if (prompt.kind === "move") {
+      const parts = t === "" ? null : t.split(/\s*[,;]\s*/).map(lengthOf);
+      const v = parts ? [parts[0], parts[1], parts[2] ?? 0] : prompt.value;
+      const how = "Type how far to move as x,y or x,y,z, like 10,0 or 0,0,5.";
+      if (parts && (parts.length < 2 || parts.length > 3)) return fail(how);
+      if (v.some((n) => n === null || n === undefined)) return fail(how);
+      why = prompt.apply(v as [number, number, number]);
+      if (why) return fail(why);
+      setSaid({ text: `${prompt.label} ${(v as number[]).map((n) => lengthNumber(n)).join(", ")} ${units}` });
+    } else {
+      const kind = prompt.kind ?? "size";
+      const plain = kind === "angle" || kind === "factor";
+      const v = t === "" ? prompt.value : plain ? numberOf(t) : lengthOf(t);
+      if (v === null) return fail(`${prompt.label} needs to be ${EXAMPLES[kind](units)}.`);
+      if ((kind === "size" || kind === "factor") && v <= 0)
+        return fail(`${prompt.label} needs to be ${EXAMPLES[kind](units)}.`);
+      why = prompt.apply(v);
+      if (why) return fail(why);
+      setSaid({ text: `${prompt.label} ${showValue(prompt, v)}` });
     }
-    const why = prompt.apply(v);
-    if (why) return setSaid({ text: why, error: true });
     setText("");
-    setSaid({ text: `${prompt.label} ${lengthNumber(v)} ${units}` });
     props.onPromptDone();
   };
 
@@ -108,7 +124,24 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
     run(pick.command);
   };
 
-  const unitsText = (v: number) => `${lengthNumber(v)} ${units}`;
+  // Space ends what is typed, so a mixed inch size is typed as AutoCAD writes it: 1-1/2.
+  const lengthOf = (t: string) => parseLength(t.replace(/(\d)-(?=\d+\s*\/)/g, "$1 "), units);
+  const showValue = (p: CommandPrompt, v: number | number[]) =>
+    p.kind === "move"
+      ? `${(v as number[]).map((n) => lengthNumber(n)).join(",")} ${units}`
+      : p.kind === "angle"
+        ? `${v}°`
+        : p.kind === "factor"
+          ? `${v}`
+          : `${lengthNumber(v as number)} ${units}`;
+  /**
+   * Space runs what is typed, as Enter does, when it is a value being asked for, an empty line (the last command
+   * again), or one word that matches a command's short name (L, FIL for FILLET). After everyday words it is a space.
+   */
+  const spaceEnters = (t: string) =>
+    prompt !== null ||
+    t.trim() === "" ||
+    (!/\s/.test(t.trim()) && !!found[0] && found[0].command.aliases.includes(found[0].matched));
   return (
     <div className="command-line glass" role="group" aria-label="Command line" data-testid="command-line">
       {shown && (
@@ -144,7 +177,7 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
         <Icon name="command" />
         {prompt && (
           <label className="command-prompt" htmlFor="command-input">
-            {prompt.label} &lt;{unitsText(prompt.value)}&gt;:
+            {prompt.label} &lt;{showValue(prompt, prompt.value)}&gt;:
           </label>
         )}
         <input
@@ -167,7 +200,9 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
           onFocus={() => setOpen(true)}
           onBlur={() => setOpen(false)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" || (e.key === " " && spaceEnters(text))) {
+              // Space is Enter too, as in AutoCAD: after a short name (L, FILLET), a value, or on an empty line to
+              // repeat the last command. Elsewhere it is a space, so everyday words still work ("round the edges").
               e.preventDefault();
               enter();
             } else if (e.key === "ArrowDown" && found.length) {
@@ -187,7 +222,7 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
               e.stopPropagation();
               if (prompt) {
                 setText("");
-                setSaid({ text: `${prompt.label} kept at ${unitsText(prompt.value)}` });
+                setSaid({ text: `${prompt.label} kept at ${showValue(prompt, prompt.value)}` });
                 props.onPromptDone();
               } else if (text) setText("");
               else input.current?.blur();
@@ -207,6 +242,21 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
     </div>
   );
 });
+
+/** A plain number typed: "90", "-45", "0.5", "1/2". */
+function numberOf(t: string): number | null {
+  const m = /^(-?)\s*(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*°?$/.exec(t.trim().replace(/,/g, "."));
+  if (!m) return null;
+  const v = Number(m[2]) / (m[3] !== undefined ? Number(m[3]) : 1);
+  return Number.isFinite(v) ? (m[1] ? -v : v) : null;
+}
+
+const EXAMPLES: Record<"size" | "distance" | "angle" | "factor", (units: string) => string> = {
+  size: (u) => `a size above 0, like ${u === "in" ? "1/8" : "2"}`,
+  distance: (u) => `a distance, like ${u === "in" ? "1/16" : "2"} (minus goes inward)`,
+  angle: () => "an angle in degrees, like 90 or -45",
+  factor: () => "a number above 0, like 2 or 0.5",
+};
 
 /** Where to find a command next time: its ribbon button if it has one ("Home › Modify"), else its menu. */
 export function whereIs(c: Command): string {

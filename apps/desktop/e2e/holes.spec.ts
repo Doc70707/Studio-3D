@@ -20,6 +20,7 @@ test.beforeEach(async ({ page }) => {
 
 test("adding a hole cuts it through the floor with the real geometry engine", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await expect(page.getByTestId("hole")).toHaveCount(1);
   await current(page);
   // Default box 60 × 40 × 30 with 2 mm walls; a 5 mm through hole removes a 2 mm-tall disc from the floor.
@@ -40,6 +41,7 @@ test("adding a hole cuts it through the floor with the real geometry engine", as
 
 test("a hole off the edge is explained and the last good model is kept", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await current(page);
   const good = await volume(page).innerText();
   await field(page, "Hole 1 left / right position").fill("-29");
@@ -56,6 +58,7 @@ test("a hole off the edge is explained and the last good model is kept", async (
 
 test("a hole in the empty inside gets a plain warning", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await page.getByLabel("All the way through").uncheck();
   await current(page);
   await expect(page.getByText("doesn't cut anything")).toBeVisible();
@@ -64,7 +67,9 @@ test("a hole in the empty inside gets a plain warning", async ({ page }) => {
 
 test("removing a hole puts the material back", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await expect(page.getByTestId("hole")).toHaveCount(2);
   await page.getByRole("button", { name: "Remove Hole 1" }).click();
   await page.getByRole("button", { name: "Remove Hole 2" }).click();
@@ -81,6 +86,7 @@ test("undo and redo step through changes, with buttons and with the keyboard", a
   await field(page, "Width").fill("80"); // one step, however many characters are typed
   await current(page);
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await current(page);
   const withHole = await volume(page).innerText();
 
@@ -111,6 +117,7 @@ test("Ctrl+Z inside a text box undoes the design, not just the text", async ({ p
 
 test("holes are saved and reopened exactly", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await field(page, "Hole 1 diameter").fill("3.5");
   await field(page, "Hole 1 left / right position").fill("12.25");
   await current(page);
@@ -138,6 +145,7 @@ test("exported STL has the holes in it and is watertight", async ({ page }) => {
   await field(page, "Height").fill("20");
   await field(page, "Wall thickness").fill("0");
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await field(page, "Hole 1 diameter").fill("8");
   await current(page);
 

@@ -21,6 +21,7 @@ test.beforeEach(async ({ page }) => {
   await wall.fill("0"); // a solid 60 × 40 × 30 block = 72000 mm³
   await wall.blur();
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await current(page);
   await expect(volume(page)).toHaveText(cm3(plain)); // a plain 5 mm hole through it
 });

@@ -24,6 +24,7 @@ test("a hole repeated in a 3 × 2 grid makes six holes, and follows the original
   page,
 }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await field(page, "Hole 1 diameter").fill("5");
   await field(page, "Hole 1 left / right position").fill("-20");
   await field(page, "Hole 1 front / back position").fill("-10");
@@ -59,6 +60,7 @@ test("a hole repeated in a 3 × 2 grid makes six holes, and follows the original
 
 test("holes round a circle, from the Modify menu", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await field(page, "Hole 1 diameter").fill("4");
   await field(page, "Hole 1 left / right position").fill("12");
   await current(page);
