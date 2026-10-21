@@ -199,7 +199,7 @@ export function Blurry(props: BlurryProps) {
               <div className="blurry-messages" ref={list} role="log" aria-live="polite">
                 {said.length === 1 && (
                   <div className="blurry-hero">
-                    <BlurryFace size={64} waving />
+                    <BlurryFace size={88} waving />
                   </div>
                 )}
                 {said.map((m) => (
@@ -386,45 +386,60 @@ function HelperSettings(props: {
 }
 
 /**
- * Blurry himself, from shane's "Blurry Prototype v11": a little ghost drawn in a glowing white line, smiling, with
- * one arm up in a wave and a warm glow round him. His body is dark, so the line glows on light themes too.
+ * Blurry's outline, copied exactly from shane's own design ("Blurry Logo", the final app icon of his Blurry task app):
+ * a hand-drawn ghost waving with his left arm, the right arm curled at his side. Drawn in a 200 x 200 box.
+ */
+const GHOST_BODY =
+  "M106.0 44.7 C104.6 44.9 101.7 45.1 99.5 45.5 C97.3 46.0 95.2 46.7 93.0 47.7 C90.8 48.6 88.6 49.9 86.5 51.3 C84.4 52.8 82.3 54.7 80.3 56.5 C78.4 58.4 76.4 60.5 74.7 62.6 C73.0 64.6 71.6 66.8 70.4 69.0 C69.2 71.1 68.2 73.3 67.3 75.5 C66.5 77.7 65.8 79.8 65.4 82.0 C64.9 84.2 65.1 86.4 64.7 88.5 C64.2 90.5 64.0 93.0 62.7 94.3 C61.4 95.7 58.8 95.8 56.8 96.7 C54.9 97.7 52.3 98.6 51.0 100.2 C49.8 101.9 49.1 104.3 49.5 106.4 C49.8 108.5 51.8 110.7 53.2 112.8 C54.6 114.8 57.0 116.8 58.0 118.9 C58.9 121.0 58.7 123.2 58.7 125.4 C58.6 127.5 57.9 129.7 57.7 131.9 C57.5 134.0 57.5 136.2 57.5 138.4 C57.5 140.5 57.1 143.0 57.7 144.8 C58.2 146.7 59.3 149.1 60.9 149.6 C62.4 150.1 65.0 148.4 67.2 148.0 C69.3 147.7 71.5 147.0 73.6 147.5 C75.8 148.0 77.9 150.0 80.0 151.2 C82.1 152.4 84.2 154.4 86.4 154.7 C88.5 154.9 90.7 153.8 92.8 152.8 C95.0 151.9 97.1 149.5 99.2 148.8 C101.4 148.1 103.6 148.4 105.7 148.7 C107.9 149.0 110.1 150.4 112.2 150.5 C114.4 150.7 116.7 150.5 118.7 149.5 C120.7 148.5 122.5 146.0 124.3 144.3 C126.1 142.5 127.6 139.9 129.5 139.0 C131.4 138.1 133.7 138.5 135.8 138.9 C138.0 139.3 140.2 141.1 142.3 141.4 C144.4 141.7 146.9 141.6 148.4 140.5 C149.8 139.5 150.4 137.0 150.8 135.0 C151.2 132.9 150.9 130.6 150.9 128.5 C150.9 126.3 151.1 124.1 150.9 122.0 C150.7 119.8 150.2 117.6 149.9 115.5 C149.6 113.3 149.3 111.1 148.9 109.0 C148.6 106.8 148.1 104.6 147.7 102.5 C147.2 100.3 146.8 98.1 146.3 96.0 C145.9 93.8 145.5 91.6 145.0 89.5 C144.6 87.3 144.2 85.1 143.8 83.0 C143.3 80.8 143.0 78.6 142.5 76.5 C142.0 74.3 141.5 72.1 140.7 70.0 C140.0 67.8 139.3 65.6 138.0 63.5 C136.8 61.4 135.0 59.2 133.2 57.3 C131.4 55.4 129.2 53.4 127.2 51.9 C125.1 50.4 122.9 49.2 120.7 48.2 C118.5 47.1 116.4 46.2 114.2 45.6 C112.0 45.1 109.1 44.9 107.7 44.7 C106.3 44.6 107.4 44.6 106.0 44.7 Z";
+const GHOST_ARM =
+  "M132.2 94.5 C131.4 94.6 128.8 94.6 127.1 95.3 C125.4 95.9 122.8 96.9 122.0 98.4 C121.2 99.8 121.4 102.0 122.0 103.9 C122.7 105.7 124.5 108.0 126.1 109.5 C127.6 110.9 130.5 112.2 131.4 112.8";
+
+/**
+ * Blurry himself, drawn the way his app draws him: a white line with a soft orange glow and a wide halo round it,
+ * dot eyes and a smile. Inside he is dark and warm, so he looks the same on light themes as on his own black screen.
  */
 export function BlurryFace({ size, waving }: { size: number; waving?: boolean }) {
-  const body = useId();
+  const id = useId();
+  const halo = `${id}-halo`;
+  const glow = `${id}-glow`;
+  // His whole drawing in one colour: outline, curled arm, smile and eyes. The glow layers are this, blurred.
+  const drawing = (colour: string, eyes?: string) => (
+    <g style={{ stroke: colour }} strokeWidth="5.6" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d={GHOST_BODY} />
+      <path d={GHOST_ARM} />
+      <path d="M89 79 Q97.5 86.5 106 78" strokeWidth="4.4" />
+      <g className={eyes} style={{ fill: colour, stroke: "none" }}>
+        <circle cx="85.3" cy="71" r="2.7" />
+        <circle cx="110.3" cy="69" r="2.7" />
+      </g>
+    </g>
+  );
   return (
     <svg
       className={`blurry-face${waving ? " waving" : ""}`}
       width={size}
       height={size}
-      viewBox="0 0 40 40"
+      viewBox="40 40 120 120"
       aria-hidden="true"
     >
       <defs>
-        <radialGradient id={body} cx="50%" cy="42%" r="62%">
-          <stop offset="0%" stopColor="#6e4a32" />
-          <stop offset="65%" stopColor="#33261d" />
-          <stop offset="100%" stopColor="#1e1814" />
-        </radialGradient>
+        <filter id={halo} x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="7" />
+        </filter>
+        <filter id={glow} x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="1.6" />
+        </filter>
       </defs>
-      <g transform="rotate(-6 20 20)" fill="none" stroke="#fffaf4" strokeLinecap="round" strokeLinejoin="round">
-        <path
-          d="M10.5 31V18.5c0-6.3 4.1-11 10-11s10 4.7 10 11V31q-2.5 2.8-5 0-2.5 2.8-5 0-2.5 2.8-5 0-2.5 2.8-5 0z"
-          fill={`url(#${body})`}
-          strokeWidth="2"
-        />
-        {/* Drawn over his side: its fill hides the body's line where it joins, so he is one outline, arm and all. */}
-        <path
-          className="blurry-arm"
-          d="M11 24C8.3 23.3 6.2 20.7 6.3 18.2c.1-1.2 1.2-1.6 2.1-.8 1 1 1.7 1.8 2.6 2.3"
-          fill={`url(#${body})`}
-          strokeWidth="2"
-        />
-        <path d="M25.6 21.2c1.8.2 2.6 2.3 1 3.7" strokeWidth="1.7" />
-        <g className="blurry-eyes" fill="#fffaf4" stroke="none">
-          <circle cx="17.3" cy="15.6" r="1.3" />
-          <circle cx="23.7" cy="15.6" r="1.3" />
+      <g className="blurry-body">
+        <path d={GHOST_BODY} fill="#2e2925" />
+        <path d={GHOST_BODY} style={{ fill: "var(--blurry)" }} opacity="0.13" />
+        <g opacity="0.45" filter={`url(#${halo})`}>
+          {drawing("var(--blurry)")}
         </g>
-        <path d="M17.8 19.2c1.6 1.6 4.2 1.6 5.8 0" strokeWidth="1.6" />
+        <g opacity="0.75" filter={`url(#${glow})`}>
+          {drawing("var(--blurry)")}
+        </g>
+        {drawing("#fff", "blurry-eyes")}
       </g>
     </svg>
   );

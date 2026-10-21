@@ -182,13 +182,16 @@ What works today:
   where the button lives on the ribbon; Enter runs one, and Enter on an empty line runs the last one again. Commands
   that add a step ask for its size right there (`Fillet radius <1 mm>:`), and Enter keeps it. With the line shown,
   typing over the 3D view goes straight to it. REC, CIRCLE, PLINE and POLYGON start a sketch on the plate with that
-  tool. Everything it runs is the same step the menus make, undone with Ctrl+Z.
+  tool. Everything it runs is the same step the menus make, undone with Ctrl+Z. It works everywhere: in the sketch
+  screen it has the sketch's own commands (REC, C, PL, POLYGON, HOLE, SELECT, ORTHO, OSNAP, M2P, ZE, ERASE, UNDO,
+  EXTRUDE, CUT, DONE, CANCEL), and any letter that isn't a tool's key goes to it; in Print Studio a design command
+  (BOX, FILLET…) takes you back to Design and runs; in Focus canvas and while measuring it stays too.
 - Pick edges for a fillet or chamfer: click an edge in the 3D view (it lights up under the pointer; edges hidden
   behind the part and the seams of round faces are left out). Click more to add them, again to let one go, Esc to
   let go of all. Then Fillet or Chamfer on the bar that appears, the ribbon, the menu, or FILLET in the command line,
   rounds just those. The edges are kept by where their middles are, so an earlier change that moves one says so
   plainly instead of rounding the wrong edge.
-- Blurry, the built-in helper: the little glowing ghost in the status bar (or Ctrl+K). Ask in your own words ("how
+- Blurry, the built-in helper: the glowing neon ghost from the Blurry app's own icon, in the status bar (or Ctrl+K). Ask in your own words ("how
   do I thread a hole?", "make a cube", "work in inches"); he answers with short steps from the app's own how-tos and
   offers the real commands as buttons, each showing where it lives on the ribbon so you learn it. A button runs the
   same step the menus make, undone with Ctrl+Z. He works with no internet and no account, and says plainly when he

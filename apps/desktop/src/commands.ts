@@ -79,6 +79,15 @@ export const COMMAND_WORDS: Record<string, { aliases: string[]; words: string[] 
   "Focus canvas": { aliases: ["CLEANSCREEN", "CLEAN"], words: ["hide panels", "more room", "focus"] },
   "Full screen": { aliases: ["FULLSCREEN"], words: ["full screen", "bigger window"] },
   "Command line": { aliases: ["COMMANDLINE", "CMD"], words: ["command bar", "type commands"] },
+  // The sketch screen's own commands.
+  Select: { aliases: ["SELECT"], words: ["pick a shape", "move a shape", "pointer"] },
+  "Ortho mode": { aliases: ["ORTHO", "ORTHOMODE"], words: ["straight lines", "lock straight", "square lines"] },
+  "Mid of 2 points": { aliases: ["M2P", "MTP"], words: ["halfway", "midpoint between", "middle of two"] },
+  "2D view": { aliases: ["2D", "PLAN"], words: ["flat drawing", "back to drawing"] },
+  "Push out": { aliases: ["EXTRUDE", "EXT"], words: ["extrude", "raise", "emboss", "add material"] },
+  "Cut in": { aliases: ["CUT", "SUBTRACT", "SU"], words: ["engrave", "pocket", "cut out", "remove material"] },
+  Done: { aliases: ["DONE", "EXIT", "OK"], words: ["finish", "finished", "save sketch", "apply"] },
+  "Cancel sketch": { aliases: ["CANCEL", "QUIT"], words: ["discard", "throw away", "leave without saving"] },
 };
 
 /** Ribbon buttons whose short label names the same command as a menu item. */

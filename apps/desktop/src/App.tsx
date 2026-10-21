@@ -1219,6 +1219,12 @@ export function App() {
         toggleFullScreen();
         return;
       }
+      // Ctrl+9 shows and hides the command line, as in AutoCAD: everywhere, sketching included.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.code === "Digit9" || e.code === "Numpad9")) {
+        e.preventDefault();
+        toggleCommandLine();
+        return;
+      }
       if (mode === "pick-face" && e.key === "Escape") {
         stopPicking();
         return;
@@ -1271,12 +1277,6 @@ export function App() {
         setHelperOpen((o) => !o);
         return;
       }
-      // Ctrl+9 shows and hides the command line, as in AutoCAD.
-      if (mod && !e.shiftKey && !e.altKey && (e.code === "Digit9" || e.code === "Numpad9")) {
-        e.preventDefault();
-        toggleCommandLine();
-        return;
-      }
       if (mod && !e.shiftKey && !e.altKey && key === "b") {
         e.preventDefault();
         togglePanel();
@@ -1303,8 +1303,8 @@ export function App() {
         return;
       }
       // With the command line on, letters typed over the view go to it, as in AutoCAD (M and D are typed as
-      // commands too: M Enter shows sizes, D Enter measures).
-      if (layout.commandLine && mode === "model" && !draft && /^[a-z]$/i.test(e.key)) {
+      // commands too: M Enter shows sizes, D Enter measures). In Print Studio, measuring and picking a face too.
+      if (layout.commandLine && mode !== "move" && !draft && /^[a-z]$/i.test(e.key)) {
         e.preventDefault();
         commandLine.current?.focus(e.key);
         return;
@@ -1940,22 +1940,32 @@ export function App() {
     : [{ id: "home", label: "Home", groups: design.ribbon }, viewTab];
 
   // The command line knows every menu and ribbon command, and the sketch tools, which start a sketch on the plate.
+  // It works the same in Print Studio: a design command typed there goes back to Design and runs (BOX adds a box).
   const sketchTools: [string, SketchTool][] = [
     ["Rectangle", "rectangle"],
     ["Circle", "circle"],
     ["Outline", "polygon"],
     ["Polygon", "regular"],
   ];
+  const homeTab: RibbonTab = { id: "home", label: "Home", groups: design.ribbon };
   const commands = indexCommands(
     menus,
-    ribbonTabs,
-    sketchTools.map(([title, tool]) => ({
-      title,
-      where: ["Home › Sketch"],
-      run: () => plateSketch(tool),
-      disabled: printing,
-      reason: "Sketches are drawn in Design",
-    })),
+    printing ? [...ribbonTabs, homeTab] : ribbonTabs,
+    sketchTools.map(([title, tool]) => ({ title, where: ["Home › Sketch"], run: () => plateSketch(tool) })),
+  ).map((c) =>
+    printing && c.where.some((w) => w === "Create" || w === "Modify" || w.startsWith("Home ›"))
+      ? {
+          ...c,
+          run: () => {
+            setWorkspace("design");
+            c.run();
+          },
+        }
+      : c,
+  );
+  /** What the command line can still do while sketching: the screen, the units, and hiding itself. */
+  const sketchingCommands = commands.filter((c) =>
+    ["Full screen", "Sizes in inches", "Command line"].includes(c.title),
   );
   // Blurry with Claude reads the app as it is at each step of an answer, and makes changes as ordinary steps.
   helperNow.current = {
@@ -2352,6 +2362,7 @@ export function App() {
           onDone={finishSketch}
           onCancel={() => setDraft(null)}
           references={doc.references}
+          commandLine={layout.commandLine ? { commands: sketchingCommands, onClose: toggleCommandLine } : null}
         />
       )}
 

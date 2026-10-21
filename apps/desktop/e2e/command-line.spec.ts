@@ -149,8 +149,8 @@ test("typed commands: BOX adds a box, Enter on an empty line repeats it, REC and
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("sketch-editor")).toBeVisible();
   await expect(page.getByRole("button", { name: "Rectangle tool" })).toHaveAttribute("aria-pressed", "true");
-  // While drawing, the sketch has its own typed sizes, so the command line steps aside.
-  await expect(line(page)).toHaveCount(0);
+  // The command line stays while drawing, with the sketch's own commands.
+  await expect(line(page)).toHaveCount(1);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
   await input(page).fill("c");

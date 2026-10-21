@@ -9,6 +9,8 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { CommandLine, type CommandLineHandle } from "./CommandLine";
+import { indexCommands, type Command } from "./commands";
 import {
   PROFILE_LABELS,
   hasErrors,
@@ -156,6 +158,8 @@ export function SketchEditor(props: {
   onCancel: () => void;
   /** Reference pictures; those facing the same way as the drawing are shown under it, to trace over. */
   references?: ReferenceImage[];
+  /** The command line, when it is on: the app's commands that still make sense while sketching come with it. */
+  commandLine?: { commands: Command[]; onClose: () => void } | null;
 }) {
   const { draft, onChange } = props;
   const s = draft.feature;
@@ -229,6 +233,23 @@ export function SketchEditor(props: {
   const restore = (to: Snapshot) => {
     onChange({ ...s, profiles: to.profiles });
     if (to.holes !== holes) props.onHoles?.(to.holes);
+  };
+  const undo = () => {
+    if (pending) return setPending(null);
+    const prev = undoStack.current.pop();
+    if (prev) {
+      redoStack.current.push(now());
+      restore(prev);
+      setSelected(null);
+      setSelectedHole(null);
+    }
+  };
+  const redo = () => {
+    const next = redoStack.current.pop();
+    if (next) {
+      undoStack.current.push(now());
+      restore(next);
+    }
   };
   const remember = () => {
     undoStack.current.push(now());
@@ -585,24 +606,11 @@ export function SketchEditor(props: {
       const key = e.key.toLowerCase();
       if (mod && (key === "y" || (key === "z" && e.shiftKey))) {
         e.preventDefault();
-        const next = redoStack.current.pop();
-        if (next) {
-          undoStack.current.push(now());
-          restore(next);
-        }
-        return;
+        return redo();
       }
       if (mod && key === "z") {
         e.preventDefault();
-        if (pending) return setPending(null);
-        const prev = undoStack.current.pop();
-        if (prev) {
-          redoStack.current.push(now());
-          restore(prev);
-          setSelected(null);
-          setSelectedHole(null);
-        }
-        return;
+        return undo();
       }
       if (e.key === "F8") {
         e.preventDefault();
@@ -669,6 +677,10 @@ export function SketchEditor(props: {
       if (t) {
         setTool(t.tool);
         setPending(null);
+      } else if (props.commandLine && !pending && /^[a-z]$/i.test(e.key)) {
+        // Any other letter starts a command, as over the 3D view (the tool letters stay quicker).
+        e.preventDefault();
+        commandLine.current?.focus(e.key);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -676,6 +688,82 @@ export function SketchEditor(props: {
   });
 
   const errors = hasErrors(props.issues);
+
+  // The command line here knows the sketch's own tools and buttons, by the names AutoCAD uses (REC, C, PL, ORTHO).
+  const commandLine = useRef<CommandLineHandle>(null);
+  const canDraw = props.view === "2d";
+  const in3d = "Switch to 2D to draw";
+  const startMid = () => {
+    if (tool === "select") setTool("polygon");
+    setM2p({ first: null });
+  };
+  const sketchCommands = (): Command[] =>
+    indexCommands(
+      [],
+      [],
+      [
+        ...tools.map((t) => ({
+          title: t.label,
+          where: ["Sketch › Drawing tools"],
+          shortcut: t.key.toUpperCase(),
+          run: () => {
+            setTool(t.tool);
+            setPending(null);
+          },
+          disabled: !canDraw,
+          reason: in3d,
+        })),
+        {
+          title: "Object snaps",
+          where: ["Sketch › Snaps"],
+          shortcut: "F3",
+          run: () => setSnaps({ ...snaps, on: !snaps.on }),
+        },
+        { title: "Ortho mode", where: ["Sketch › Ortho"], shortcut: "F8", run: () => setOrtho((o) => !o) },
+        {
+          title: "Mid of 2 points",
+          where: ["Sketch › Mid of 2"],
+          shortcut: "M",
+          run: startMid,
+          disabled: !canDraw,
+          reason: in3d,
+        },
+        { title: "Fit all", where: ["Sketch › Fit"], run: fit, disabled: !canDraw, reason: in3d },
+        { title: "2D view", where: ["Sketch › 2D"], run: () => props.onView("2d") },
+        { title: "3D view", where: ["Sketch › 3D"], run: () => props.onView("3d") },
+        { title: "Undo", where: ["Sketch › Ctrl+Z"], shortcut: "Ctrl+Z", run: undo },
+        { title: "Redo", where: ["Sketch › Ctrl+Y"], shortcut: "Ctrl+Y", run: redo },
+        {
+          title: "Delete",
+          where: ["Sketch › Selected shape"],
+          shortcut: "Del",
+          run: removeSelected,
+          disabled: selected === null && selectedHole === null,
+          reason: "Click a shape or a hole first",
+        },
+        {
+          title: "Push out",
+          where: ["Sketch › What the sketch does"],
+          run: () => onChange({ ...s, mode: "add", depth: s.depth || 5 }),
+        },
+        {
+          title: "Cut in",
+          where: ["Sketch › What the sketch does"],
+          run: () => onChange({ ...s, mode: "cut" }),
+          disabled: !props.canCut,
+          reason: "Sketch on a face of the part to cut into it",
+        },
+        {
+          title: "Done",
+          where: ["Sketch › Done"],
+          run: props.onDone,
+          disabled: errors,
+          reason: "Fix the problems shown first",
+        },
+        { title: "Cancel sketch", where: ["Sketch › Cancel"], run: props.onCancel },
+      ],
+    );
+
   const across = onPlate ? "Left / right" : spun ? "Out from the line" : "Across";
   const up = onPlate ? "Front / back" : spun ? "Height" : "Up";
   const hint = once
@@ -862,8 +950,7 @@ export function SketchEditor(props: {
             disabled={props.view === "3d"}
             onClick={() => {
               if (m2p) return setM2p(null);
-              if (tool === "select") setTool("polygon");
-              setM2p({ first: null });
+              startMid();
             }}
           >
             Mid of 2
@@ -1119,6 +1206,20 @@ export function SketchEditor(props: {
                 ? "Measured out from the spin line and up from the plate."
                 : `Measured from the bottom-left corner of the ${s.surface}.`}
           </p>
+        </div>
+      )}
+
+      {props.commandLine && (
+        <div className="command-dock sketch-command">
+          <CommandLine
+            ref={commandLine}
+            commands={[...sketchCommands(), ...props.commandLine.commands]}
+            prompt={null}
+            onPromptDone={() => {}}
+            onRan={() => {}}
+            placeholder="Type a command: REC, CIRCLE, PL, HOLE, ORTHO, DONE"
+            onClose={props.commandLine.onClose}
+          />
         </div>
       )}
 
