@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { answer, findHowTo, HOW_TOS } from "./blurry";
+import { answer, findHowTo, HOW_TOS } from "./helperAnswers";
 import { indexCommands } from "./commands";
 import type { Menu } from "./MenuBar";
 

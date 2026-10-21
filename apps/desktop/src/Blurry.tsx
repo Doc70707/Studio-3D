@@ -2,7 +2,7 @@
 // and ask in your own words; he answers from the app's own how-tos and offers the real commands as buttons, so
 // what he does is what the menus do: an ordinary step, undone with Ctrl+Z. He works with no internet.
 import { useEffect, useRef, useState } from "react";
-import { answer, type Answer } from "./blurry";
+import { answer, type Answer } from "./helperAnswers";
 import type { Command } from "./commands";
 import { whereIs } from "./CommandLine";
 import { Icon } from "./Icon";
