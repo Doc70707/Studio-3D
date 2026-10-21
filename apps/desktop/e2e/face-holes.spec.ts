@@ -40,12 +40,16 @@ test("a hole on the front face, measured from the right edge, follows the box wh
   await current(page);
   await expect(volume(page)).toHaveText(cm3(72000 - cyl(5, 40)));
 
+  // It went where it was clicked: across, the middle of the view is the middle of the face (up, the view's middle
+  // is above the face's, as the view centres on the part with room for the plate).
+  await expect(field(page, "Hole 1 distance across")).toHaveValue("0");
+  const up = Number(await field(page, "Hole 1 distance up").inputValue());
   // Measure from the right edge instead: the same place reads 30 mm from it.
   await page.getByLabel("Hole 1 measured across from").selectOption("right");
   await expect(field(page, "Hole 1 distance across")).toHaveValue("30");
   await field(page, "Hole 1 distance across").fill("10");
   await page.getByLabel("Hole 1 measured up from").selectOption("bottom");
-  await expect(field(page, "Hole 1 distance up")).toHaveValue("15");
+  await expect(field(page, "Hole 1 distance up")).toHaveValue(String(15 + up));
   await field(page, "Hole 1 distance up").fill("8");
   await current(page);
   await expect(labels(page).filter({ hasText: /^10 mm$/ })).toHaveCount(1);
