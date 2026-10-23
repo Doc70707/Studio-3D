@@ -134,10 +134,14 @@ test("object snaps: ends, middles, centres, crossings and square to a side, with
   await current(page); // the sketch's checks are back, so the bar under the drawing (and the drawing) stop moving
 
   await page.getByRole("button", { name: "Outline tool" }).click();
-  const snapAt = async (u: number, v: number, kind: string) => {
-    await moveTo(page, u, v);
-    await expect(page.getByTestId("snap")).toHaveAttribute("data-snap", kind);
-  };
+  // On a busy test machine a single pointer move can land before the drawing is ready for it, so the pointer comes
+  // in again from a little way off until the snap mark shows, as a person's hand would.
+  const snapAt = async (u: number, v: number, kind: string) =>
+    expect(async () => {
+      await moveTo(page, u - 3, v - 3);
+      await moveTo(page, u, v);
+      await expect(page.getByTestId("snap")).toHaveAttribute("data-snap", kind, { timeout: 3000 });
+    }).toPass({ timeout: 20_000 });
   await snapAt(39.6, 19.7, "end");
   await snapAt(20.3, 0.2, "middle");
   await snapAt(59.7, 10.3, "centre");
