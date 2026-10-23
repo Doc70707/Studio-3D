@@ -66,7 +66,7 @@ test("changing the printer never touches the design, and undo puts it back", asy
   await expect(check(page, "fits")).toHaveAttribute("data-status", "ok");
 
   await page.getByRole("button", { name: "Back to design" }).click();
-  await expect(host(page)).toHaveAttribute("data-plate", "256,256");
+  await expect(host(page)).toHaveAttribute("data-plate", "1000,1000");
   await expect(field(page, "Width")).toHaveValue("200");
 });
 

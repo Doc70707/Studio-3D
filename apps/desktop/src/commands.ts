@@ -70,6 +70,15 @@ export const COMMAND_WORDS: Record<string, { aliases: string[]; words: string[] 
     words: ["how far", "distance", "ruler", "length"],
   },
   "Object snaps": { aliases: ["OSNAP", "OS", "SNAP"], words: ["snapping", "snap to points"] },
+  "Build plate": {
+    aliases: ["PLATE", "BED"],
+    words: ["model space", "no plate", "hide the plate", "turn off the plate", "print bed"],
+  },
+  Grid: { aliases: ["GRID", "GRIDMODE"], words: ["grid lines", "hide the grid", "squares"] },
+  "Background colour": {
+    aliases: ["BACKGROUND", "BG"],
+    words: ["background", "black background", "background color", "model space colour"],
+  },
   Palettes: { aliases: ["PALETTES"], words: ["side panels", "panels"] },
   "Reset workspace": { aliases: ["WSRESET"], words: ["reset layout", "put panels back"] },
   Appearance: {

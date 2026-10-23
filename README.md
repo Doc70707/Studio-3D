@@ -141,6 +141,12 @@ What works today:
   part stays centred in the space the palettes leave open.
 - Appearance (top bar, or View > Appearance…): Midnight, Graphite or Light theme; six accent colours; and the part's
   colour, so it looks like the filament it will be printed in. Changes show straight away and are remembered.
+- Around the part (Appearance, View > Build plate / Grid / Background colour…, or the View ribbon's Scene group): a
+  design plate of 256 mm, 500 mm, 1 m (the default) or 2 m; or no plate at all (PLATE), so the part sits on a plain
+  background with only a grid, as in Civil 3D's model space. The background can be the theme's, black, model space
+  grey, white or any colour picked, in the 3D view and the sketch screen alike, and the grid and size lines adjust to
+  stay readable on it. F7 or GRID shows and hides the grid; grid lines fade into the distance instead of crowding at
+  the horizon. Print Studio always shows the chosen printer's own plate.
 - A calm frame: the camera views sit in a slim column in the corner of the 3D view, steps in the Browser show their
   sizes on a second line instead of cutting them off, and a picked piece shows only its own sizes.
 - A shorter top: the ribbon's tabs sit in the title bar beside the logo, and the ribbon is one compact row, so the

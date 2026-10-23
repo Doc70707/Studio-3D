@@ -643,8 +643,8 @@ export function App() {
   useEffect(() => {
     const v = printer.volume;
     if (printing) viewportRef.current?.setPlate(v[0], v[1], { height: v[2], fits: fitsPrinter });
-    else viewportRef.current?.setPlate(256, 256);
-  }, [printing, printer, fitsPrinter]);
+    else viewportRef.current?.setPlate(appearance.plateSize, appearance.plateSize);
+  }, [printing, printer, fitsPrinter, appearance.plateSize]);
   const openPrintStudio = useCallback(() => {
     setSelection(null);
     setPicking(false);
@@ -981,6 +981,18 @@ export function App() {
   };
 
   useEffect(() => viewportRef.current?.setColors(viewportColors(appearance)), [appearance]);
+  useEffect(
+    () => viewportRef.current?.setSurroundings({ plate: appearance.plate, grid: appearance.grid }),
+    [appearance.plate, appearance.grid],
+  );
+  const togglePlate = useCallback(
+    () => changeAppearance({ ...appearance, plate: !appearance.plate }),
+    [appearance, changeAppearance],
+  );
+  const toggleGrid = useCallback(
+    () => changeAppearance({ ...appearance, grid: !appearance.grid }),
+    [appearance, changeAppearance],
+  );
   useEffect(() => viewportRef.current?.setGridUnits(units), [units]);
 
   // Picked edges: drawn over the part. After a change to the part, an edge that is no longer there is let go.
@@ -1400,6 +1412,12 @@ export function App() {
         setSnaps({ ...snaps, on: !snaps.on });
         return;
       }
+      // F7 shows or hides the grid, as in AutoCAD.
+      if (e.key === "F7" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleGrid();
+        return;
+      }
       if (key === "d" && mode === "model" && !e.shiftKey) {
         startMeasure();
         return;
@@ -1436,6 +1454,7 @@ export function App() {
     toggleCommandLine,
     holeTarget,
     built,
+    toggleGrid,
   ]);
 
   // Window title and close guard
@@ -1569,6 +1588,16 @@ export function App() {
           checked: snaps.on,
           onSelect: () => setSnaps({ ...snaps, on: !snaps.on }),
         },
+        "separator" as const,
+        {
+          label: "Build plate",
+          checked: appearance.plate,
+          onSelect: togglePlate,
+          disabled: printing,
+          reason: "Print Studio always shows your printer's plate",
+        },
+        { label: "Grid", shortcut: "F7", checked: appearance.grid, onSelect: toggleGrid },
+        { label: "Background colour…", onSelect: () => setAppearanceOpen(true) },
         "separator" as const,
         { label: "Palettes", shortcut: "Ctrl+B", checked: panelShown, onSelect: togglePanel },
         {
@@ -1938,6 +1967,34 @@ export function App() {
         ],
       },
       {
+        label: "Scene",
+        items: [
+          {
+            icon: "plate",
+            label: "Plate",
+            name: "Build plate",
+            title:
+              "Show or hide the build plate (PLATE). Off, the part floats on a plain background, as in model space.",
+            pressed: appearance.plate,
+            onClick: togglePlate,
+          },
+          {
+            icon: "grid",
+            label: "Grid",
+            title: "Show or hide the grid (F7)",
+            pressed: appearance.grid,
+            onClick: toggleGrid,
+          },
+          {
+            icon: "background",
+            label: "Background",
+            name: "Background colour",
+            title: "The colour behind the part: the theme's, black, model space grey, white or any colour",
+            onClick: () => setAppearanceOpen(true),
+          },
+        ],
+      },
+      {
         label: "Workspace",
         items: [
           {
@@ -2188,7 +2245,9 @@ export function App() {
         data-camera-target={camera ? camera.target.join(",") : ""}
         data-references={shownPictures.length}
         data-edge-picks={edgePicks.map((p) => p.map((v) => Math.round(v * 1000) / 1000 + 0).join(",")).join(" ")}
-        data-plate={printing ? printer.volume.join(",") : "256,256"}
+        data-plate={printing ? printer.volume.join(",") : `${appearance.plateSize},${appearance.plateSize}`}
+        data-surroundings={printing || appearance.plate ? "plate" : "model-space"}
+        data-grid={appearance.grid ? "on" : "off"}
         data-safe-area={safeArea}
         data-layers={sliced ? `${layer + 1}/${layerCount}` : layerPreview ? layerPreview.status : undefined}
         data-geometry={

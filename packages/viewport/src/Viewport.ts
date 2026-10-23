@@ -49,7 +49,23 @@ export interface ViewportColors {
   plate: number;
   gridMinor: number;
   gridMajor: number;
+  /** The part's measurement lines: light on a dark background, dark on a light one. */
+  dimension?: number;
 }
+
+/**
+ * What lies around the part while designing: a build plate of a chosen size, or none, so the part floats on a plain
+ * background with only a grid, as in AutoCAD's model space. The grid can be hidden either way (F7).
+ */
+export interface Surroundings {
+  plate: boolean;
+  grid: boolean;
+}
+
+/** Without a plate, the grid reaches this far each way from the middle (mm), fading towards its edge. */
+export const MODEL_SPACE_REACH = 1000;
+/** With no part, the standard views frame at most this much of a big plate (mm), so the start isn't a speck. */
+const HOME_AREA = 300;
 
 export const DEFAULT_VIEWPORT_COLORS: ViewportColors = {
   part: 0x6cb4ff,
@@ -169,6 +185,9 @@ export class Viewport {
     width: 0,
     depth: 0,
   };
+  private surroundings: Surroundings = { plate: true, grid: true };
+  /** How far the camera is from what it looks at; grid lines fade out a few times further away than that. */
+  private readonly gridFocus = { value: 1e9 };
   private labels: { el: HTMLElement; at: THREE.Vector3 }[] = [];
   private readonly labelLayer: HTMLDivElement;
   private safeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -217,7 +236,7 @@ export class Viewport {
     fill.position.set(-300, 250, 150);
     this.scene.add(fill);
     this.plateSize = { width: w, depth: d };
-    this.plate = buildPlate(w, d, this.colors, this.grid);
+    this.plate = this.buildSurroundings();
     this.scene.add(this.plate);
 
     // Dragging a move arrow comes before orbiting: registered first, on the capture phase, so the orbit never sees it.
@@ -847,13 +866,14 @@ export class Viewport {
         const line = new THREE.LineSegments(
           g,
           new THREE.LineBasicMaterial({
-            color: kind === "part" ? 0xdfe6f5 : 0xffc94d,
+            color: kind === "part" ? (this.colors.dimension ?? 0xdfe6f5) : 0xffc94d,
             depthTest: false,
             transparent: true,
             opacity: 0.85,
           }),
         );
         line.renderOrder = 4;
+        line.name = `${kind}-dimensions`;
         group.add(line);
       }
       this.scene.add(group);
@@ -936,6 +956,9 @@ export class Viewport {
       if (o instanceof THREE.LineSegments && o.material instanceof THREE.LineBasicMaterial)
         o.material.color.set(colors.edge);
     });
+    const sizes = this.dimensionGroup?.getObjectByName("part-dimensions");
+    if (sizes instanceof THREE.LineSegments && sizes.material instanceof THREE.LineBasicMaterial)
+      sizes.material.color.set(colors.dimension ?? 0xdfe6f5);
     const { width, depth, volume } = this.plateSize;
     if (width > 0) this.setPlate(width, depth, volume);
     else this.requestRender();
@@ -949,11 +972,35 @@ export class Viewport {
     this.scene.remove(this.plate);
     disposeObject(this.plate);
     this.plateSize = { width, depth, volume };
-    this.plate = buildPlate(width, depth, this.colors, this.grid);
-    if (volume) this.plate.add(buildVolume(width, depth, volume.height, volume.fits));
+    this.plate = this.buildSurroundings();
     this.scene.add(this.plate);
-    this.plateBounds = { min: [-width / 2, -depth / 2, 0], max: [width / 2, depth / 2, volume?.height ?? 0] };
+    // A printer's plate is framed whole; a big design plate only around its middle, where a new part starts.
+    const [hw, hd] = volume ? [width / 2, depth / 2] : [Math.min(width, HOME_AREA) / 2, Math.min(depth, HOME_AREA) / 2];
+    this.plateBounds = { min: [-hw, -hd, 0], max: [hw, hd, volume?.height ?? 0] };
     this.requestRender();
+  }
+
+  /** Shows or hides the build plate and its grid. A printer's plate (with its build volume) always shows. */
+  setSurroundings(s: Surroundings): void {
+    if (s.plate === this.surroundings.plate && s.grid === this.surroundings.grid) return;
+    this.surroundings = s;
+    const { width, depth, volume } = this.plateSize;
+    if (width > 0) this.setPlate(width, depth, volume);
+  }
+
+  /** What is drawn around the part now: "plate", or "model space" (no plate), and whether the grid shows. */
+  get surroundingsShown(): { plate: boolean; grid: boolean } {
+    return { plate: !!this.plateSize.volume || this.surroundings.plate, grid: this.surroundings.grid };
+  }
+
+  private buildSurroundings(): THREE.Group {
+    const { width, depth, volume } = this.plateSize;
+    const { plate, grid } = this.surroundingsShown;
+    const group = plate
+      ? buildPlate(width, depth, this.colors, this.grid, this.gridFocus, grid)
+      : buildPlate(MODEL_SPACE_REACH * 2, MODEL_SPACE_REACH * 2, this.colors, this.grid, this.gridFocus, grid, false);
+    if (volume) group.add(buildVolume(width, depth, volume.height, volume.fits));
+    return group;
   }
 
   /** Squares on the plate: 10 mm (heavier every 50), or half inches (heavier every 2 inches). */
@@ -1132,6 +1179,8 @@ export class Viewport {
     requestAnimationFrame(() => {
       this.frameRequested = false;
       this.sizeGizmo();
+      this.gridFocus.value =
+        this.camera instanceof THREE.PerspectiveCamera ? this.camera.position.distanceTo(this.controls.target) : 1e9;
       this.renderer.render(this.scene, this.camera);
       this.placeLabels();
       const s = this.getCameraState();
@@ -1231,23 +1280,38 @@ function buildVolume(width: number, depth: number, height: number, fits: boolean
   return lines;
 }
 
-/** Build plate: a flat surface with 10 mm and 50 mm grid lines and X/Y axis lines through the origin. */
-function buildPlate(width: number, depth: number, colors: ViewportColors, grid: PlateGrid): THREE.Group {
+/**
+ * Build plate: a flat surface with 10 mm and 50 mm grid lines and X/Y axis lines through the origin. Without its
+ * surface it is model space's grid: the lines and axes only, over the plain background.
+ */
+function buildPlate(
+  width: number,
+  depth: number,
+  colors: ViewportColors,
+  grid: PlateGrid,
+  focus: { value: number },
+  showGrid = true,
+  withSurface = true,
+): THREE.Group {
   const group = new THREE.Group();
-  group.name = "build-plate";
+  group.name = withSurface ? "build-plate" : "model-space";
+  // Long lines are drawn in pieces so they can fade towards the edge; a big grid in fewer, longer pieces.
+  const piece = Math.max(10, (width + depth) / 100);
 
   // The plate has softly rounded corners, like a real print bed.
-  const surface = new THREE.Mesh(
-    roundedPlate(width, depth, Math.min(width, depth) * 0.04),
-    new THREE.MeshStandardMaterial({
-      color: colors.plate,
-      roughness: 0.9,
-      transparent: true,
-      opacity: 0.72,
-    }),
-  );
-  surface.position.z = -0.01;
-  group.add(surface);
+  if (withSurface) {
+    const surface = new THREE.Mesh(
+      roundedPlate(width, depth, Math.min(width, depth) * 0.04),
+      new THREE.MeshStandardMaterial({
+        color: colors.plate,
+        roughness: 0.9,
+        transparent: true,
+        opacity: 0.72,
+      }),
+    );
+    surface.position.z = -0.01;
+    group.add(surface);
+  }
 
   // Grid lines fade out towards the plate's edge, so the plate reads as a surface, not a cage.
   const minor: number[] = [];
@@ -1256,7 +1320,7 @@ function buildPlate(width: number, depth: number, colors: ViewportColors, grid: 
   const hd = depth / 2;
   const fade = (x: number, y: number) => gridFade(Math.max(Math.abs(x) / hw, Math.abs(y) / hd));
   const line = (arr: number[], x1: number, y1: number, x2: number, y2: number) => {
-    const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 10));
+    const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / piece));
     for (let i = 0; i < n; i++) {
       const [ax, ay] = [x1 + ((x2 - x1) * i) / n, y1 + ((y2 - y1) * i) / n];
       const [bx, by] = [x1 + ((x2 - x1) * (i + 1)) / n, y1 + ((y2 - y1) * (i + 1)) / n];
@@ -1267,13 +1331,19 @@ function buildPlate(width: number, depth: number, colors: ViewportColors, grid: 
   const isMajor = (v: number) => Math.abs(v / grid.major - Math.round(v / grid.major)) < 1e-6;
   const xs = new Set<number>();
   const ys = new Set<number>();
-  for (let v = 0; v <= hw + 1e-9; v += grid.minor) [v, -v].forEach((x) => xs.add(x + 0));
-  for (let v = 0; v <= hd + 1e-9; v += grid.minor) [v, -v].forEach((y) => ys.add(y + 0));
+  if (showGrid) {
+    for (let v = 0; v <= hw + 1e-9; v += grid.minor) [v, -v].forEach((x) => xs.add(x + 0));
+    for (let v = 0; v <= hd + 1e-9; v += grid.minor) [v, -v].forEach((y) => ys.add(y + 0));
+  }
   xs.forEach((x) => line(isMajor(x) ? major : minor, x, -hd, x, hd));
   ys.forEach((y) => line(isMajor(y) ? major : minor, -hw, y, hw, y));
 
-  /** Lines from points stored as x, y, alpha: drawn on the plate, each point as clear as its alpha. */
-  const lines = (pts: number[], color: number, z = 0) => {
+  /**
+   * Lines from points stored as x, y, alpha: drawn on the plate, each point as clear as its alpha. Seen in perspective,
+   * they also fade between `near` and `far` times the camera's distance from what it looks at, so a big grid melts
+   * into the distance instead of crowding into a moiré at the horizon.
+   */
+  const lines = (pts: number[], color: number, z: number, near: number, far: number) => {
     const c = new THREE.Color(color);
     const pos: number[] = [];
     const rgba: number[] = [];
@@ -1283,20 +1353,46 @@ function buildPlate(width: number, depth: number, colors: ViewportColors, grid: 
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute("color", new THREE.Float32BufferAttribute(rgba, 4));
+    g.setAttribute("rgba", new THREE.Float32BufferAttribute(rgba, 4));
     return new THREE.LineSegments(
       g,
-      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
+      new THREE.ShaderMaterial({
+        uniforms: { focus, near: { value: near }, far: { value: far } },
+        vertexShader: `
+          attribute vec4 rgba;
+          varying vec4 vRgba;
+          varying float vDepth;
+          void main() {
+            vRgba = rgba;
+            vec4 at = modelViewMatrix * vec4(position, 1.0);
+            vDepth = -at.z;
+            gl_Position = projectionMatrix * at;
+          }`,
+        fragmentShader: `
+          uniform float focus;
+          uniform float near;
+          uniform float far;
+          varying vec4 vRgba;
+          varying float vDepth;
+          void main() {
+            float away = 1.0 - smoothstep(focus * near, focus * far, vDepth);
+            gl_FragColor = vec4(vRgba.rgb, vRgba.a * away);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+          }`,
+        transparent: true,
+        depthWrite: false,
+      }),
     );
   };
-  group.add(lines(minor, colors.gridMinor));
-  group.add(lines(major, colors.gridMajor));
+  group.add(lines(minor, colors.gridMinor, 0, 1.1, 2.2));
+  group.add(lines(major, colors.gridMajor, 0, 2, 4.5));
   const axis: number[] = [];
   line(axis, -hw, 0, hw, 0);
-  group.add(lines(axis, 0xd9534f, 0.02)); // X axis, red
+  group.add(lines(axis, 0xd9534f, 0.02, 4, 10)); // X axis, red
   const yAxis: number[] = [];
   line(yAxis, 0, -hd, 0, hd);
-  group.add(lines(yAxis, 0x5cb85c, 0.02)); // Y axis, green
+  group.add(lines(yAxis, 0x5cb85c, 0.02, 4, 10)); // Y axis, green
   return group;
 }
 

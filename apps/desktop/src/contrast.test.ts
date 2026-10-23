@@ -53,7 +53,7 @@ describe("text contrast in every theme", () => {
   for (const theme of themes) {
     const c = THEMES[theme].colors;
     for (const accent of accents) {
-      const a = accentColors({ theme, accent, part: "sky" });
+      const a = accentColors({ ...DEFAULT_APPEARANCE, theme, accent });
       for (const surface of ["chrome", "chrome-2"] as const) {
         it(`${theme}, ${accent}: the accent is readable on ${surface}`, () => {
           expect(contrast(parse(a.accent).rgb, parse(c[surface]).rgb)).toBeGreaterThanOrEqual(4.5);
@@ -98,8 +98,31 @@ describe("appearance", () => {
       ...DEFAULT_APPEARANCE,
       accent: "teal",
     });
-    const a = { theme: "light", accent: "coral", part: "charcoal" } as const;
+    const a = { ...DEFAULT_APPEARANCE, theme: "light", accent: "coral", part: "charcoal" } as const;
     expect(parseAppearance(JSON.stringify(a))).toEqual(a);
+  });
+
+  it("the plate, its size, the grid and the background come back; settings saved before them get the defaults", () => {
+    const old = parseAppearance(JSON.stringify({ theme: "graphite", accent: "blue", part: "sky" }));
+    expect(old).toMatchObject({ plate: true, plateSize: 1000, grid: true, background: "theme" });
+    const a = { ...DEFAULT_APPEARANCE, plate: false, plateSize: 2000, grid: false, background: "#000000" };
+    expect(parseAppearance(JSON.stringify(a))).toEqual(a);
+    expect(parseAppearance(JSON.stringify({ plateSize: 3, background: "red", plate: "no" }))).toMatchObject({
+      plate: true,
+      plateSize: 1000,
+      background: "theme",
+    });
+    expect(parseAppearance(JSON.stringify({ background: "#A0B0C0" })).background).toBe("#a0b0c0");
+  });
+
+  it("on any background picked by hand, the grid and the measurement lines show", () => {
+    for (const background of ["#000000", "#212830", "#3b3f45", "#ffffff", "#ff0000", "#00ff66", "#2040ff", "#808080"]) {
+      const v = viewportColors({ ...DEFAULT_APPEARANCE, plate: false, background });
+      const bg = rgbOf(parseInt(background.slice(1), 16));
+      expect(contrast(rgbOf(v.gridMajor), bg), background).toBeGreaterThanOrEqual(1.7);
+      expect(contrast(rgbOf(v.gridMinor), bg), background).toBeGreaterThanOrEqual(1.3);
+      expect(contrast(rgbOf(v.dimension!), bg), background).toBeGreaterThanOrEqual(3);
+    }
   });
 
   it("part edges stand out from the part: darker on a light part, lighter on a dark one", () => {

@@ -100,10 +100,13 @@ button {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background:
+  /* A background picked in Appearance (black, model space grey, any colour), else the theme's own. */
+  background: var(
+    --viewport-bg,
     radial-gradient(1200px 700px at 78% 8%, var(--glow-1), transparent 60%),
     radial-gradient(900px 600px at 10% 100%, var(--glow-2), transparent 60%),
-    linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    linear-gradient(180deg, var(--bg-2), var(--bg-1))
+  );
 }
 
 .viewport-host canvas {
@@ -1579,9 +1582,11 @@ input:focus-visible {
 }
 
 .sketch-editor.view-2d {
-  background:
+  background: var(
+    --viewport-bg,
     radial-gradient(900px 600px at 80% 0%, var(--glow-1), transparent 60%),
-    linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    linear-gradient(180deg, var(--bg-2), var(--bg-1))
+  );
 }
 
 .sketch-editor.view-3d {
@@ -2859,6 +2864,57 @@ button.link:hover {
 .appearance .choices.wide button:hover {
   transform: none;
   background: var(--fill-hover);
+}
+
+.appearance .choices.pills {
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--well);
+}
+
+.appearance .choices.pills button {
+  flex: 1;
+  width: auto;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+
+.appearance .choices.pills button:hover {
+  transform: none;
+  color: var(--text);
+}
+
+.appearance .choices.pills button[aria-checked="true"] {
+  background: var(--chrome-2);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+.appearance .any-colour {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: var(--fs-small);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.appearance .any-colour input {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgb(var(--ink-rgb) / 0.18);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
 }
 
 .theme-swatch {

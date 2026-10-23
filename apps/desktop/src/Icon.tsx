@@ -58,6 +58,9 @@ const PATHS = {
   key: "M15 4a5 5 0 1 1-4.6 7L4 17.4V20h3v-2h2v-2h2l1.4-1.4A5 5 0 0 1 15 4zM16 8h.01",
   send: "M12 19V5M6 11l6-6 6 6",
   stop: "M8 8h8v8H8z",
+  plate: "M6 9h15l-3 8H3zM3 17v1.5h15V17M18 18.5l3-8V9",
+  grid: "M4 4h16v16H4zM4 9.3h16M4 14.7h16M9.3 4v16M14.7 4v16",
+  background: "M4 4h16v16H4zM4 15l5-5 4 4 3-3 4 4",
 } as const;
 
 export type IconName = keyof typeof PATHS;

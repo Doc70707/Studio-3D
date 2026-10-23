@@ -1,6 +1,7 @@
-// How the app looks: a theme for the frame and panels, an accent colour for buttons and highlights, and the colour the
-// part is drawn in (pick your filament's). Kept per computer, like the workspace layout, and applied before the first
-// paint so the app never flashes the wrong colours.
+// How the app looks: a theme for the frame and panels, an accent colour for buttons and highlights, the colour the
+// part is drawn in (pick your filament's), and what lies around it: a build plate of a chosen size, or a plain
+// background of any colour with just a grid, as in Civil 3D's model space. Kept per computer, like the workspace
+// layout, and applied before the first paint so the app never flashes the wrong colours.
 import { DEFAULT_VIEWPORT_COLORS, type ViewportColors } from "@studio3d/viewport";
 
 export type ThemeId = "midnight" | "graphite" | "light";
@@ -11,6 +12,14 @@ export interface Appearance {
   theme: ThemeId;
   accent: AccentId;
   part: PartColorId;
+  /** Show the build plate while designing. Off, the part floats over the background, as in model space. */
+  plate: boolean;
+  /** The design plate's width and depth, in mm. Print Studio always shows the printer's own plate. */
+  plateSize: number;
+  /** The grid on the plate or in model space (F7 or GRID). */
+  grid: boolean;
+  /** Behind the part: "theme" for the theme's own, or a colour as #rrggbb. */
+  background: string;
 }
 
 /** The CSS colour variables a theme sets. Every text colour is checked against every surface in contrast.test.ts. */
@@ -200,7 +209,27 @@ export const PART_COLORS: Record<PartColorId, { label: string; color: number }> 
   purple: { label: "Purple", color: 0x8e6cf0 },
 };
 
-export const DEFAULT_APPEARANCE: Appearance = { theme: "midnight", accent: "blue", part: "sky" };
+/** Plate sizes to pick from (mm): a printer's, and room for bigger designs. */
+export const PLATE_SIZES = [256, 500, 1000, 2000] as const;
+
+/** Backgrounds to pick from, besides the theme's own and any colour picked by hand. */
+export const BACKGROUNDS: { id: string; label: string }[] = [
+  { id: "theme", label: "Theme" },
+  { id: "#000000", label: "Black" },
+  { id: "#212830", label: "Model space" }, // Civil 3D and AutoCAD's dark model space (33, 40, 48)
+  { id: "#3b3f45", label: "Grey" },
+  { id: "#ffffff", label: "White" },
+];
+
+export const DEFAULT_APPEARANCE: Appearance = {
+  theme: "midnight",
+  accent: "blue",
+  part: "sky",
+  plate: true,
+  plateSize: 1000,
+  grid: true,
+  background: "theme",
+};
 export const APPEARANCE_KEY = "studio3d.appearance";
 
 const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
@@ -215,6 +244,18 @@ const mix = (a: number, b: number, t: number) => {
     (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t)
   );
 };
+/** WCAG contrast between two colours: 1 (the same) to 21 (black on white). */
+const contrastOf = (a: number, b: number) => {
+  const lum = (n: number) => {
+    const [r, g, bl] = channels(hex(n)).map((c) => {
+      const v = c / 255;
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p) as [number, number];
+  return (x + 0.05) / (y + 0.05);
+};
 const brightness = (n: number) => {
   const [r, g, b] = channels(hex(n));
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
@@ -222,11 +263,36 @@ const brightness = (n: number) => {
 
 export const accentColors = (a: Appearance): AccentColors => ACCENTS[a.accent][THEMES[a.theme].dark ? "dark" : "light"];
 
-/** The part and plate colours for the 3D view: edges darker than a light part, lighter than a dark one. */
+/** The colour behind the part as a number, or null for the theme's own background. */
+export const backgroundColor = (a: Appearance): number | null =>
+  a.background === "theme" ? null : parseInt(a.background.slice(1), 16);
+
+/**
+ * The part, plate and grid colours for the 3D view: edges darker than a light part, lighter than a dark one. On a
+ * background picked by hand, the grid and measurement lines are worked out from it so they show on any colour.
+ */
 export function viewportColors(a: Appearance): ViewportColors {
   const part = PART_COLORS[a.part].color;
   const edge = brightness(part) > 0.3 ? mix(part, 0x000000, 0.68) : mix(part, 0xffffff, 0.45);
-  return { part, edge, ...THEMES[a.theme].plate };
+  const bg = backgroundColor(a);
+  if (bg === null)
+    return { part, edge, ...THEMES[a.theme].plate, dimension: THEMES[a.theme].dark ? 0xdfe6f5 : 0x2a3346 };
+  // Lines go towards black or white, whichever stands out more, only as far as they need to show.
+  const ink = contrastOf(bg, 0x000000) > contrastOf(bg, 0xffffff) ? 0x000000 : 0xffffff;
+  const toward = (least: number) => {
+    let t = 0.06;
+    while (t < 1 && contrastOf(mix(bg, ink, t), bg) < least) t += 0.02;
+    return mix(bg, ink, Math.min(t, 1));
+  };
+  const plateColors = a.plate ? THEMES[a.theme].plate : null;
+  return {
+    part,
+    edge,
+    plate: plateColors?.plate ?? mix(bg, ink, 0.06),
+    gridMinor: plateColors?.gridMinor ?? toward(1.3),
+    gridMajor: plateColors?.gridMajor ?? toward(1.75),
+    dimension: ink === 0x000000 ? 0x2a3346 : 0xdfe6f5,
+  };
 }
 
 /** Every CSS variable the appearance sets, by name without the leading dashes. */
@@ -245,10 +311,21 @@ export function parseAppearance(text: string | null): Appearance {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const pick = <K extends string>(v: unknown, table: Record<K, unknown>, d: K): K =>
     typeof v === "string" && Object.hasOwn(table, v) ? (v as K) : d;
+  const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
   return {
     theme: pick(r.theme, THEMES, DEFAULT_APPEARANCE.theme),
     accent: pick(r.accent, ACCENTS, DEFAULT_APPEARANCE.accent),
     part: pick(r.part, PART_COLORS, DEFAULT_APPEARANCE.part),
+    plate: bool(r.plate, DEFAULT_APPEARANCE.plate),
+    plateSize:
+      typeof r.plateSize === "number" && (PLATE_SIZES as readonly number[]).includes(r.plateSize)
+        ? r.plateSize
+        : DEFAULT_APPEARANCE.plateSize,
+    grid: bool(r.grid, DEFAULT_APPEARANCE.grid),
+    background:
+      typeof r.background === "string" && (r.background === "theme" || /^#[0-9a-f]{6}$/i.test(r.background))
+        ? r.background.toLowerCase()
+        : DEFAULT_APPEARANCE.background,
   };
 }
 
@@ -287,4 +364,15 @@ export function applyAppearance(a: Appearance, doc: Document = document): void {
   doc.documentElement.dataset.theme = a.theme;
   doc.documentElement.dataset.accent = a.accent;
   doc.documentElement.dataset.partColor = a.part;
+  // A background picked by hand replaces the theme's behind the part, in the 3D view and the sketch screen alike. The
+  // sketch's lines and words take the colours of a theme of the background's own lightness, so they show on it.
+  const bg = backgroundColor(a);
+  if (bg !== null) {
+    const ink = THEMES[contrastOf(bg, 0x000000) > contrastOf(bg, 0xffffff) ? "light" : "midnight"].colors;
+    const inkVars = (["ink-rgb", "text", "muted", "success", "warning"] as const)
+      .map((k) => `--${k}: ${ink[k]};`)
+      .join(" ");
+    sheet.textContent += `\nhtml:root { --viewport-bg: ${a.background}; }\nhtml:root .sketch-canvas { ${inkVars} }`;
+  }
+  doc.documentElement.dataset.background = a.background === "theme" ? "theme" : "custom";
 }

@@ -9,7 +9,9 @@ export {
   type ViewportOptions,
   type ReferencePicture,
   type ViewportColors,
+  type Surroundings,
   DEFAULT_VIEWPORT_COLORS,
+  MODEL_SPACE_REACH,
 } from "./Viewport";
 export {
   STANDARD_VIEWS,
