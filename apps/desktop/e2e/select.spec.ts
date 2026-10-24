@@ -7,16 +7,16 @@ const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometr
 const card = (page: Page, name: string) => page.getByTestId("shape").filter({ hasText: name });
 const bar = (page: Page) => page.getByTestId("selection-bar");
 
-/** The middle of the part of the 3D view the panels don't cover, where the views centre the part. */
+/** The middle of the part of the 3D view the bars and palettes leave open, where the views centre the part. */
 async function middle(page: Page) {
-  const panel = (await page.locator("aside.panel").boundingBox())!;
-  const top = (await page.locator("header.topbar").boundingBox())!;
-  const status = (await page.locator("footer.statusbar").boundingBox())!;
   const view = (await host(page).boundingBox())!;
-  return {
-    x: (panel.x + panel.width + view.x + view.width) / 2,
-    y: (top.y + top.height + status.y) / 2,
-  };
+  const [top, left, bottom, right] = (await host(page).getAttribute("data-safe-area"))!.split(",").map(Number) as [
+    number,
+    number,
+    number,
+    number,
+  ];
+  return { x: view.x + (left + view.width - right) / 2, y: view.y + (top + view.height - bottom) / 2 };
 }
 
 test.beforeEach(async ({ page }) => {
@@ -36,7 +36,7 @@ test("click a piece to select it, nudge it with the keys, drag its arrow, then r
   await page.mouse.click(m.x, m.y);
   await expect(bar(page)).toContainText("Cylinder 1 · top face");
   await expect(card(page, "Cylinder 1")).toHaveClass(/picked/);
-  await expect(card(page, "Cylinder 1")).toHaveClass(/open/); // its settings are ready to edit
+  await expect(card(page, "Cylinder 1")).toHaveClass(/current/); // its settings are ready to edit
 
   // Arrow keys move it 1 mm, Shift 10 mm; every move is one undo step.
   await page.keyboard.press("ArrowRight");
@@ -58,8 +58,8 @@ test("click a piece to select it, nudge it with the keys, drag its arrow, then r
   await page.screenshot({ path: `${OUT}select-move.png` });
   await page.mouse.up();
   await expect(bar(page)).not.toContainText("Moving");
-  const x = Number(await field(page, "Left / right").inputValue());
-  expect(x).toBeGreaterThan(3);
+  // The move lands in the design a moment after the arrow is let go, so wait for it rather than read it once.
+  await expect.poll(async () => Number(await field(page, "Left / right").inputValue())).toBeGreaterThan(3);
   await expect(field(page, "Front / back")).toHaveValue("0"); // only along the arrow
   await current(page);
   await page.keyboard.press("0"); // the 3D view, with the arrows on the selected piece
@@ -93,13 +93,34 @@ test("sketch on a clicked face straight from the selection", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Done" })).toBeVisible();
 });
 
-test("the last shape can't be removed", async ({ page }) => {
-  await card(page, "Cylinder 1").getByRole("button", { name: "Remove Cylinder 1" }).click();
-  await current(page);
+test("every shape can be removed, even the first one, leaving an empty plate", async ({ page }) => {
   const m = await middle(page);
   await page.mouse.click(m.x, m.y);
-  await expect(bar(page)).toContainText("Box");
-  await expect(bar(page).getByRole("button", { name: "Remove" })).toBeDisabled();
+  await expect(bar(page)).toContainText("Cylinder 1");
   await page.keyboard.press("Delete");
+  await current(page);
+  await expect(card(page, "Cylinder 1")).toHaveCount(0);
+  // The box was the shape the part started from; it can go too.
+  await page.mouse.click(m.x, m.y);
+  await expect(bar(page)).toContainText("Box");
+  await expect(bar(page).getByRole("button", { name: "Remove" })).toBeEnabled();
+  await bar(page).getByRole("button", { name: "Remove" }).click();
+  await expect(host(page)).toHaveAttribute("data-geometry", "empty");
+  await expect(page.getByTestId("shape")).toHaveCount(0);
+  await expect(page.getByTestId("empty-plate")).toBeVisible();
+  await page.getByRole("button", { name: "Print Studio" }).click();
+  await expect(page.getByTestId("print-blocked")).toContainText("nothing to print");
+  await expect(page.getByRole("button", { name: "Export STL" })).toBeDisabled();
+  await page.getByRole("button", { name: "Back to design" }).click();
+  // A new part can be started from the empty plate, and undo brings the old one back.
+  await page.getByRole("button", { name: "Add cylinder" }).click();
+  await current(page);
   await expect(page.getByTestId("shape")).toHaveCount(1);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(host(page)).toHaveAttribute("data-geometry", "empty");
+  await page.getByRole("button", { name: "Undo" }).click();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await current(page);
+  await expect(card(page, "Box")).toHaveCount(1);
+  await expect(card(page, "Cylinder 1")).toHaveCount(1);
 });

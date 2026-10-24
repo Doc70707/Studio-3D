@@ -63,7 +63,11 @@ test("a mistake in a shape is explained on its card and the last good model is k
   await expect(page.getByText("must be smaller than the outside")).toBeVisible();
   await expect(host(page)).toHaveAttribute("data-geometry", "stale");
   await expect(volume(page)).toHaveText(good);
+  // Print Studio holds the export, and says why it can't run yet.
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await expect(page.getByRole("button", { name: "Export STL" })).toBeDisabled();
+  await expect(page.getByTestId("print-blocked")).toContainText("Fix the highlighted values");
+  await page.getByRole("button", { name: "Back to design" }).click();
   await page.getByRole("button", { name: /^Box/ }).click(); // the error still shows when the card is closed
   await expect(card(page, "Tube 1")).toContainText("must be smaller than the outside");
 });
@@ -113,6 +117,7 @@ test("a part with a sphere and a cone exports a watertight STL", async ({ page }
   await current(page);
   const expected = Number((await volume(page).innerText()).replace(" cm³", "")) * 1000;
   const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await page.getByRole("button", { name: "Export STL" }).click();
   const bytes = readFileSync(await (await download).path());
   const report = checkBinaryStl(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));

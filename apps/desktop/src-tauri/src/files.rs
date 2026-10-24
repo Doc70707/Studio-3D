@@ -61,6 +61,34 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// The crash-recovery copy of unsaved work, kept in the app's own data folder.
+pub const RECOVERY_FILE: &str = "recovery.json";
+
+pub fn read_recovery(dir: &Path) -> Result<Option<String>, String> {
+    let path = dir.join(RECOVERY_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = read_limited(&path, MAX_PROJECT_BYTES)?;
+    // Not text means damaged; the interface explains that, so hand back what is readable.
+    Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+pub fn write_recovery(dir: &Path, text: &str) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("Couldn't back up your work: {e}"))?;
+    write_atomic(&dir.join(RECOVERY_FILE), text.as_bytes())
+}
+
+/// Removes the recovery copy (and its backup), once the work is saved or deliberately discarded.
+pub fn clear_recovery(dir: &Path) -> Result<(), String> {
+    for path in [dir.join(RECOVERY_FILE), sibling(&dir.join(RECOVERY_FILE), ".bak")] {
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| format!("Couldn't remove the backup of your work: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +131,20 @@ mod tests {
         fs::create_dir(sibling(&p, &format!(".tmp-{}", std::process::id()))).unwrap();
         assert!(write_atomic(&p, b"new").is_err());
         assert_eq!(fs::read(&p).unwrap(), b"original");
+    }
+
+    #[test]
+    fn recovery_copy_is_written_read_and_cleared() {
+        let dir = temp_dir("recovery").join("not-created-yet");
+        assert_eq!(read_recovery(&dir).unwrap(), None);
+        write_recovery(&dir, "first").unwrap();
+        write_recovery(&dir, "second").unwrap();
+        assert_eq!(read_recovery(&dir).unwrap().as_deref(), Some("second"));
+        clear_recovery(&dir).unwrap();
+        assert_eq!(read_recovery(&dir).unwrap(), None);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        // Clearing when there is nothing to clear is fine.
+        clear_recovery(&dir).unwrap();
     }
 
     #[test]

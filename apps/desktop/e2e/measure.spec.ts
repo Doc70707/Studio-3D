@@ -31,13 +31,15 @@ test("labels follow the design when a size changes", async ({ page }) => {
 test("the selected shape shows its size and where it sits", async ({ page }) => {
   await page.getByRole("button", { name: "Add cylinder" }).click();
   await current(page);
-  // Overall 60 × 40 × 50, plus the cylinder: 20 × 20 × 20, 20 mm from the left and 10 from the front, lifted 30.
-  expect(await texts(page)).toEqual(["10 mm", "20 mm", "20 mm", "20 mm", "20 mm", "30 mm", "40 mm", "50 mm", "60 mm"]);
+  // Only the cylinder's own sizes: Ø20 (once, not as a width and a depth) × 20 high, 20 mm from the left and 10 from
+  // the front, lifted 30. The part's overall size stays in Properties, so the labels don't crowd each other.
+  expect(await texts(page)).toEqual(["10 mm", "20 mm", "20 mm", "30 mm", "Ø20 mm"]);
   await page.screenshot({ path: `${OUT}measure-shape.png` });
 });
 
 test("a hole shows its diameter and distance from the edges when it's being edited", async ({ page }) => {
   await page.getByRole("button", { name: "Add hole" }).click();
+  await page.keyboard.press("Enter"); // the hole goes in the middle
   await page.getByLabel("Hole 1 left / right position").fill("-15");
   await current(page);
   await expect(labels(page).filter({ hasText: "Ø5 mm" })).toHaveCount(1);
@@ -48,23 +50,29 @@ test("a hole shows its diameter and distance from the edges when it's being edit
 
 test("the status bar says where the pointer is on the part", async ({ page }) => {
   await page.getByRole("button", { name: "Top", exact: true }).click();
-  const panel = (await page.locator(".panel").boundingBox())!;
-  const top = (await page.locator(".topbar").boundingBox())!;
-  const status = (await page.locator(".statusbar").boundingBox())!;
-  const vp = page.viewportSize()!;
-  await page.mouse.move((panel.x + panel.width + vp.width) / 2, (top.y + top.height + status.y) / 2);
+  const view = (await page.locator("main.viewport-host").boundingBox())!;
+  const [top, left, bottom, right] = (await page.locator("main.viewport-host").getAttribute("data-safe-area"))!
+    .split(",")
+    .map(Number) as [number, number, number, number];
+  await page.mouse.move(view.x + (left + view.width - right) / 2, view.y + (top + view.height - bottom) / 2);
   // Looking down into the open box, the pointer is on its floor, 2 mm up.
-  await expect(page.getByTestId("pointer-readout")).toContainText("left/right 0.0 · front/back 0.0 · height 2.0 mm");
-  await page.mouse.move(vp.width - 40, top.y + top.height + 40); // over empty plate
+  await expect(page.getByTestId("pointer-readout")).toHaveText(/^X -?0\.0\d {3}Y -?0\.0\d {3}Z 2\.00 mm$/);
+  await page.mouse.move(view.x + left + 40, view.y + top + 40); // over empty plate
   await expect(page.getByTestId("pointer-readout")).toHaveText("");
 });
 
 test("the standard views frame the part, not the whole plate, so its sizes are readable", async ({ page }) => {
   const canvas = (await page.getByTestId("viewport-canvas").boundingBox())!;
-  const boxes = await Promise.all((await labels(page).all()).map((l) => l.boundingBox()));
-  const xs = boxes.flatMap((b) => [b!.x, b!.x + b!.width]);
-  // The labels spread over a good part of the screen rather than bunching on a tiny part.
-  expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(canvas.width * 0.2);
+  await expect(labels(page)).toHaveCount(3);
+  const measure = async () => Promise.all((await labels(page).all()).map((l) => l.boundingBox()));
+  const spread = async () => {
+    const xs = (await measure()).flatMap((b) => [b!.x, b!.x + b!.width]);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  // The labels spread over a good part of the screen rather than bunching on a tiny part. Under load the first
+  // frames can still be framing the part, so wait for the view to settle rather than reading it once.
+  await expect.poll(spread).toBeGreaterThan(canvas.width * 0.2);
+  const boxes = await measure();
   // And none of them cover each other.
   for (let i = 0; i < boxes.length; i++)
     for (let j = i + 1; j < boxes.length; j++) {
