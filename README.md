@@ -139,16 +139,28 @@ What works today:
   inner edge (drag or arrow keys), swap sides and hide; View > Reset workspace puts everything back. Docked (solid,
   against the edges) or Floating (frosted glass over the view). The layout is remembered on this computer, and the
   part stays centred in the space the palettes leave open.
-- Appearance (top bar, or View > Appearance…): Midnight, Graphite or Light theme; six accent colours; and the part's
-  colour, so it looks like the filament it will be printed in. Changes show straight away and are remembered.
-- Around the part (Appearance, View > Build plate / Grid / Background colour…, or the View ribbon's Scene group): a
+- Settings (top bar, View > Settings…, Ctrl+, or OPTIONS): one window with five categories. Appearance: Midnight,
+  Graphite or Light theme, six accent colours and the part's colour, so it looks like the filament it will be printed
+  in. Viewport and grid: the plate, the grid and the background (below). Units: millimetres or inches. Snaps and
+  navigation: object snaps on or off and which ones, and the mouse and keys. Workspace: docked or floating palettes,
+  comfortable or compact density, the ribbon and the command line. Every change shows at once while the part moves
+  out from under the window; Cancel or Esc puts back everything changed since it opened, Done keeps it, and Reset
+  puts one category back as it starts. Nothing in Settings changes the part or its file.
+- Around the part (Settings, View > Build plate / Grid / Background colour…, or the View ribbon's Scene group): a
   design plate of 256 mm, 500 mm, 1 m (the default) or 2 m; or no plate at all (PLATE), so the part sits on a plain
   background with only a grid, as in Civil 3D's model space. The background can be the theme's, black, model space
   grey, white or any colour picked, in the 3D view and the sketch screen alike, and the grid and size lines adjust to
-  stay readable on it. F7 or GRID shows and hides the grid; grid lines fade into the distance instead of crowding at
-  the horizon. Print Studio always shows the chosen printer's own plate.
-- A calm frame: the camera views sit in a slim column in the corner of the 3D view, steps in the Browser show their
-  sizes on a second line instead of cutting them off, and a picked piece shows only its own sizes.
+  stay readable on it. F7 or GRID shows and hides the grid. The grid adapts to the zoom: finer squares appear as you
+  zoom in (down to 1 mm, or 1/16 in) and coarser ones take over as you zoom out (10 mm, 100 mm, 1 m…), cross-fading
+  without jumps; lines stay one crisp pixel wide, fade into the distance instead of crowding at the horizon, and the
+  grid snap uses the squares shown. Print Studio always shows the chosen printer's own plate.
+- A calm frame: the camera controls sit in one slim column in the corner of the 3D view, in three parts: a compass
+  that turns with the view and shows where X, Y and Z point (click it for the 3D view), the Top/Front/Right views, and
+  Ortho and Sizes. Steps in the Browser show their sizes on a second line instead of cutting them off, a picked piece
+  shows only its own sizes, and size labels too short to read when zoomed far out are hidden instead of piling up.
+- Print Studio's panel folds into sections (Before printing, Print settings, Send to a slicer), each with a one-line
+  summary such as "All 4 pass"; a section with a problem opens itself. Its ribbon row shows the printer and settings
+  beside Slice, and the print time and filament once sliced.
 - A shorter top: the ribbon's tabs sit in the title bar beside the logo, and the ribbon is one compact row, so the
   frame above the 3D view went from 181 to 102 px.
 - Snaps you can see and choose, like AutoCAD's object snaps: a Snaps menu while sketching ticks End, Middle, Centre,

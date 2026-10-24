@@ -22,4 +22,5 @@ export {
   type Bounds,
   type Vec3,
 } from "./views";
+export { gridLevels, snapStep, MM_GRID, INCH_GRID, MIN_CELL_PIXELS, type GridScale } from "./grid";
 export { dimensionLines, labelPoint, partDimensions, setDimensionFormat, type Dimension } from "./dimensions";

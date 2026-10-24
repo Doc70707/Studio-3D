@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 const OUT = new URL("../../../test-output/", import.meta.url).pathname;
 const host = (page: Page) => page.locator("main.viewport-host");
 const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
-const panel = (page: Page) => page.getByRole("dialog", { name: "Appearance" });
+const panel = (page: Page) => page.getByRole("dialog", { name: "Settings" });
 const backgrounds = (page: Page) => panel(page).getByRole("radiogroup", { name: "Background" });
 const line = (page: Page) => page.getByTestId("command-line");
 const input = (page: Page) => line(page).getByRole("combobox");
@@ -48,7 +48,7 @@ test.beforeEach(async ({ page }) => {
   await expect(line(page)).toBeVisible();
 });
 
-test("the design plate is 1 m across, and Appearance makes it 256 mm, 500 mm or 2 m", async ({ page }) => {
+test("the design plate is 1 m across, and Settings makes it 256 mm, 500 mm or 2 m", async ({ page }) => {
   await expect(host(page)).toHaveAttribute("data-plate", "1000,1000");
   await expect(host(page)).toHaveAttribute("data-surroundings", "plate");
   await page.screenshot({ path: `${OUT}plate-1m.png` });

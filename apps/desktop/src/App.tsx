@@ -86,7 +86,8 @@ import {
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { SHAPE_ORDER, copySource, placeNew, useDesignPanel } from "./DesignPanel";
 import { Palette } from "./Palette";
-import { AppearancePanel } from "./AppearancePanel";
+import { SettingsWindow, type SettingsCategory } from "./SettingsWindow";
+import { ViewNav } from "./ViewNav";
 import { applyAppearance, readAppearance, viewportColors, writeAppearance, type Appearance } from "./appearance";
 import { Ribbon, type RibbonTab } from "./Ribbon";
 import {
@@ -110,7 +111,7 @@ import { SKETCH_ONLY, SNAPS_3D, describeEdge, distance, edgeAt, findSnap3, type 
 import { SNAP_KINDS, SNAP_LABELS, type SnapKind } from "./precision";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
-import { toggleUnits, useUnits } from "./unitsSetting";
+import { setUnits, toggleUnits, useUnits } from "./unitsSetting";
 import { UnitsSwitch } from "./UnitsSwitch";
 import { Icon } from "./Icon";
 import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
@@ -120,7 +121,7 @@ import type { HelperChange } from "./helperTools";
 import { indexCommands, type Command } from "./commands";
 import { type Tool as SketchTool } from "./SketchEditor";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
-import { PrintPanel, type LayerPreview, type PrintState, type SliceSummary } from "./PrintPanel";
+import { PrintPanel, duration, type LayerPreview, type PrintState, type SliceSummary } from "./PrintPanel";
 import { escapeLeaves, focusPanelAfterSelection, type FocusPanel } from "./screen";
 import { APP_INFO, useProject, whenSaved } from "./useProject";
 
@@ -254,7 +255,9 @@ export function App() {
   const [layout, setLayout] = useState<Workspace>(readWorkspace);
   /** Theme, accent and part colour: kept on this computer. The page's colours were set before the first paint. */
   const [appearance, setAppearance] = useState<Appearance>(readAppearance);
-  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  /** The Settings window, open at a category, or closed. */
+  const [settingsAt, setSettingsAt] = useState<SettingsCategory | null>(null);
+  const settingsOpen = settingsAt !== null;
   /** The ribbon's tab names sit in the top bar, so the ribbon is one row shorter. */
   const [ribbonTabsHost, setRibbonTabsHost] = useState<HTMLElement | null>(null);
   const changeAppearance = useCallback((a: Appearance) => {
@@ -346,15 +349,19 @@ export function App() {
       const paletteRight = right ? h.right - right.left : 0;
       // Its layout width, not its drawn box, which is still growing while it opens.
       const helperRoom = helperShown && helperPanel.current ? helperPanel.current.offsetWidth + 16 : 0;
+      // Settings sits over the right palette; the part moves out from under it, so each change can be seen on it.
+      const settings = settingsOpen ? host.ownerDocument.querySelector<HTMLElement>(".settings") : null;
+      const settingsRoom = settings ? settings.offsetWidth + 28 : 0;
       const area = {
         top,
         left: left ? left.right - h.left : 0,
         bottom: Math.max(status ? h.bottom - status.top : 0, command ? h.bottom - command.top : 0),
-        right: paletteRight + helperRoom,
+        right: Math.max(paletteRight + helperRoom, settingsRoom),
       };
-      // The part glides over when Blurry opens or closes, rather than jumping.
-      vp.setSafeArea(area, helperRoom !== helperRoomWas.current);
-      helperRoomWas.current = helperRoom;
+      // The part glides over when Blurry or Settings opens or closes, rather than jumping.
+      const room = helperRoom + settingsRoom;
+      vp.setSafeArea(area, room !== helperRoomWas.current);
+      helperRoomWas.current = room;
       // The status bar's own room too: the command line sits just above it.
       const statusRoom = status ? h.bottom - status.top : 0;
       setSafeArea([area.top, area.left, area.bottom, area.right, statusRoom, paletteRight].map(Math.round).join(","));
@@ -367,7 +374,7 @@ export function App() {
     if (helperPanel.current) ro.observe(helperPanel.current);
     update();
     return () => ro.disconnect();
-  }, [printing, layout, panelShown, focus, draft, helperShown]);
+  }, [printing, layout, panelShown, focus, draft, helperShown, settingsOpen]);
 
   // Geometry engine
   useEffect(() => {
@@ -707,7 +714,13 @@ export function App() {
     const hit = vp.pickPoint(x, y);
     const plate = hit ? null : vp.pickPlate(x, y);
     const model = mesh ? { edges: mesh.edgeInfo, faces: mesh.faceInfo } : { edges: [], faces: [] };
-    const base = { pointer: [x, y] as [number, number], toScreen: (p: Vec3) => vp.toClient(p), from, plate };
+    const base = {
+      pointer: [x, y] as [number, number],
+      toScreen: (p: Vec3) => vp.toClient(p),
+      from,
+      plate,
+      gridStep: vp.gridStep(),
+    };
     const forced = only ? findSnap3(model, { ...base, radius: 40, kinds: [only] }) : null;
     if (strict) return { point: forced?.point ?? null, snap: forced };
     // F3 turns the object snaps off; the grid snap stays as it is set.
@@ -1279,6 +1292,12 @@ export function App() {
         toggleCommandLine();
         return;
       }
+      // Ctrl+, opens Settings, as in most desktop apps.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === ",") {
+        e.preventDefault();
+        setSettingsAt((c) => (c ? null : "appearance"));
+        return;
+      }
       if (mode === "pick-face" && e.key === "Escape") {
         stopPicking();
         markSnap(null);
@@ -1597,7 +1616,7 @@ export function App() {
           reason: "Print Studio always shows your printer's plate",
         },
         { label: "Grid", shortcut: "F7", checked: appearance.grid, onSelect: toggleGrid },
-        { label: "Background colour…", onSelect: () => setAppearanceOpen(true) },
+        { label: "Background colour…", onSelect: () => setSettingsAt("view") },
         "separator" as const,
         { label: "Palettes", shortcut: "Ctrl+B", checked: panelShown, onSelect: togglePanel },
         {
@@ -1617,7 +1636,7 @@ export function App() {
         },
         { label: "Command line", shortcut: "Ctrl+9", checked: layout.commandLine, onSelect: toggleCommandLine },
         { label: "Reset workspace", onSelect: () => arrange(() => DEFAULT_WORKSPACE) },
-        { label: "Appearance…", onSelect: () => setAppearanceOpen(true) },
+        { label: "Settings…", shortcut: "Ctrl+,", onSelect: () => setSettingsAt("appearance") },
         "separator" as const,
         { label: "Focus canvas", shortcut: "Ctrl+0", checked: focus, onSelect: toggleFocus },
         { label: "Full screen", shortcut: "F11", checked: fullScreen, onSelect: toggleFullScreen },
@@ -1990,7 +2009,7 @@ export function App() {
             label: "Background",
             name: "Background colour",
             title: "The colour behind the part: the theme's, black, model space grey, white or any colour",
-            onClick: () => setAppearanceOpen(true),
+            onClick: () => setSettingsAt("view"),
           },
         ],
       },
@@ -2005,12 +2024,12 @@ export function App() {
             onClick: () => arrange(() => DEFAULT_WORKSPACE),
           },
           {
-            icon: "palette",
-            label: "Colours",
-            name: "Appearance",
-            title: "Theme, accent colour and the part's colour",
-            pressed: appearanceOpen,
-            onClick: () => setAppearanceOpen((o) => !o),
+            icon: "settings",
+            label: "Settings",
+            name: "Settings",
+            title: "Theme and colours, the 3D view and grid, units, snaps and the workspace (Ctrl+,)",
+            pressed: settingsOpen,
+            onClick: () => setSettingsAt((c) => (c ? null : "appearance")),
           },
         ],
       },
@@ -2046,6 +2065,45 @@ export function App() {
             size: "large",
           },
         ],
+      },
+      // The job at a glance beside its buttons, so the row says what will be printed and, once sliced, what it takes.
+      {
+        label: "Job",
+        items: [],
+        info: (
+          <>
+            <strong>
+              {printer.maker} {printer.name}
+            </strong>
+            <span>
+              {slicerSettings.layerHeight.toFixed(2)} mm layers · {slicerSettings.walls} walls ·{" "}
+              {Math.round(slicerSettings.infillDensity * 100)}% infill
+            </span>
+          </>
+        ),
+      },
+      {
+        label: "Result",
+        items: [],
+        info:
+          sliceSummary?.status === "ready" ? (
+            <>
+              <strong>{duration(sliceSummary.seconds)}</strong>
+              <span>
+                {Math.round(sliceSummary.grams)} g · {(sliceSummary.filament / 1000).toFixed(2)} m PLA ·{" "}
+                {sliceSummary.layers} layers
+              </span>
+            </>
+          ) : (
+            <>
+              <strong>{sliceSummary?.status === "writing" ? "Working out the print…" : "Not sliced yet"}</strong>
+              <span>
+                {sliceSummary?.status === "failed"
+                  ? "The toolpaths didn't pass their check"
+                  : "Slice to see time and filament"}
+              </span>
+            </>
+          ),
       },
     ],
   };
@@ -2498,56 +2556,31 @@ export function App() {
           <button
             type="button"
             className="appearance-button"
-            data-opens="appearance"
-            aria-label="Appearance"
-            aria-pressed={appearanceOpen}
-            title="Appearance: theme, accent colour and the part's colour"
-            onClick={() => setAppearanceOpen((o) => !o)}
+            data-opens="settings"
+            aria-label="Settings"
+            aria-pressed={settingsOpen}
+            title="Settings: theme and colours, the 3D view, units, snaps and the workspace (Ctrl+,)"
+            onClick={() => setSettingsAt((c) => (c ? null : "appearance"))}
           >
-            <Icon name="palette" />
-            <span className="label">Appearance</span>
+            <Icon name="settings" />
+            <span className="label">Settings</span>
           </button>
         </div>
 
         {focus && screenModes}
       </header>
 
-      <nav className="glass view-bar" aria-label="Camera views">
-        {VIEW_BUTTONS.filter((b) => b.bar).map((b) => (
-          <button
-            key={b.view}
-            type="button"
-            aria-pressed={camera?.view === b.view}
-            title={`${b.label} view (key ${b.key}; Shift+${b.key} looks from the other side)`}
-            onClick={() => viewportRef.current?.setView(b.view)}
-            disabled={webglError}
-          >
-            {b.label}
-          </button>
-        ))}
-        <span className="divider" aria-hidden="true" />
-        <button
-          type="button"
-          aria-pressed={projection === "orthographic"}
-          aria-label="Orthographic"
-          title={`Orthographic: no perspective, parallel edges stay parallel (key ${PROJECTION_KEY})`}
-          onClick={toggleProjection}
-          disabled={webglError}
-        >
-          Ortho
-        </button>
-        <span className="divider" aria-hidden="true" />
-        <button
-          type="button"
-          aria-pressed={showSizes}
-          title="Show sizes in the 3D view (M)"
-          onClick={() => setShowSizes((v) => !v)}
-          disabled={webglError}
-        >
-          <Icon name="ruler" />
-          Sizes
-        </button>
-      </nav>
+      <ViewNav
+        camera={camera}
+        views={VIEW_BUTTONS.filter((b) => b.bar)}
+        ortho={projection === "orthographic"}
+        sizes={showSizes}
+        disabled={webglError}
+        projectionKey={PROJECTION_KEY}
+        onView={(view) => viewportRef.current?.setView(view)}
+        onOrtho={toggleProjection}
+        onSizes={() => setShowSizes((v) => !v)}
+      />
 
       {ribbonShown && (
         <Ribbon
@@ -2625,8 +2658,18 @@ export function App() {
         {!focus && screenModes}
       </footer>
 
-      {appearanceOpen && (
-        <AppearancePanel value={appearance} onChange={changeAppearance} onClose={() => setAppearanceOpen(false)} />
+      {settingsAt && (
+        <SettingsWindow
+          value={{ appearance, units, workspace: layout, snaps }}
+          category={settingsAt}
+          onCategory={setSettingsAt}
+          onAppearance={changeAppearance}
+          onUnits={setUnits}
+          onWorkspace={(w) => arrange(() => w)}
+          onSnaps={setSnaps}
+          shortcuts={SHORTCUTS}
+          onClose={() => setSettingsAt(null)}
+        />
       )}
       {dialog && <HelpDialog kind={dialog} onClose={() => setDialog(null)} />}
       {calibratingPicture && (

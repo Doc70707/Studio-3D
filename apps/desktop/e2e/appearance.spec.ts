@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const host = (page: Page) => page.locator("main.viewport-host");
 const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
-const panel = (page: Page) => page.getByRole("dialog", { name: "Appearance" });
-const open = (page: Page) => page.locator(".topbar").getByRole("button", { name: "Appearance" }).click();
+const panel = (page: Page) => page.getByRole("dialog", { name: "Settings" });
+const open = (page: Page) => page.locator(".topbar").getByRole("button", { name: "Settings" }).click();
 const cssVar = (page: Page, name: string) =>
   page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name);
 /** The view publishes its camera after drawing the next frame; wait for it so a read isn't one frame old. */
@@ -44,7 +44,7 @@ test.beforeEach(async ({ page }) => {
   await current(page);
 });
 
-test("Appearance changes the theme, the accent and the part's colour at once, and keeps them", async ({ page }) => {
+test("Settings changes the theme, the accent and the part's colour at once, and keeps them", async ({ page }) => {
   test.setTimeout(90_000); // it rebuilds the part after a restart, which a busy test machine can take a while over
   await page.keyboard.press("1"); // top view: the part fills the middle of the view
   const blue = await partColour(page);
@@ -74,35 +74,90 @@ test("Appearance changes the theme, the accent and the part's colour at once, an
   const again = await partColour(page);
   expect(again[0]).toBeGreaterThan(again[2] + 60);
 
-  // Default colours puts all three back.
+  // Reset puts all three back.
   await open(page);
-  await panel(page).getByRole("button", { name: "Default colours" }).click();
+  await panel(page).getByRole("button", { name: "Reset appearance" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
   expect(await cssVar(page, "--accent")).toBe("#5ea8ff");
   await expect(panel(page).getByRole("radio", { name: "Sky blue" })).toHaveAttribute("aria-checked", "true");
 });
 
-test("the colours can be picked from the keyboard, and Escape or a click outside closes the panel", async ({
+test("Settings works from the keyboard: arrows pick, Escape cancels every change, Done keeps them", async ({
   page,
 }) => {
   await page.getByRole("tab", { name: "View", exact: true }).click();
-  await page.getByTestId("ribbon").getByRole("button", { name: "Appearance" }).click();
+  await page.getByTestId("ribbon").getByRole("button", { name: "Settings" }).click();
   await expect(panel(page)).toBeVisible();
-  // The chosen theme has the focus; arrow keys move along the choices and pick as they go.
-  await expect(panel(page).getByRole("radio", { name: "Midnight" })).toBeFocused();
+  // The open category has the focus; up and down move between categories.
+  const appearance = panel(page).getByRole("tab", { name: "Appearance" });
+  await expect(appearance).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(panel(page).getByRole("tab", { name: "Viewport and grid" })).toHaveAttribute("aria-selected", "true");
+  await expect(panel(page).getByRole("tab", { name: "Viewport and grid" })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(appearance).toHaveAttribute("aria-selected", "true");
+
+  // Arrow keys move along the choices and pick as they go, shown on the app at once.
+  await panel(page).getByRole("radio", { name: "Midnight" }).focus();
   await page.keyboard.press("ArrowRight");
   await expect(panel(page).getByRole("radio", { name: "Graphite" })).toHaveAttribute("aria-checked", "true");
   await expect(panel(page).getByRole("radio", { name: "Graphite" })).toBeFocused();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite");
+  // A change in another category, then Escape: everything goes back as it was.
+  await panel(page).getByRole("tab", { name: "Units" }).click();
+  await panel(page).getByRole("radio", { name: "Inches" }).click();
+  await expect(page.getByTestId("dimension").first()).toContainText("in");
   await page.keyboard.press("Escape");
   await expect(panel(page)).toHaveCount(0);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
+  await expect(page.getByTestId("dimension").first()).toContainText("mm");
 
-  await page.getByRole("menubar").getByRole("menuitem", { name: "View", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Appearance…" }).click();
+  // Ctrl+, opens it too; clicking the app behind leaves it open, so the view can be turned to judge a change.
+  await page.keyboard.press("Control+,");
   await expect(panel(page)).toBeVisible();
+  await panel(page).getByRole("radio", { name: "Graphite" }).click();
   await page.getByTestId("browser").click({ position: { x: 20, y: 200 } });
+  await expect(panel(page)).toBeVisible();
+  await panel(page).getByRole("button", { name: "Done" }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite");
+
+  // And from the View menu, as Settings…
+  await page.getByRole("menubar").getByRole("menuitem", { name: "View", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Settings…" }).click();
+  await expect(panel(page)).toBeVisible();
+});
+
+test("Settings' other categories change the snaps, the workspace and the density, and Reset puts one back", async ({
+  page,
+}) => {
+  await open(page);
+  await panel(page).getByRole("tab", { name: "Snaps and navigation" }).click();
+  const midpoint = panel(page).getByRole("checkbox", { name: "Middle" });
+  await expect(midpoint).toBeChecked();
+  await midpoint.uncheck();
+  await panel(page).getByRole("radio", { name: "Snaps off" }).click();
+  await expect(midpoint).toBeDisabled();
+  await expect(panel(page).getByText("Undo / Redo")).toBeVisible(); // the mouse and keys list
+
+  await panel(page).getByRole("tab", { name: "Workspace" }).click();
+  await panel(page).getByRole("radio", { name: "Compact" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-density", "compact");
+  await panel(page).getByRole("radio", { name: "Shown" }).click();
+  await expect(page.getByTestId("command-line")).toBeVisible();
+  await panel(page).getByRole("button", { name: "Reset workspace" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-density", "comfortable");
+  await expect(page.getByTestId("command-line")).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Done" }).click();
+
+  // The snaps were kept: off, and without midpoints, until put back.
+  await open(page);
+  await panel(page).getByRole("tab", { name: "Snaps and navigation" }).click();
+  await expect(panel(page).getByRole("radio", { name: "Snaps off" })).toHaveAttribute("aria-checked", "true");
+  await expect(midpoint).not.toBeChecked();
+  await panel(page).getByRole("button", { name: "Reset snaps and navigation" }).click();
+  await expect(midpoint).toBeChecked();
+  await expect(panel(page).getByRole("radio", { name: "Snaps on" })).toHaveAttribute("aria-checked", "true");
 });
 
 test("with a piece picked, only its own sizes are labelled, so the labels don't crowd", async ({ page }) => {

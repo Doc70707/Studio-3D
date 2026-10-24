@@ -14,6 +14,7 @@ import {
 } from "@studio3d/document";
 import { PLA, type SlicedLayer, type SlicerSettings } from "@studio3d/geometry";
 import { Icon } from "./Icon";
+import { Section } from "./Section";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
 import { defaultSlicer, readSlicerMemory, slicerList, writeSlicerMemory, type SlicerMemory } from "./slicerChoice";
 
@@ -196,6 +197,20 @@ export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(
   }, [slicers]);
   const list = slicerList(found ?? [], memory.located);
   const slicer = defaultSlicer(list, memory.last);
+  const checks = state.kind === "checked" ? state.checks : [];
+  const warnings = checks.filter((c) => c.status !== "ok").length - errors;
+  const checksTone: "ok" | "warning" | "error" =
+    state.kind === "blocked" || state.kind === "failed" || errors ? "error" : warnings ? "warning" : "ok";
+  const checksSummary =
+    state.kind === "checking"
+      ? "Checking…"
+      : state.kind !== "checked"
+        ? "Can't check"
+        : errors
+          ? `${errors} to fix`
+          : warnings
+            ? `${warnings} to look at`
+            : `All ${checks.length} pass`;
   const remember = (m: SlicerMemory) => {
     setMemory(m);
     writeSlicerMemory(m);
@@ -231,87 +246,110 @@ export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(
           {printerSummary(printer)}
         </p>
 
-        <h2 className="panel-title">Before printing</h2>
-        {state.kind === "blocked" || state.kind === "failed" ? (
-          <p className="issue error" role="alert" data-testid="print-blocked">
-            {state.reason}
-          </p>
-        ) : state.kind === "checking" ? (
-          <p className="props-note" role="status" data-testid="print-checking">
-            Checking the file that would go to your slicer…
-          </p>
-        ) : (
-          <ul className="print-checks" aria-label="Print checks">
-            {state.checks.map((c) => (
-              <li
-                key={c.id}
-                className={`print-check ${c.status}`}
-                data-testid="print-check"
-                data-check={c.id}
-                data-status={c.status}
-              >
-                <Icon name={c.status === "ok" ? "check" : "alert"} />
-                <span>{c.text}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <Section
+          id="print-checks"
+          title="Before printing"
+          summary={checksSummary}
+          tone={checksTone}
+          forceOpen={checksTone === "error"}
+        >
+          {state.kind === "blocked" || state.kind === "failed" ? (
+            <p className="issue error" role="alert" data-testid="print-blocked">
+              {state.reason}
+            </p>
+          ) : state.kind === "checking" ? (
+            <p className="props-note" role="status" data-testid="print-checking">
+              Checking the file that would go to your slicer…
+            </p>
+          ) : (
+            <ul className="print-checks" aria-label="Print checks">
+              {state.checks.map((c) => (
+                <li
+                  key={c.id}
+                  className={`print-check ${c.status}`}
+                  data-testid="print-check"
+                  data-check={c.id}
+                  data-status={c.status}
+                >
+                  <Icon name={c.status === "ok" ? "check" : "alert"} />
+                  <span>{c.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {state.kind === "checked" && (
+            <dl className="facts" data-testid="print-facts">
+              <dt>Part size</dt>
+              <dd>
+                {state.size.map((n) => lengthNumber(n)).join(" × ")} {getDisplayUnits()}
+              </dd>
+              <dt>Material volume</dt>
+              <dd>{volumeText(state.volume)}</dd>
+            </dl>
+          )}
+        </Section>
 
-        <h2 className="panel-title">Layers</h2>
-        <div className="field compact">
-          <label htmlFor="layer-height">Layer height</label>
-          <div className="input-row select-row">
-            <select
-              id="layer-height"
-              value={settings.layerHeight}
-              onChange={(e) => props.onSettings({ layerHeight: Number(e.target.value) })}
-              title="Thinner layers show less of the steps on curves and slopes, and take longer to print"
-            >
-              {withCurrent(LAYER_HEIGHTS, settings.layerHeight).map((h) => (
-                <option key={h} value={h}>
-                  {mm(h)}
-                </option>
-              ))}
-            </select>
+        <Section
+          id="print-settings"
+          title="Print settings"
+          summary={`${mm(settings.layerHeight)} · ${settings.walls} walls · ${Math.round(settings.infillDensity * 100)}%`}
+          summaryWhenFolded
+        >
+          <div className="field compact">
+            <label htmlFor="layer-height">Layer height</label>
+            <div className="input-row select-row">
+              <select
+                id="layer-height"
+                value={settings.layerHeight}
+                onChange={(e) => props.onSettings({ layerHeight: Number(e.target.value) })}
+                title="Thinner layers show less of the steps on curves and slopes, and take longer to print"
+              >
+                {withCurrent(LAYER_HEIGHTS, settings.layerHeight).map((h) => (
+                  <option key={h} value={h}>
+                    {mm(h)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
-        <div className="field compact">
-          <label htmlFor="walls">Walls</label>
-          <div className="input-row select-row">
-            <select
-              id="walls"
-              value={settings.walls}
-              onChange={(e) => props.onSettings({ walls: Number(e.target.value) })}
-              title={`Lines round every outline, each ${settings.lineWidth} mm wide. More walls make a stronger part.`}
-            >
-              {withCurrent(WALL_COUNTS, settings.walls).map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+          <div className="field compact">
+            <label htmlFor="walls">Walls</label>
+            <div className="input-row select-row">
+              <select
+                id="walls"
+                value={settings.walls}
+                onChange={(e) => props.onSettings({ walls: Number(e.target.value) })}
+                title={`Lines round every outline, each ${settings.lineWidth} mm wide. More walls make a stronger part.`}
+              >
+                {withCurrent(WALL_COUNTS, settings.walls).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
-        <div className="field compact">
-          <label htmlFor="infill">Infill</label>
-          <div className="input-row select-row">
-            <select
-              id="infill"
-              value={settings.infillDensity}
-              onChange={(e) => props.onSettings({ infill: Number(e.target.value) })}
-              title={
-                "How much of the inside is filled, in lines crossing at right angles from layer to layer. " +
-                "The top 0.8 mm and bottom 0.6 mm are always solid."
-              }
-            >
-              {withCurrent(INFILL_DENSITIES, settings.infillDensity).map((d) => (
-                <option key={d} value={d}>
-                  {Math.round(d * 100)}%
-                </option>
-              ))}
-            </select>
+          <div className="field compact">
+            <label htmlFor="infill">Infill</label>
+            <div className="input-row select-row">
+              <select
+                id="infill"
+                value={settings.infillDensity}
+                onChange={(e) => props.onSettings({ infill: Number(e.target.value) })}
+                title={
+                  "How much of the inside is filled, in lines crossing at right angles from layer to layer. " +
+                  "The top 0.8 mm and bottom 0.6 mm are always solid."
+                }
+              >
+                {withCurrent(INFILL_DENSITIES, settings.infillDensity).map((d) => (
+                  <option key={d} value={d}>
+                    {Math.round(d * 100)}%
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
+        </Section>
         {layers ? (
           <button type="button" className="layer-toggle" onClick={() => props.onLayerView(false)}>
             Show the part
@@ -400,96 +438,91 @@ export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(
             </button>
           </>
         )}
-      </div>
 
-      {state.kind === "checked" && (
-        <dl className="facts" data-testid="print-facts">
-          <dt>Part size</dt>
-          <dd>
-            {state.size.map((n) => lengthNumber(n)).join(" × ")} {getDisplayUnits()}
-          </dd>
-          <dt>Material volume</dt>
-          <dd>{volumeText(state.volume)}</dd>
-        </dl>
-      )}
-      <div className="print-actions">
-        {slicers ? (
-          <>
-            {list.length > 0 && (
-              <div className="field compact">
-                <label htmlFor="slicer">Slicer</label>
-                <div className="print-buttons">
-                  <div className="input-row select-row">
-                    <select
-                      id="slicer"
-                      value={slicer?.path}
-                      onChange={(e) => remember({ ...memory, last: e.target.value })}
-                    >
-                      {list.map((s) => (
-                        <option key={s.path} value={s.path} title={s.path}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
+        <Section id="print-send" title="Send to a slicer" summary={slicer?.name ?? "3MF or STL file"}>
+          <div className="print-actions">
+            {slicers ? (
+              <>
+                {list.length > 0 && (
+                  <div className="field compact">
+                    <label htmlFor="slicer">Slicer</label>
+                    <div className="print-buttons">
+                      <div className="input-row select-row">
+                        <select
+                          id="slicer"
+                          value={slicer?.path}
+                          onChange={(e) => remember({ ...memory, last: e.target.value })}
+                        >
+                          {list.map((s) => (
+                            <option key={s.path} value={s.path} title={s.path}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        className="narrow"
+                        onClick={() => void locate()}
+                        title="Point to a slicer's program file"
+                      >
+                        Other…
+                      </button>
+                    </div>
                   </div>
+                )}
+                {found && list.length === 0 && (
+                  <p className="props-note" data-testid="no-slicer">
+                    No Bambu Studio, OrcaSlicer or PrusaSlicer in its usual folder. Locate yours, or export a file
+                    below.
+                  </p>
+                )}
+                {slicer ? (
                   <button
                     type="button"
-                    className="narrow"
-                    onClick={() => void locate()}
-                    title="Point to a slicer's program file"
+                    className="primary"
+                    onClick={() => props.onOpenInSlicer(slicer)}
+                    disabled={!ready}
+                    title={why ?? `Open the checked part in ${slicer.name} as a 3MF file`}
                   >
-                    Other…
+                    <Icon name="printer" />
+                    Open in {slicer.name}
                   </button>
-                </div>
-              </div>
-            )}
-            {found && list.length === 0 && (
-              <p className="props-note" data-testid="no-slicer">
-                No Bambu Studio, OrcaSlicer or PrusaSlicer in its usual folder. Locate yours, or export a file below.
-              </p>
-            )}
-            {slicer ? (
+                ) : (
+                  <button type="button" onClick={() => void locate()} title="Point to a slicer's program file">
+                    Locate slicer…
+                  </button>
+                )}
+              </>
+            ) : null}
+            <p className="props-note" data-testid="handoff-note">
+              Only the part's shape is sure to go across. Pick your printer, filament and settings in the slicer.
+            </p>
+            <div className="print-buttons">
               <button
                 type="button"
-                className="primary"
-                onClick={() => props.onOpenInSlicer(slicer)}
+                className={slicers ? "" : "primary"}
+                onClick={() => props.onExport("3mf")}
                 disabled={!ready}
-                title={why ?? `Open the checked part in ${slicer.name} as a 3MF file`}
+                title={why ?? "Save the checked part as a 3MF file: millimetres, its name, on the printer's plate"}
               >
-                <Icon name="printer" />
-                Open in {slicer.name}
+                <Icon name="export" />
+                Export 3MF
               </button>
-            ) : (
-              <button type="button" onClick={() => void locate()} title="Point to a slicer's program file">
-                Locate slicer…
+              <button
+                type="button"
+                onClick={() => props.onExport("stl")}
+                disabled={!ready}
+                title={why ?? "Save the checked part as an STL file"}
+              >
+                <Icon name="export" />
+                Export STL
               </button>
-            )}
-          </>
-        ) : null}
-        <p className="props-note" data-testid="handoff-note">
-          Only the part's shape is sure to go across. Pick your printer, filament and settings in the slicer.
-        </p>
-        <div className="print-buttons">
-          <button
-            type="button"
-            className={slicers ? "" : "primary"}
-            onClick={() => props.onExport("3mf")}
-            disabled={!ready}
-            title={why ?? "Save the checked part as a 3MF file: millimetres, its name, on the printer's plate"}
-          >
-            <Icon name="export" />
-            Export 3MF
-          </button>
-          <button
-            type="button"
-            onClick={() => props.onExport("stl")}
-            disabled={!ready}
-            title={why ?? "Save the checked part as an STL file"}
-          >
-            <Icon name="export" />
-            Export STL
-          </button>
-        </div>
+            </div>
+          </div>
+        </Section>
+      </div>
+      <div className="panel-footer">
         <button type="button" onClick={props.onBackToDesign}>
           Back to design
         </button>

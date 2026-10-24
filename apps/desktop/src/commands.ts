@@ -81,9 +81,9 @@ export const COMMAND_WORDS: Record<string, { aliases: string[]; words: string[] 
   },
   Palettes: { aliases: ["PALETTES"], words: ["side panels", "panels"] },
   "Reset workspace": { aliases: ["WSRESET"], words: ["reset layout", "put panels back"] },
-  Appearance: {
-    aliases: ["THEME", "COLOURS", "COLORS"],
-    words: ["dark mode", "light mode", "colour", "color", "theme"],
+  Settings: {
+    aliases: ["OPTIONS", "OP", "SETTINGS", "THEME", "COLOURS", "COLORS"],
+    words: ["preferences", "appearance", "dark mode", "light mode", "colour", "color", "theme", "options"],
   },
   "Focus canvas": { aliases: ["CLEANSCREEN", "CLEAN"], words: ["hide panels", "more room", "focus"] },
   "Full screen": { aliases: ["FULLSCREEN"], words: ["full screen", "bigger window"] },
@@ -114,7 +114,6 @@ const RIBBON_TITLES: Record<string, string> = {
   Hollow: "Hollow out",
   Measure: "Measure distance",
   Reset: "Reset workspace",
-  Colours: "Appearance",
 };
 
 /** "Fillet (round edges)" and "Pattern Box 1" are the commands Fillet and Pattern. */

@@ -76,6 +76,19 @@ describe("3D snaps on the kernel's edges", () => {
     expect(at(60, 60, ["end"], { plate: [63.4, 57.2, 0] })).toBeNull();
   });
 
+  it("the grid snap follows the squares drawn at this zoom", () => {
+    expect(at(60, 60, SNAPS_3D, { plate: [63.4, 57.2, 0], gridStep: 1 })).toEqual({ kind: "grid", point: [63, 57, 0] });
+    expect(at(60, 60, SNAPS_3D, { plate: [63.4, 57.2, 0], gridStep: 100 })).toEqual({
+      kind: "grid",
+      point: [100, 100, 0],
+    });
+    // Quarter inches: 6.35 mm squares, with no floating-point dust.
+    expect(at(60, 60, SNAPS_3D, { plate: [6.2, -12.8, 0], gridStep: 6.35 })).toEqual({
+      kind: "grid",
+      point: [6.35, -12.7, 0],
+    });
+  });
+
   it("names the edge under the pointer", () => {
     const i = edgeAt(model, { pointer: toScreen([33, 10.5, 10]), toScreen, radius: 8 })!;
     expect(describeEdge(model.edges[i]!)).toBe("Circle, Ø6 mm");

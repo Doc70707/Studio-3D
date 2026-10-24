@@ -1505,11 +1505,106 @@ input:focus-visible {
 }
 
 .print-actions {
-  flex: none;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0 12px 12px;
+}
+
+/* Folding sections: a title row with a one-line summary, the detail below when open. */
+.panel-section {
+  margin: 0 -8px 10px;
+}
+
+.panel-section-title {
+  margin: 0;
+  font: inherit;
+}
+
+.panel-section-title button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.panel-section-title button:hover {
+  background: var(--fill-hover);
+}
+
+.panel-section-title .icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: transform 160ms var(--ease);
+}
+
+.panel-section.open .panel-section-title .icon {
+  transform: rotate(90deg);
+}
+
+.panel-section-title .name {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.panel-section-title .summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-section-title .summary.ok {
+  color: var(--success);
+}
+
+.panel-section-title .summary.warning {
+  color: var(--warning);
+}
+
+.panel-section-title .summary.error {
+  color: var(--error);
+}
+
+.panel-section-body {
+  padding: 6px 8px 4px;
+}
+
+.panel-section-body .facts {
+  margin: 4px 0 6px;
+}
+
+/* The one way out of a palette, always in reach under its scrolling part. */
+.panel-footer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--chrome-edge);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-section-title .icon {
+    transition: none;
+  }
 }
 
 .print-actions .props-note,
@@ -2372,6 +2467,36 @@ button.link:hover {
   cursor: not-allowed;
 }
 
+/* Words in the ribbon: how the job stands, beside its buttons. */
+.ribbon-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  max-width: 280px;
+  padding: 0 10px;
+  font-size: var(--fs-small);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.ribbon-info strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.ribbon-info span {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
 .ribbon-group-label {
   padding: 3px 0 1px;
   color: var(--muted);
@@ -2681,28 +2806,28 @@ button.link:hover {
 }
 
 /* The camera views: a slim column at the top right of the open part of the 3D view. */
-.view-bar {
+.view-nav {
   position: absolute;
   z-index: 3;
   top: calc(var(--safe-top, 76px) + 12px);
   right: calc(var(--safe-right, 0px) + 12px);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px;
-  border-radius: 14px;
+  align-items: stretch;
+  width: 68px;
+  padding: 6px;
+  border-radius: 16px;
 }
 
-.view-bar button {
+.view-nav button {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-width: 56px;
-  height: 30px;
-  padding: 0 8px;
+  height: 28px;
+  padding: 0 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 9px;
   background: transparent;
   color: var(--muted);
   font-size: var(--fs-small);
@@ -2713,23 +2838,72 @@ button.link:hover {
     color 140ms var(--ease);
 }
 
-.view-bar button:hover:not(:disabled) {
+.view-nav button:hover:not(:disabled) {
   background: var(--fill-hover);
   color: var(--text);
 }
 
-.view-bar button[aria-pressed="true"] {
+.view-nav button[aria-pressed="true"] {
   background: rgb(var(--accent-rgb) / 0.2);
   color: var(--text);
 }
 
-.view-bar .divider {
-  width: auto;
-  height: 1px;
-  margin: 3px 6px;
+/* Where you look from: the compass, whose axes turn with the view; clicking it goes back to the 3D view. */
+.view-nav .compass {
+  flex-direction: column;
+  gap: 0;
+  height: auto;
+  padding: 4px 0 3px;
 }
 
-.app.sketching .view-bar {
+.view-nav .compass svg {
+  display: block;
+  overflow: visible;
+}
+
+.compass-ring {
+  fill: rgb(var(--ink-rgb) / 0.04);
+  stroke: rgb(var(--ink-rgb) / 0.12);
+  stroke-width: 1;
+}
+
+.compass-hub {
+  fill: var(--text);
+}
+
+.view-nav .compass text {
+  fill: #0b1020;
+  font-size: 6.5px;
+  font-weight: 750;
+  pointer-events: none;
+}
+
+.compass-label {
+  margin-top: 1px;
+  font-size: var(--fs-caption);
+  line-height: 1.2;
+}
+
+.view-faces,
+.view-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 5px;
+  margin-top: 5px;
+  border-top: 1px solid rgb(var(--ink-rgb) / 0.08);
+}
+
+.view-tools button {
+  justify-content: flex-start;
+  padding-left: 7px;
+}
+
+.view-tools .icon {
+  flex: none;
+}
+
+.app.sketching .view-nav {
   display: none;
 }
 
@@ -2760,56 +2934,161 @@ button.link:hover {
   }
 }
 
-/* Appearance: floats at the top right, beside the work, so each change shows on the app straight away. */
-.appearance {
+/* Settings: a window at the top right, beside the work rather than over it, so each change shows on the app at once.
+   Its categories run down the left; the window is solid rather than glass, so its many small words stay crisp. */
+.settings {
   position: absolute;
   z-index: 30;
   top: calc(var(--safe-top, 76px) + 12px);
-  right: calc(var(--safe-right, 0px) + 12px);
-  width: 340px;
-  max-height: calc(100% - var(--safe-top, 76px) - 72px);
-  overflow-y: auto;
-  padding: 16px 18px 18px;
+  right: 12px;
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr);
+  width: min(640px, calc(100vw - 24px));
+  height: min(560px, calc(100% - var(--safe-top, 76px) - 72px));
+  border: 1px solid var(--chrome-edge);
   border-radius: var(--radius-lg);
-  background: var(--glass-strong);
-  animation: materialize 240ms var(--ease);
+  background: var(--chrome);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transform-origin: top right; /* it grows out of the Settings button above it */
+  animation: settings-in 220ms var(--ease);
 }
 
-.appearance header {
+@keyframes settings-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 18px 10px;
+  background: rgb(var(--ink-rgb) / 0.035);
+  border-right: 1px solid var(--chrome-edge);
+}
+
+.settings-nav h2 {
+  margin: 0 10px 12px;
+  font-size: var(--fs-title);
+  font-weight: 650;
+}
+
+.settings-nav button {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease);
 }
 
-.appearance h2 {
+.settings-nav button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-nav button .icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.settings-nav button:hover {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+
+.settings-nav button[aria-selected="true"] {
+  background: rgb(var(--accent-rgb) / 0.18);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.settings-nav button[aria-selected="true"] .icon {
+  color: var(--accent);
+}
+
+.settings-nav button:focus-visible,
+.settings-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.settings-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.settings-main > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 6px;
+}
+
+.settings-main > header h3 {
   margin: 0;
   font-size: var(--fs-title);
   font-weight: 650;
 }
 
-.appearance-group {
-  padding: 12px 0 4px;
+.settings-main > header p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-small);
 }
 
-.appearance-group h3 {
+.settings-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 20px 12px;
+}
+
+.settings-group {
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--chrome-edge);
+}
+
+.settings-group:first-child {
+  border-top: 0;
+}
+
+.settings-group h4 {
   margin: 0 0 8px;
   font-size: var(--fs-body);
   font-weight: 600;
 }
 
-.appearance-group p {
+.settings .hint-line {
   margin: -4px 0 10px;
+  color: var(--muted);
   font-size: var(--fs-small);
+  line-height: 1.4;
 }
 
-.appearance .choices {
+.settings .choices {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.appearance .choices button {
+.settings .choices button {
   display: grid;
   place-items: center;
   width: 34px;
@@ -2824,15 +3103,15 @@ button.link:hover {
     transform 100ms ease-out;
 }
 
-.appearance .choices button:hover {
+.settings .choices button:hover {
   transform: scale(1.06);
 }
 
-.appearance .choices button[aria-checked="true"] {
+.settings .choices button[aria-checked="true"] {
   border-color: var(--accent);
 }
 
-.appearance .choices button:focus-visible {
+.settings .choices button:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
@@ -2844,12 +3123,12 @@ button.link:hover {
   box-shadow: 0 0 0 1px rgb(var(--ink-rgb) / 0.18) inset;
 }
 
-.appearance .choices.wide {
+.settings .choices.wide {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
 }
 
-.appearance .choices.wide button {
+.settings .choices.wide button {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2861,23 +3140,27 @@ button.link:hover {
   font-size: var(--fs-small);
 }
 
-.appearance .choices.wide button:hover {
+.settings .choices.wide button:hover {
   transform: none;
   background: var(--fill-hover);
 }
 
-.appearance .choices.pills {
+.settings .choices.pills {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  max-width: 100%;
   gap: 4px;
   padding: 3px;
   border-radius: 12px;
   background: var(--well);
 }
 
-.appearance .choices.pills button {
-  flex: 1;
+.settings .choices.pills button {
+  flex: 0 1 auto;
   width: auto;
+  min-width: 0;
   height: 30px;
-  padding: 0 10px;
+  padding: 0 14px;
   border: 0;
   border-radius: 9px;
   color: var(--muted);
@@ -2885,19 +3168,24 @@ button.link:hover {
   white-space: nowrap;
 }
 
-.appearance .choices.pills button:hover {
+.settings .choices.pills button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings .choices.pills button:hover {
   transform: none;
   color: var(--text);
 }
 
-.appearance .choices.pills button[aria-checked="true"] {
+.settings .choices.pills button[aria-checked="true"] {
   background: var(--chrome-2);
   color: var(--text);
   font-weight: 600;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
 }
 
-.appearance .any-colour {
+.settings .any-colour {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2907,7 +3195,7 @@ button.link:hover {
   cursor: pointer;
 }
 
-.appearance .any-colour input {
+.settings .any-colour input {
   width: 34px;
   height: 26px;
   padding: 0;
@@ -2915,6 +3203,55 @@ button.link:hover {
   border-radius: 7px;
   background: transparent;
   cursor: pointer;
+}
+
+.settings .check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px 12px;
+}
+
+.settings .check-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+
+.settings .check-grid input {
+  accent-color: var(--button);
+}
+
+.settings .check-grid label:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.shortcut-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.shortcut-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--chrome-edge);
+  font-size: var(--fs-small);
+}
+
+.shortcut-list dt {
+  color: var(--muted);
+}
+
+.shortcut-list dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 550;
 }
 
 .theme-swatch {
@@ -2940,14 +3277,19 @@ button.link:hover {
   opacity: 0.8;
 }
 
-.appearance .actions {
+.settings-actions {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   gap: 8px;
-  margin-top: 16px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--chrome-edge);
 }
 
-.appearance .actions button {
+.settings-actions .spacer {
+  flex: 1;
+}
+
+.settings-actions button {
   height: 34px;
   padding: 0 16px;
   border: 0;
@@ -2955,16 +3297,58 @@ button.link:hover {
   background: var(--fill);
   color: var(--text);
   font-weight: 550;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.appearance .actions button:hover {
+.settings-actions button:hover {
   background: var(--fill-hover);
 }
 
-.appearance .actions button.primary {
+.settings-actions button.primary {
   background: var(--button);
   color: var(--on-accent);
+}
+
+/* A smaller window: the categories shrink to their icons, so the part keeps room beside Settings. */
+@media (max-width: 1180px) {
+  .settings {
+    grid-template-columns: 56px minmax(0, 1fr);
+    width: min(500px, calc(100vw - 24px));
+  }
+  .settings-nav h2,
+  .settings-nav button span {
+    display: none;
+  }
+  .settings-nav button {
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+/* Compact: controls closer together, so more fits on a small screen. Text sizes stay the same, so nothing gets
+   harder to read. */
+:root[data-density="compact"] {
+  --gap: 10px;
+}
+
+:root[data-density="compact"] .ribbon-button {
+  gap: 3px;
+  min-width: 50px;
+  padding: 4px 5px 3px;
+}
+
+:root[data-density="compact"] .ribbon-button .icon {
+  width: 20px;
+  height: 20px;
+}
+
+:root[data-density="compact"] .ribbon-group {
+  padding: 0 5px;
+}
+
+:root[data-density="compact"] .palette-body > .panel-scroll {
+  padding-top: 8px;
 }
 
 /* Light theme: the white pressed pill needs an edge to stand off a light track. */
@@ -3368,7 +3752,7 @@ button.link:hover {
 
 /* The selection bar centres in the open view, clear of the camera views column on the right. */
 .app {
-  --view-bar-room: 96px;
+  --view-bar-room: 92px;
 }
 .selection-bar {
   left: calc(
@@ -3899,6 +4283,7 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
 
 @media (prefers-reduced-motion: reduce) {
   .menu-list,
+  .settings,
   .context-menu {
     animation: fade 120ms ease;
   }

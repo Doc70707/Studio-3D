@@ -20,6 +20,8 @@ export interface Appearance {
   grid: boolean;
   /** Behind the part: "theme" for the theme's own, or a colour as #rrggbb. */
   background: string;
+  /** How much room controls get: comfortable (the default) or compact, which fits more on a small screen. */
+  density: "comfortable" | "compact";
 }
 
 /** The CSS colour variables a theme sets. Every text colour is checked against every surface in contrast.test.ts. */
@@ -229,6 +231,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   plateSize: 1000,
   grid: true,
   background: "theme",
+  density: "comfortable",
 };
 export const APPEARANCE_KEY = "studio3d.appearance";
 
@@ -326,6 +329,7 @@ export function parseAppearance(text: string | null): Appearance {
       typeof r.background === "string" && (r.background === "theme" || /^#[0-9a-f]{6}$/i.test(r.background))
         ? r.background.toLowerCase()
         : DEFAULT_APPEARANCE.background,
+    density: r.density === "compact" ? "compact" : "comfortable",
   };
 }
 
@@ -364,6 +368,7 @@ export function applyAppearance(a: Appearance, doc: Document = document): void {
   doc.documentElement.dataset.theme = a.theme;
   doc.documentElement.dataset.accent = a.accent;
   doc.documentElement.dataset.partColor = a.part;
+  doc.documentElement.dataset.density = a.density;
   // A background picked by hand replaces the theme's behind the part, in the 3D view and the sketch screen alike. The
   // sketch's lines and words take the colours of a theme of the background's own lightness, so they show on it.
   const bg = backgroundColor(a);

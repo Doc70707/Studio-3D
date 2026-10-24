@@ -70,8 +70,13 @@ for (const [width, height] of SIZES)
     await page.getByRole("menubar").getByRole("menuitem", { name: "File", exact: true }).click();
     await look(page, "file-menu");
     await page.keyboard.press("Escape");
-    await page.locator(".topbar").getByRole("button", { name: "Appearance" }).click();
-    await look(page, "appearance");
+    await page.locator(".topbar").getByRole("button", { name: "Settings" }).click();
+    await look(page, "settings");
+    for (const category of ["Viewport and grid", "Units", "Snaps and navigation", "Workspace"]) {
+      await page.getByRole("tab", { name: category }).click();
+      await look(page, `settings-${category.split(" ")[0]!.toLowerCase()}`);
+    }
+    await page.getByRole("tab", { name: "Appearance" }).click();
     await page.getByRole("radio", { name: "Light" }).click();
     await page.getByRole("button", { name: "Done" }).click();
     await look(page, "light");

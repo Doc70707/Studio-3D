@@ -13,6 +13,7 @@ import {
   type StandardView,
 } from "./views";
 import { dimensionLines, labelPoint, type Dimension } from "./dimensions";
+import { INCH_GRID, MM_GRID, buildGround, snapStep, type GridScale } from "./grid";
 import { blendPose, prefersReducedMotion, settled, springProgress, type Pose } from "./glide";
 
 export interface ViewportOptions {
@@ -28,14 +29,6 @@ export interface DisplayMesh {
   indices: Uint32Array;
   edges: Float32Array;
 }
-
-/** Spacing of the plate's grid lines, in mm. */
-interface PlateGrid {
-  minor: number;
-  major: number;
-}
-const MM_GRID: PlateGrid = { minor: 10, major: 50 };
-const INCH_GRID: PlateGrid = { minor: 12.7, major: 50.8 };
 
 /** Part edges are drawn a little see-through, so they define the shape without outlining it like a cartoon. */
 const EDGE_OPACITY = 0.6;
@@ -63,7 +56,7 @@ export interface Surroundings {
 }
 
 /** Without a plate, the grid reaches this far each way from the middle (mm), fading towards its edge. */
-export const MODEL_SPACE_REACH = 1000;
+export const MODEL_SPACE_REACH = 10000;
 /** With no part, the standard views frame at most this much of a big plate (mm), so the start isn't a speck. */
 const HOME_AREA = 300;
 
@@ -146,7 +139,7 @@ export class Viewport {
   private partBounds: Bounds | null = null;
   private view: StandardView | "custom" = "iso";
   private frameRequested = false;
-  private grid: PlateGrid = MM_GRID;
+  private grid: GridScale = MM_GRID;
   /** The part's soft shadow on the plate. */
   private shadow: THREE.Mesh | null = null;
   /** The camera's glide to a new view, while one is running. */
@@ -188,7 +181,7 @@ export class Viewport {
   private surroundings: Surroundings = { plate: true, grid: true };
   /** How far the camera is from what it looks at; grid lines fade out a few times further away than that. */
   private readonly gridFocus = { value: 1e9 };
-  private labels: { el: HTMLElement; at: THREE.Vector3 }[] = [];
+  private labels: { el: HTMLElement; at: THREE.Vector3; from: THREE.Vector3; to: THREE.Vector3 }[] = [];
   private readonly labelLayer: HTMLDivElement;
   private safeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
   /** Where the open area is gliding to, while it is. */
@@ -885,7 +878,12 @@ export class Viewport {
         el.textContent = d.text;
         el.style.visibility = "hidden"; // until the next frame puts it in its place
         this.labelLayer.appendChild(el);
-        this.labels.push({ el, at: new THREE.Vector3(...labelPoint(d)) });
+        this.labels.push({
+          el,
+          at: new THREE.Vector3(...labelPoint(d)),
+          from: new THREE.Vector3(...d.from),
+          to: new THREE.Vector3(...d.to),
+        });
       }
     }
     this.requestRender();
@@ -996,14 +994,34 @@ export class Viewport {
   private buildSurroundings(): THREE.Group {
     const { width, depth, volume } = this.plateSize;
     const { plate, grid } = this.surroundingsShown;
-    const group = plate
-      ? buildPlate(width, depth, this.colors, this.grid, this.gridFocus, grid)
-      : buildPlate(MODEL_SPACE_REACH * 2, MODEL_SPACE_REACH * 2, this.colors, this.grid, this.gridFocus, grid, false);
+    const group = new THREE.Group();
+    group.add(
+      buildGround({
+        width: plate ? width : MODEL_SPACE_REACH * 2,
+        depth: plate ? depth : MODEL_SPACE_REACH * 2,
+        surface: plate,
+        grid,
+        scale: this.grid,
+        colors: this.colors,
+        focus: this.gridFocus,
+      }),
+    );
     if (volume) group.add(buildVolume(width, depth, volume.height, volume.fits));
     return group;
   }
 
   /** Squares on the plate: 10 mm (heavier every 50), or half inches (heavier every 2 inches). */
+  /** The grid squares (mm) a grid snap uses now: the finest still clearly drawn where the camera looks. */
+  gridStep(): number {
+    const h = Math.max(1, this.renderer.domElement.clientHeight);
+    const cam = this.camera;
+    const mmPerPixel =
+      cam instanceof THREE.PerspectiveCamera
+        ? (2 * cam.position.distanceTo(this.controls.target) * Math.tan((cam.fov * Math.PI) / 360)) / h
+        : (cam.top - cam.bottom) / cam.zoom / h;
+    return snapStep(mmPerPixel, this.grid);
+  }
+
   setGridUnits(units: "mm" | "in"): void {
     const grid = units === "in" ? INCH_GRID : MM_GRID;
     if (grid === this.grid) return;
@@ -1141,12 +1159,22 @@ export class Viewport {
     const { clientWidth: w, clientHeight: h } = this.container;
     const p = new THREE.Vector3();
     const placed: { x: number; y: number; w: number; h: number }[] = [];
-    for (const { el, at } of this.labels) {
+    const ends = [new THREE.Vector3(), new THREE.Vector3()];
+    for (const { el, at, from, to } of this.labels) {
       p.copy(at).project(this.camera);
       const visible = p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2;
       el.style.visibility = visible ? "visible" : "hidden";
       const lw = el.offsetWidth + 4;
       const lh = el.offsetHeight + 2;
+      // Zoomed far out, a size shorter on screen than half its label would bury the part under numbers: it waits
+      // until the part is big enough to read, as in a drawing (the numbers are in Properties meanwhile).
+      ends[0]!.copy(from).project(this.camera);
+      ends[1]!.copy(to).project(this.camera);
+      const onScreen = Math.hypot(((ends[1]!.x - ends[0]!.x) / 2) * w, ((ends[1]!.y - ends[0]!.y) / 2) * h);
+      if (onScreen < lw * 0.5) {
+        el.style.visibility = "hidden";
+        continue;
+      }
       const x = ((p.x + 1) / 2) * w;
       let y = ((1 - p.y) / 2) * h;
       // A label that would cover one already placed moves a little way to the nearest clear spot beside its line.
@@ -1281,122 +1309,6 @@ function buildVolume(width: number, depth: number, height: number, fits: boolean
 }
 
 /**
- * Build plate: a flat surface with 10 mm and 50 mm grid lines and X/Y axis lines through the origin. Without its
- * surface it is model space's grid: the lines and axes only, over the plain background.
- */
-function buildPlate(
-  width: number,
-  depth: number,
-  colors: ViewportColors,
-  grid: PlateGrid,
-  focus: { value: number },
-  showGrid = true,
-  withSurface = true,
-): THREE.Group {
-  const group = new THREE.Group();
-  group.name = withSurface ? "build-plate" : "model-space";
-  // Long lines are drawn in pieces so they can fade towards the edge; a big grid in fewer, longer pieces.
-  const piece = Math.max(10, (width + depth) / 100);
-
-  // The plate has softly rounded corners, like a real print bed.
-  if (withSurface) {
-    const surface = new THREE.Mesh(
-      roundedPlate(width, depth, Math.min(width, depth) * 0.04),
-      new THREE.MeshStandardMaterial({
-        color: colors.plate,
-        roughness: 0.9,
-        transparent: true,
-        opacity: 0.72,
-      }),
-    );
-    surface.position.z = -0.01;
-    group.add(surface);
-  }
-
-  // Grid lines fade out towards the plate's edge, so the plate reads as a surface, not a cage.
-  const minor: number[] = [];
-  const major: number[] = [];
-  const hw = width / 2;
-  const hd = depth / 2;
-  const fade = (x: number, y: number) => gridFade(Math.max(Math.abs(x) / hw, Math.abs(y) / hd));
-  const line = (arr: number[], x1: number, y1: number, x2: number, y2: number) => {
-    const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / piece));
-    for (let i = 0; i < n; i++) {
-      const [ax, ay] = [x1 + ((x2 - x1) * i) / n, y1 + ((y2 - y1) * i) / n];
-      const [bx, by] = [x1 + ((x2 - x1) * (i + 1)) / n, y1 + ((y2 - y1) * (i + 1)) / n];
-      arr.push(ax, ay, fade(ax, ay), bx, by, fade(bx, by));
-    }
-  };
-  // Lines out from the centre both ways, so the centre lines are always on the grid whatever the plate's size.
-  const isMajor = (v: number) => Math.abs(v / grid.major - Math.round(v / grid.major)) < 1e-6;
-  const xs = new Set<number>();
-  const ys = new Set<number>();
-  if (showGrid) {
-    for (let v = 0; v <= hw + 1e-9; v += grid.minor) [v, -v].forEach((x) => xs.add(x + 0));
-    for (let v = 0; v <= hd + 1e-9; v += grid.minor) [v, -v].forEach((y) => ys.add(y + 0));
-  }
-  xs.forEach((x) => line(isMajor(x) ? major : minor, x, -hd, x, hd));
-  ys.forEach((y) => line(isMajor(y) ? major : minor, -hw, y, hw, y));
-
-  /**
-   * Lines from points stored as x, y, alpha: drawn on the plate, each point as clear as its alpha. Seen in perspective,
-   * they also fade between `near` and `far` times the camera's distance from what it looks at, so a big grid melts
-   * into the distance instead of crowding into a moiré at the horizon.
-   */
-  const lines = (pts: number[], color: number, z: number, near: number, far: number) => {
-    const c = new THREE.Color(color);
-    const pos: number[] = [];
-    const rgba: number[] = [];
-    for (let i = 0; i < pts.length; i += 3) {
-      pos.push(pts[i]!, pts[i + 1]!, z);
-      rgba.push(c.r, c.g, c.b, pts[i + 2]!);
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute("rgba", new THREE.Float32BufferAttribute(rgba, 4));
-    return new THREE.LineSegments(
-      g,
-      new THREE.ShaderMaterial({
-        uniforms: { focus, near: { value: near }, far: { value: far } },
-        vertexShader: `
-          attribute vec4 rgba;
-          varying vec4 vRgba;
-          varying float vDepth;
-          void main() {
-            vRgba = rgba;
-            vec4 at = modelViewMatrix * vec4(position, 1.0);
-            vDepth = -at.z;
-            gl_Position = projectionMatrix * at;
-          }`,
-        fragmentShader: `
-          uniform float focus;
-          uniform float near;
-          uniform float far;
-          varying vec4 vRgba;
-          varying float vDepth;
-          void main() {
-            float away = 1.0 - smoothstep(focus * near, focus * far, vDepth);
-            gl_FragColor = vec4(vRgba.rgb, vRgba.a * away);
-            #include <tonemapping_fragment>
-            #include <colorspace_fragment>
-          }`,
-        transparent: true,
-        depthWrite: false,
-      }),
-    );
-  };
-  group.add(lines(minor, colors.gridMinor, 0, 1.1, 2.2));
-  group.add(lines(major, colors.gridMajor, 0, 2, 4.5));
-  const axis: number[] = [];
-  line(axis, -hw, 0, hw, 0);
-  group.add(lines(axis, 0xd9534f, 0.02, 4, 10)); // X axis, red
-  const yAxis: number[] = [];
-  line(yAxis, 0, -hd, 0, hd);
-  group.add(lines(yAxis, 0x5cb85c, 0.02, 4, 10)); // Y axis, green
-  return group;
-}
-
-/**
  * A soft shadow under the part, as if lit by a bright overcast sky: the part seen from above, blurred, darkest where
  * the part touches the plate. Drawn on a 2D canvas from the triangles, so it costs nothing per frame.
  */
@@ -1452,28 +1364,6 @@ function contactShadow(positions: Float32Array, indices: Uint32Array): THREE.Mes
   plane.position.set((x0 + x1) / 2, (y0 + y1) / 2, Math.min(z0, 0) - 0.004);
   plane.renderOrder = 1; // over the plate, which is see-through too
   return plane;
-}
-
-/** How clear a grid line is at a share of the way to the plate's edge (0 at the centre, 1 at the edge). */
-export function gridFade(r: number): number {
-  const t = Math.min(Math.max((r - 0.55) / 0.45, 0), 1);
-  return 1 - t * t * (3 - 2 * t) * 0.85;
-}
-
-/** A flat rectangle with rounded corners, centred on the origin. */
-function roundedPlate(width: number, depth: number, radius: number): THREE.ShapeGeometry {
-  const [w, d, r] = [width / 2, depth / 2, Math.min(radius, width / 2, depth / 2)];
-  const s = new THREE.Shape();
-  s.moveTo(-w + r, -d);
-  s.lineTo(w - r, -d);
-  s.quadraticCurveTo(w, -d, w, -d + r);
-  s.lineTo(w, d - r);
-  s.quadraticCurveTo(w, d, w - r, d);
-  s.lineTo(-w + r, d);
-  s.quadraticCurveTo(-w, d, -w, d - r);
-  s.lineTo(-w, -d + r);
-  s.quadraticCurveTo(-w, -d, -w + r, -d);
-  return new THREE.ShapeGeometry(s, 6);
 }
 
 /** A layer's material as flat triangles: each outside outline with the holes that lie inside it. */

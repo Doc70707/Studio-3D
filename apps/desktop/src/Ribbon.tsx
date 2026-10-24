@@ -1,6 +1,6 @@
 // The ribbon: tabs of labelled buttons in named groups, like Autodesk's. Minimised, only the tab names show and a
 // tab opens over the 3D view when clicked; double-clicking a tab name minimises or restores it, as in Civil 3D.
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./Icon";
 
@@ -23,6 +23,8 @@ export interface RibbonItem {
 export interface RibbonGroup {
   label: string;
   items: RibbonItem[];
+  /** Words beside the buttons that say how things stand (the printer and settings, the slice's time and filament). */
+  info?: ReactNode;
 }
 
 export interface RibbonTab {
@@ -144,6 +146,7 @@ export const Ribbon = forwardRef<HTMLElement, Props>(function Ribbon({ tabs, min
                     <span>{item.label}</span>
                   </button>
                 ))}
+                {g.info && <div className="ribbon-info">{g.info}</div>}
               </div>
             </div>
           ))}

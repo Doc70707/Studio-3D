@@ -31,7 +31,7 @@ export const SNAPS_3D: readonly SnapKind[] = [
  * single points belong to drawing outlines.
  */
 export const SKETCH_ONLY: readonly SnapKind[] = ["intersection", "tangent", "node"];
-/** The plate's grid lines are 10 mm apart. */
+/** The grid snap's squares when the view doesn't say (mm); the view's own grid adapts to the zoom. */
 export const PLATE_GRID = 10;
 const PRIORITY: SnapKind[] = ["end", "middle", "centre", "geometric", "quadrant", "perpendicular", "nearest", "grid"];
 
@@ -103,6 +103,8 @@ export interface SnapQuery {
   from?: Vec3 | null;
   /** Where the pointer meets the plate when it isn't over the part, for the grid snap. */
   plate?: Vec3 | null;
+  /** The grid squares drawn at this zoom (mm), which the grid snap follows. */
+  gridStep?: number;
 }
 
 /** The snap nearest the pointer, or null. "On the line" and the grid only apply when nothing else is near. */
@@ -150,7 +152,8 @@ export function findSnap3(model: SnapModel, q: SnapQuery): Snap3 | null {
     if (best) return best;
   }
   if (q.plate && q.kinds.includes("grid")) {
-    const g = (v: number) => Math.round(v / PLATE_GRID) * PLATE_GRID + 0;
+    const step = q.gridStep ?? PLATE_GRID;
+    const g = (v: number) => Math.round(Math.round(v / step) * step * 1e6) / 1e6 + 0;
     return { kind: "grid", point: [g(q.plate[0]), g(q.plate[1]), 0] };
   }
   return null;

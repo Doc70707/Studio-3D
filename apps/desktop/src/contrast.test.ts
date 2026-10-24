@@ -113,6 +113,8 @@ describe("appearance", () => {
       background: "theme",
     });
     expect(parseAppearance(JSON.stringify({ background: "#A0B0C0" })).background).toBe("#a0b0c0");
+    expect(parseAppearance(JSON.stringify({ density: "compact" })).density).toBe("compact");
+    expect(parseAppearance(JSON.stringify({ density: "tiny" })).density).toBe("comfortable");
   });
 
   it("on any background picked by hand, the grid and the measurement lines show", () => {
