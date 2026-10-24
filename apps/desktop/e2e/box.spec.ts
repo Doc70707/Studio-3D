@@ -48,7 +48,7 @@ test("invalid values are explained and the last valid model is kept", async ({ p
   await page.getByRole("button", { name: "Back to design" }).click();
 
   await setField(page, "Height", "abc");
-  await expect(page.getByText("Height needs to be a number")).toBeVisible();
+  await expect(page.getByText("Height needs to be a size, like 12 or 2.5.")).toBeVisible();
 
   await setField(page, "Wall thickness", "3");
   await setField(page, "Height", "30");
