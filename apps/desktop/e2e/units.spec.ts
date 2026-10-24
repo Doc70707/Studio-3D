@@ -95,29 +95,30 @@ test("Settings › Units: feet and inches, centimetres and metres, each to a cho
   await expect(page.locator(".field", { has: width(page) }).locator(".unit")).toHaveCount(0);
 
   // Typed as an architect writes it.
-  await width(page).fill(`5' 3 1/2"`);
+  await width(page).fill(`2' 3 1/2"`);
   await current(page);
-  await expect(sizes).toContainText(`5' 3 1/2" × 1 9/16" × 1 3/16"`);
-  await expect(page.getByTestId("dimension").filter({ hasText: `5' 3 1/2"` })).toHaveCount(1);
+  await expect(sizes).toContainText(`2' 3 1/2" × 1 9/16" × 1 3/16"`);
+  await expect(page.getByTestId("dimension").filter({ hasText: `2' 3 1/2"` })).toHaveCount(1);
 
   await settings.getByRole("radio", { name: `1/64"` }).click();
-  await expect(sizes).toContainText(`5' 3 1/2" × 1 37/64" × 1 3/16"`);
+  await expect(sizes).toContainText(`2' 3 1/2" × 1 37/64" × 1 3/16"`);
 
   await settings.getByRole("radio", { name: "Centimetres" }).click();
-  await expect(sizes).toContainText("161.29 × 4 × 3 cm");
-  await settings.getByRole("radio", { name: "Metres" }).click();
-  await expect(sizes).toContainText("1.613 × 0.04 × 0.03 m");
+  await expect(sizes).toContainText("69.85 × 4 × 3 cm");
+  await settings.getByRole("radio", { name: "Metres", exact: true }).click();
+  await expect(sizes).toContainText("0.699 × 0.04 × 0.03 m");
   await settings.getByRole("radio", { name: "0.0001" }).click();
-  await expect(sizes).toContainText("1.6129 × 0.04 × 0.03 m");
+  await expect(sizes).toContainText("0.6985 × 0.04 × 0.03 m");
 
-  // Cancel puts the units back; the part keeps its new width, exactly 63.5 inches.
+  // Cancel puts the units back; the part keeps its new width, exactly 27.5 inches.
   await settings.getByRole("button", { name: "Cancel" }).click();
-  await expect(sizes).toContainText("1612.9 × 40 × 30 mm");
+  await expect(sizes).toContainText("698.5 × 40 × 30 mm");
 
   // The status bar's switch goes to the last imperial choice: feet and inches, to the 1/64.
   await units(page).getByRole("button", { name: "ft-in", exact: true }).click();
-  await expect(sizes).toContainText(`5' 3 1/2" × 1 37/64" × 1 3/16"`);
+  await expect(sizes).toContainText(`2' 3 1/2" × 1 37/64" × 1 3/16"`);
+  // Remembered: after a restart (the design itself waits in "Restore your unsaved work?") sizes are still to the 1/64.
   await page.reload();
   await current(page);
-  await expect(sizes).toContainText(`5' 3 1/2"`);
+  await expect(sizes).toContainText(`2 23/64" × 1 37/64" × 1 3/16"`);
 });

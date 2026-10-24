@@ -675,7 +675,7 @@ function ShapeProps(props: { shape: ShapeFeature; first: boolean; issues: Issue[
         />
       )}
       <div className="position" title="From the centre of the build plate to the middle of the shape's base">
-        <span className="position-title">Position (mm)</span>
+        <span className="position-title">Position{unitSuffix() && ` (${unitSuffix()})`}</span>
         <div className="hole-grid three">
           {(["x", "y", "z"] as const).map((k) => (
             <NumberField

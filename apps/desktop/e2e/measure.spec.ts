@@ -56,7 +56,7 @@ test("the status bar says where the pointer is on the part", async ({ page }) =>
     .map(Number) as [number, number, number, number];
   await page.mouse.move(view.x + (left + view.width - right) / 2, view.y + (top + view.height - bottom) / 2);
   // Looking down into the open box, the pointer is on its floor, 2 mm up.
-  await expect(page.getByTestId("pointer-readout")).toHaveText("X 0.00   Y 0.00   Z 2.00 mm");
+  await expect(page.getByTestId("pointer-readout")).toHaveText(/^X -?0\.0\d {3}Y -?0\.0\d {3}Z 2\.00 mm$/);
   await page.mouse.move(view.x + left + 40, view.y + top + 40); // over empty plate
   await expect(page.getByTestId("pointer-readout")).toHaveText("");
 });

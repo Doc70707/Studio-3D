@@ -2931,7 +2931,13 @@ button.link:hover {
   text-overflow: ellipsis;
 }
 
-@media (max-width: 1100px) {
+/* The mouse controls show only when the whole line fits; cut off they read as noise (Help lists them all). */
+.statusbar .hint {
+  flex: 1 1 0;
+  container-type: inline-size;
+}
+
+@container (max-width: 600px) {
   .hint-keys {
     display: none;
   }

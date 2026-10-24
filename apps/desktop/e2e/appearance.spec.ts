@@ -105,7 +105,7 @@ test("Settings works from the keyboard: arrows pick, Escape cancels every change
   await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite");
   // A change in another category, then Escape: everything goes back as it was.
   await panel(page).getByRole("tab", { name: "Units" }).click();
-  await panel(page).getByRole("radio", { name: "Inches" }).click();
+  await panel(page).getByRole("radio", { name: "Inches", exact: true }).click();
   await expect(page.getByTestId("dimension").first()).toContainText("in");
   await page.keyboard.press("Escape");
   await expect(panel(page)).toHaveCount(0);
