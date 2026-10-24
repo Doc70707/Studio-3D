@@ -82,3 +82,42 @@ test("sketching in inches: the grid is in inches, and a typed rectangle is exact
   await expect(page.getByLabel("Rectangle width")).toHaveValue("50.8");
   await expect(page.getByLabel("Rectangle height")).toHaveValue("38.1");
 });
+
+test("Settings › Units: feet and inches, centimetres and metres, each to a chosen precision", async ({ page }) => {
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  const sizes = page.getByTestId("measurements");
+  await page.keyboard.press("Control+,");
+  await settings.getByRole("tab", { name: "Units" }).click();
+  await settings.getByRole("radio", { name: "Feet and inches" }).click();
+  // Shown at once, to the nearest 1/16 inch; the box keeps the exact size for editing.
+  await expect(sizes).toContainText(`2 3/8" × 1 9/16" × 1 3/16"`);
+  await expect(width(page)).toHaveValue(`2 3/8"`);
+  await expect(page.locator(".field", { has: width(page) }).locator(".unit")).toHaveCount(0);
+
+  // Typed as an architect writes it.
+  await width(page).fill(`5' 3 1/2"`);
+  await current(page);
+  await expect(sizes).toContainText(`5' 3 1/2" × 1 9/16" × 1 3/16"`);
+  await expect(page.getByTestId("dimension").filter({ hasText: `5' 3 1/2"` })).toHaveCount(1);
+
+  await settings.getByRole("radio", { name: `1/64"` }).click();
+  await expect(sizes).toContainText(`5' 3 1/2" × 1 37/64" × 1 3/16"`);
+
+  await settings.getByRole("radio", { name: "Centimetres" }).click();
+  await expect(sizes).toContainText("161.29 × 4 × 3 cm");
+  await settings.getByRole("radio", { name: "Metres" }).click();
+  await expect(sizes).toContainText("1.613 × 0.04 × 0.03 m");
+  await settings.getByRole("radio", { name: "0.0001" }).click();
+  await expect(sizes).toContainText("1.6129 × 0.04 × 0.03 m");
+
+  // Cancel puts the units back; the part keeps its new width, exactly 63.5 inches.
+  await settings.getByRole("button", { name: "Cancel" }).click();
+  await expect(sizes).toContainText("1612.9 × 40 × 30 mm");
+
+  // The status bar's switch goes to the last imperial choice: feet and inches, to the 1/64.
+  await units(page).getByRole("button", { name: "ft-in", exact: true }).click();
+  await expect(sizes).toContainText(`5' 3 1/2" × 1 37/64" × 1 3/16"`);
+  await page.reload();
+  await current(page);
+  await expect(sizes).toContainText(`5' 3 1/2"`);
+});

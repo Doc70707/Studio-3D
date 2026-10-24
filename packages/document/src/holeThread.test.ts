@@ -20,19 +20,46 @@ describe("threading an existing hole", () => {
     expect(suggestThread(6.8)).toBe("M8"); // M8's tap drill
     expect(suggestThread(6.35, "UNC")).toBe("1/4-20 UNC");
     expect(threadSettingsFor(hole({ diameter: 8.5 })).thread).toBe("M10");
+    expect(threadSettingsFor(hole({ diameter: 6.35 }), true).thread).toBe("1/4-20 UNC"); // inches shown: inch sizes
   });
 
   it("starts from the hole's own thread when it has one", () => {
     const s = threadSettingsFor(hole({ thread: "M8", fit: 0.15, threadDepth: 9, hand: "left", simplified: true }));
-    expect(s).toEqual({ thread: "M8", hand: "left", length: 9, depth: 0, fit: 0.15, cosmetic: true });
+    expect(s).toEqual({
+      thread: "M8",
+      hand: "left",
+      length: 9,
+      depth: 0,
+      fit: 0.15,
+      cosmetic: true,
+      drillPoint: false,
+    });
   });
 
   it("applies as hole settings, replacing a clearance size or a head recess", () => {
     const h = hole({ clearance: { screw: "M6", series: "medium" }, head: { kind: "countersink", diameter: 12 } });
-    const t = withThread(h, { thread: "M6", hand: "left", length: 8, depth: 12, fit: 0.3, cosmetic: false });
+    const t = withThread(h, {
+      thread: "M6",
+      hand: "left",
+      length: 8,
+      depth: 12,
+      fit: 0.3,
+      cosmetic: false,
+      drillPoint: false,
+    });
     expect(t).toEqual({ ...hole({ depth: 12 }), thread: "M6", fit: 0.3, hand: "left", threadDepth: 8 });
-    const plain = withThread(t, { thread: "M6", hand: "right", length: null, depth: 0, fit: 0.3, cosmetic: true });
+    const plain = withThread(t, {
+      thread: "M6",
+      hand: "right",
+      length: null,
+      depth: 0,
+      fit: 0.3,
+      cosmetic: true,
+      drillPoint: true,
+    });
     expect(plain.hand).toBeUndefined();
+    expect(plain.drillPoint).toBeUndefined(); // a through hole has no bottom for a point
+    expect(withThread(t, { ...threadSettingsFor(t), drillPoint: true }).drillPoint).toBe(true);
     expect(plain.threadDepth).toBeUndefined();
     expect(plain.simplified).toBe(true);
   });

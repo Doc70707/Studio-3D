@@ -12,7 +12,7 @@ import {
   type ReferenceImage,
   type ReferencePlane,
   getDisplayUnits,
-  lengthNumber,
+  lengthFigure,
   lengthText,
   toDisplay,
 } from "@studio3d/document";
@@ -78,8 +78,8 @@ export function ReferenceProps(props: {
   return (
     <>
       <p className="props-note" data-testid="reference-size">
-        {lengthNumber(w)} × {lengthNumber(h)} {getDisplayUnits()} (
-        {round(toDisplay(r.scale), getDisplayUnits() === "in" ? 5 : 4)} {getDisplayUnits()} per pixel).{" "}
+        {lengthFigure(w)} × {lengthText(h)} ({round(toDisplay(r.scale), getDisplayUnits() === "mm" ? 4 : 5)}{" "}
+        {getDisplayUnits()} per pixel).{" "}
         {r.calibrated ? "Sized from a known distance." : "Not calibrated yet: the size is a guess."}
       </p>
       <button type="button" className="link calibrate-link" onClick={props.onCalibrate}>
@@ -290,7 +290,7 @@ export function CalibrateDialog(props: {
         )}
         {scale && (
           <p className="props-note" data-testid="calibrate-result">
-            {round(pixels, 1)} pixels = {lengthText(distance)}, so the picture is {lengthNumber(r.pixels[0] * scale)} ×{" "}
+            {round(pixels, 1)} pixels = {lengthText(distance)}, so the picture is {lengthFigure(r.pixels[0] * scale)} ×{" "}
             {lengthText(r.pixels[1] * scale)}.
           </p>
         )}

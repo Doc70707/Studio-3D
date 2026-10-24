@@ -8,8 +8,8 @@ import {
   PRINTERS,
   type PrintCheck,
   type Printer,
-  getDisplayUnits,
-  lengthNumber,
+  lengthFigure,
+  unitSuffix,
   volumeText,
 } from "@studio3d/document";
 import { PLA, type SlicedLayer, type SlicerSettings } from "@studio3d/geometry";
@@ -281,7 +281,8 @@ export const PrintPanel = forwardRef<HTMLDivElement, Props>(function PrintPanel(
             <dl className="facts" data-testid="print-facts">
               <dt>Part size</dt>
               <dd>
-                {state.size.map((n) => lengthNumber(n)).join(" × ")} {getDisplayUnits()}
+                {state.size.map((n) => lengthFigure(n)).join(" × ")}
+                {unitSuffix() && ` ${unitSuffix()}`}
               </dd>
               <dt>Material volume</dt>
               <dd>{volumeText(state.volume)}</dd>

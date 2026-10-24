@@ -2017,6 +2017,7 @@ input:focus-visible {
 }
 
 .hint .pointer-readout {
+  white-space: pre;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
@@ -2814,7 +2815,7 @@ button.link:hover {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  width: 68px;
+  width: 76px;
   padding: 6px;
   border-radius: 16px;
 }
@@ -2901,6 +2902,8 @@ button.link:hover {
 
 .view-tools .icon {
   flex: none;
+  width: 15px;
+  height: 15px;
 }
 
 .app.sketching .view-nav {
@@ -3752,7 +3755,7 @@ button.link:hover {
 
 /* The selection bar centres in the open view, clear of the camera views column on the right. */
 .app {
-  --view-bar-room: 92px;
+  --view-bar-room: 100px;
 }
 .selection-bar {
   left: calc(
@@ -4284,6 +4287,7 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
 @media (prefers-reduced-motion: reduce) {
   .menu-list,
   .settings,
+  .welcome,
   .context-menu {
     animation: fade 120ms ease;
   }
@@ -5043,4 +5047,216 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
   .blurry-button.busy .blurry-face {
     animation: none !important;
   }
+}
+
+/* The first start: pick Kids, Easy or Advanced. The one decision asked before anything else, so it has the screen. */
+.welcome-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--scrim);
+  backdrop-filter: blur(6px);
+  animation: scrim-in 200ms ease;
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(760px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 32px 32px 28px;
+  border: 1px solid var(--chrome-edge);
+  border-radius: 24px;
+  background: var(--chrome);
+  box-shadow: var(--shadow);
+  text-align: center;
+  animation: settings-in 260ms var(--ease);
+}
+
+.welcome .welcome-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+}
+
+.welcome h2 {
+  margin: 16px 0 4px;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.welcome-lead {
+  margin: 0 0 22px;
+  color: var(--muted);
+}
+
+.welcome-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.welcome-choices button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 2px solid var(--chrome-edge);
+  border-radius: 16px;
+  background: rgb(var(--ink-rgb) / 0.03);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease),
+    background-color 140ms var(--ease),
+    transform 100ms ease-out;
+}
+
+.welcome-choices button:hover {
+  background: var(--fill-hover);
+}
+
+.welcome-choices button:active {
+  transform: scale(0.99);
+}
+
+.welcome-choices button[aria-checked="true"] {
+  border-color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.12);
+}
+
+.welcome-choices button:focus-visible,
+.welcome-start:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.welcome-choice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.welcome-choice-head .name {
+  font-size: var(--fs-title);
+  font-weight: 650;
+}
+
+.welcome-choice-head .badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--button);
+  color: var(--on-accent);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.welcome-choices .blurb {
+  color: var(--muted);
+  font-size: var(--fs-small);
+  line-height: 1.4;
+}
+
+.welcome-choices ul {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-small);
+  line-height: 1.35;
+}
+
+.welcome-choices li {
+  display: flex;
+  gap: 6px;
+}
+
+.welcome-choices li .icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: var(--success);
+}
+
+.welcome-start {
+  min-width: 200px;
+  height: 40px;
+  margin-top: 22px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--button);
+  color: var(--on-accent);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.welcome-start:hover {
+  background: var(--button-strong);
+}
+
+@media (max-width: 720px) {
+  .welcome-choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Experience in Settings: each mode as a card with its one-line description. */
+.experience-card {
+  display: block;
+  min-height: 52px;
+}
+
+.experience-blurb {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+}
+
+.settings .choices.wide button:has(.experience-card) {
+  flex-direction: column-reverse;
+  align-items: stretch;
+  padding: 10px;
+  text-align: left;
+}
+
+.settings .choices.wide button:has(.experience-card) > span:last-child {
+  font-weight: 600;
+  font-size: var(--fs-body);
+}
+
+/* Kids: bigger buttons with bigger icons, easy to hit and to read. */
+:root[data-experience="kids"] .ribbon-button {
+  min-width: 76px;
+  padding: 8px 10px 6px;
+  font-size: var(--fs-body);
+  font-weight: 550;
+}
+
+:root[data-experience="kids"] .ribbon-button .icon {
+  width: 30px;
+  height: 30px;
 }

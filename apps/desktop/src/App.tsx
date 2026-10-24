@@ -79,14 +79,17 @@ import {
   DEFAULT_WALLS,
   DEFAULT_INFILL,
   LINE_WIDTH,
-  getDisplayUnits,
-  lengthNumber,
+  isImperial,
+  lengthFixed,
   lengthText,
+  unitSuffix,
 } from "@studio3d/document";
 import { CalibrateDialog, choosePicture, readPicture } from "./ReferencePanel";
 import { SHAPE_ORDER, copySource, placeNew, useDesignPanel } from "./DesignPanel";
 import { Palette } from "./Palette";
 import { SettingsWindow, type SettingsCategory } from "./SettingsWindow";
+import { Welcome } from "./Welcome";
+import { DEFAULT_EXPERIENCE, readExperience, ribbonFor, shownIn, writeExperience, type Experience } from "./experience";
 import { ViewNav } from "./ViewNav";
 import { applyAppearance, readAppearance, viewportColors, writeAppearance, type Appearance } from "./appearance";
 import { Ribbon, type RibbonTab } from "./Ribbon";
@@ -111,7 +114,7 @@ import { SKETCH_ONLY, SNAPS_3D, describeEdge, distance, edgeAt, findSnap3, type 
 import { SNAP_KINDS, SNAP_LABELS, type SnapKind } from "./precision";
 import { sketchLines, sketchViewpoint } from "./sketch3d";
 import { featureDimensions } from "./guides";
-import { setUnits, toggleUnits, useUnits } from "./unitsSetting";
+import { getLengthFormat, setFormat, toggleUnits, useFormatKey } from "./unitsSetting";
 import { UnitsSwitch } from "./UnitsSwitch";
 import { Icon } from "./Icon";
 import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
@@ -196,13 +199,15 @@ export function App() {
   const [workspace, setWorkspace] = useState<"design" | "print">("design");
   const printing = workspace === "print";
   /** The Thread dialog: the hole being threaded and the settings being tried (previewed in the 3D view). */
-  const [threadEdit, setThreadEdit] = useState<{ id: string; settings: ThreadSettings } | null>(null);
+  /** The Thread dialog's hole and settings; `placed` when the Threaded hole tool has just put the hole there. */
+  const [threadEdit, setThreadEdit] = useState<{ id: string; settings: ThreadSettings; placed?: boolean } | null>(null);
   /** Measure (D): the first and second points, each on a snap or on the part or plate. */
   const [measure, setMeasure] = useState<{ a: Vec3 | null; b: Vec3 | null } | null>(null);
   /** Where the pointer would put the next measuring point, shown as a live line from the first. */
   const [measureCursor, setMeasureCursor] = useState<Vec3 | null>(null);
   const [snaps, setSnaps] = useSnaps();
-  const units = useUnits();
+  /** Changes with the units' style and precision too (mm to cm, 1/16 to 1/32 in), for what shows sizes. */
+  const unitsKey = useFormatKey();
   /** A snap picked from the right-click menu for the next point only (AutoCAD's snap override). */
   const [snapOnce, setSnapOnce] = useState<SnapKind | null>(null);
   /** The snap the pointer is on, drawn at its place in the 3D view. */
@@ -210,7 +215,11 @@ export function App() {
   /** The right-click menu, where it opened (window pixels). */
   const [menu3d, setMenu3d] = useState<{ x: number; y: number } | null>(null);
   const closeMenu3d = useCallback(() => setMenu3d(null), []);
-  const cancelThread = useCallback(() => setThreadEdit(null), []);
+  // Cancelling the Threaded hole tool's dialog takes back the hole it placed, as if the tool was never used.
+  const cancelThread = useCallback(() => {
+    if (threadEdit?.placed) project.undo();
+    setThreadEdit(null);
+  }, [project, threadEdit]);
   const rightDown = useRef<{ x: number; y: number } | null>(null);
   const mode = interactionMode({
     sketching: !!draft,
@@ -236,6 +245,8 @@ export function App() {
   const helperContext = useCallback(() => helperNow.current!.context, []);
   const helperApply = useCallback((c: HelperChange) => helperNow.current!.apply(c), []);
   const waitingStep = useRef<{ title: string; count: number } | null>(null);
+  /** Threaded hole: how many steps there were when it started; the next hole added gets the Thread dialog. */
+  const threadNext = useRef<number | null>(null);
   /** The last values typed for MOVE, ROTATE and SCALE: Enter on an empty line uses them again, as AutoCAD does. */
   const lastMove = useRef<[number, number, number]>([0, 0, 0]);
   const lastTurn = useRef(0);
@@ -258,6 +269,17 @@ export function App() {
   /** The Settings window, open at a category, or closed. */
   const [settingsAt, setSettingsAt] = useState<SettingsCategory | null>(null);
   const settingsOpen = settingsAt !== null;
+  /** Kids, Easy or Advanced: how much of the app is on show. Null until picked at the first start. */
+  const [experienceSaved, setExperienceSaved] = useState<Experience | null>(readExperience);
+  const experience = experienceSaved ?? DEFAULT_EXPERIENCE;
+  const can = shownIn(experience);
+  const changeExperience = useCallback((e: Experience) => {
+    writeExperience(e);
+    setExperienceSaved(e);
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.experience = experience;
+  }, [experience]);
   /** The ribbon's tab names sit in the top bar, so the ribbon is one row shorter. */
   const [ribbonTabsHost, setRibbonTabsHost] = useState<HTMLElement | null>(null);
   const changeAppearance = useCallback((a: Appearance) => {
@@ -286,9 +308,12 @@ export function App() {
     else setPanelOpen((v) => !v);
   }, [focus]);
   const toggleCommandLine = useCallback(() => {
+    if (!can.commandLine) return;
     setCommandPrompt(null);
     arrange((w) => ({ ...w, commandLine: !w.commandLine }));
-  }, [arrange]);
+  }, [arrange, can.commandLine]);
+  // The command line as shown: the workspace keeps the choice, and Kids mode leaves it out without forgetting it.
+  const showCommandLine = layout.commandLine && can.commandLine;
   const toggleFocus = useCallback(() => {
     setFocus((f) => !f);
     setFocusPanel("closed");
@@ -328,7 +353,7 @@ export function App() {
   const [safeArea, setSafeArea] = useState("");
   // Blurry's open panel takes a column on the right, as a palette would, so the part moves over and stays in view.
   const helperPanel = useRef<HTMLElement>(null);
-  const helperShown = helperOpen && !draft && !focus;
+  const helperShown = helperOpen && can.helper && !draft && !focus;
   const helperRoomWas = useRef(0);
   useEffect(() => {
     const update = () => {
@@ -815,12 +840,12 @@ export function App() {
   };
 
   /** Opens the Thread dialog on a hole step. */
-  const openThread = (id: string) => {
+  const openThread = (id: string, placed = false) => {
     const h = doc.features.find((f): f is HoleFeature => f.id === id && f.type === "hole");
     if (!h) return;
     stopMeasure();
     setSelection({ id, face: null });
-    setThreadEdit({ id, settings: threadSettingsFor(h) });
+    setThreadEdit({ id, settings: threadSettingsFor(h, isImperial()), placed });
   };
   const applyThread = () => {
     const h = doc.features.find((f): f is HoleFeature => f.id === threadEdit?.id && f.type === "hole");
@@ -952,7 +977,7 @@ export function App() {
     markSnap(null);
     const at = pick?.point ?? undefined;
     // Where no snap caught the pointer, the spot is rounded to a tidy size: 0.5 mm, or 1/32" in inches.
-    const step = units === "in" ? 25.4 / 32 : 0.5;
+    const step = isImperial() ? 25.4 / 32 : 0.5;
     const tidy = (n: number) => (pick?.snap ? n : Math.round(n / step) * step + 0);
     // A face that looks straight up: an ordinary hole, drilled down from the top at the spot clicked.
     if (at && !holeTarget && o.plane.normal[2] > 0.999)
@@ -985,10 +1010,9 @@ export function App() {
   const showPointer = (p: [number, number, number] | null) => {
     const el = pointerReadout.current;
     if (!el) return;
-    const inches = getDisplayUnits() === "in";
-    const n = (v: number) => lengthNumber(v).toFixed(inches ? 3 : 1);
+    // As in AutoCAD's status bar: X, Y, Z of the point under the pointer (X left/right, Y front/back, Z height).
     el.textContent = p
-      ? `Pointer on the part: left/right ${n(p[0])} · front/back ${n(p[1])} · height ${n(p[2])} ${getDisplayUnits()}`
+      ? `X ${lengthFixed(p[0])}   Y ${lengthFixed(p[1])}   Z ${lengthFixed(p[2])} ${unitSuffix()}`.trim()
       : "";
     el.parentElement?.classList.toggle("showing-pointer", !!p);
   };
@@ -1006,7 +1030,7 @@ export function App() {
     () => changeAppearance({ ...appearance, grid: !appearance.grid }),
     [appearance, changeAppearance],
   );
-  useEffect(() => viewportRef.current?.setGridUnits(units), [units]);
+  useEffect(() => viewportRef.current?.setGridUnits(isImperial() ? "in" : "mm"), [unitsKey]);
 
   // Picked edges: drawn over the part. After a change to the part, an edge that is no longer there is let go.
   useEffect(() => {
@@ -1017,6 +1041,18 @@ export function App() {
     drawEdgePicks(draft || printing ? [] : edgePicks);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edgePicks, built, draft, printing]);
+
+  // Threaded hole: once the hole is placed, its Thread dialog opens; leaving the placing without one cancels it.
+  useEffect(() => {
+    const n = threadNext.current;
+    if (n === null) return;
+    if (doc.features.length > n) {
+      threadNext.current = null;
+      const f = doc.features[doc.features.length - 1]!;
+      if (f.type === "hole") openThread(f.id, true);
+    } else if (!picking) threadNext.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, picking]);
 
   // A command typed in the command line that adds a step asks for its main size there, as AutoCAD's FILLET asks
   // for the radius; Enter keeps the size it starts with.
@@ -1052,7 +1088,7 @@ export function App() {
     // Print Studio is about the whole part on its plate: only its overall size.
     const own = focused && !printing ? featureDimensions(focused, m, built.doc) : [];
     vp.setDimensions(own.length ? own : partDimensions(m.min, m.max));
-  }, [built, showSizes, focusId, draft, printing, measure, measureCursor, units]);
+  }, [built, showSizes, focusId, draft, printing, measure, measureCursor, unitsKey]);
 
   // Cosmetic threads: dashed circles at the thread's full size where it starts and ends.
   useEffect(() => {
@@ -1358,7 +1394,7 @@ export function App() {
       // Ctrl+K opens Blurry, the helper (and closes him).
       if (mod && !e.shiftKey && !e.altKey && key === "k") {
         e.preventDefault();
-        setHelperOpen((o) => !o);
+        if (can.helper) setHelperOpen((o) => !o);
         return;
       }
       if (mod && !e.shiftKey && !e.altKey && key === "b") {
@@ -1388,7 +1424,7 @@ export function App() {
       }
       // With the command line on, letters typed over the view go to it, as in AutoCAD (M and D are typed as
       // commands too: M Enter shows sizes, D Enter measures). In Print Studio, measuring and picking a face too.
-      if (layout.commandLine && mode !== "move" && !draft && /^[a-z]$/i.test(e.key)) {
+      if (showCommandLine && mode !== "move" && !draft && /^[a-z]$/i.test(e.key)) {
         e.preventDefault();
         commandLine.current?.focus(e.key);
         return;
@@ -1468,7 +1504,8 @@ export function App() {
     fullScreen,
     focus,
     edgePicks,
-    layout.commandLine,
+    showCommandLine,
+    can.helper,
     draft,
     toggleCommandLine,
     holeTarget,
@@ -1520,6 +1557,12 @@ export function App() {
   const where = placeNew(built?.measurements ?? null);
   /** HOLE: click on the part where it goes (with nothing built yet, it goes in the middle). */
   const addHole = () => (built ? startHolePicking(null) : addAndSelect(newHole(doc, where)));
+  /** Threaded hole: placed like a hole, then the Thread dialog opens on it (see the effect that waits for it). */
+  function startThreadedHole() {
+    if (!built) return;
+    threadNext.current = doc.features.length;
+    startHolePicking(null);
+  }
   const hasHollow = doc.features.some(isHollow);
   /** What Modify > Pattern / Mirror copies: the selected piece, or the last one that can be copied. */
   const copyFrom = copySource(doc, selection?.id ?? null);
@@ -1592,7 +1635,8 @@ export function App() {
           reason: noView,
         },
         { label: "Show sizes", shortcut: "M", checked: showSizes, onSelect: () => setShowSizes((v) => !v) },
-        { label: "Sizes in inches", checked: units === "in", onSelect: toggleUnits },
+        { label: "Sizes in inches", checked: isImperial(), onSelect: toggleUnits },
+        { label: "Units…", onSelect: () => setSettingsAt("units") },
         {
           label: "Measure distance",
           shortcut: "D",
@@ -1634,7 +1678,7 @@ export function App() {
           checked: layout.ribbonMinimized,
           onSelect: () => arrange((w) => ({ ...w, ribbonMinimized: !w.ribbonMinimized })),
         },
-        { label: "Command line", shortcut: "Ctrl+9", checked: layout.commandLine, onSelect: toggleCommandLine },
+        { label: "Command line", shortcut: "Ctrl+9", checked: showCommandLine, onSelect: toggleCommandLine },
         { label: "Reset workspace", onSelect: () => arrange(() => DEFAULT_WORKSPACE) },
         { label: "Settings…", shortcut: "Ctrl+,", onSelect: () => setSettingsAt("appearance") },
         "separator" as const,
@@ -1656,6 +1700,12 @@ export function App() {
           onSelect: () => startHolePicking(null),
           disabled: !built,
           reason: "Add a shape first, then pick one of its faces",
+        },
+        {
+          label: "Threaded hole…",
+          onSelect: startThreadedHole,
+          disabled: !built,
+          reason: "Add a shape first, then click where the hole goes",
         },
         "separator" as const,
         {
@@ -1771,6 +1821,7 @@ export function App() {
     onSketchOnFace: startPicking,
     onPickHoleFace: startHolePicking,
     onThreadHole: openThread,
+    onThreadedHole: startThreadedHole,
     onSketchOnPlate: sketchOnPlate,
     onRevolve: startRevolve,
     onEditSketch: editSketch,
@@ -2107,9 +2158,12 @@ export function App() {
       },
     ],
   };
-  const ribbonTabs: RibbonTab[] = printing
-    ? [printTab, { ...viewTab, groups: viewTab.groups.filter((g) => g.label !== "Palettes") }]
-    : [{ id: "home", label: "Home", groups: design.ribbon }, viewTab];
+  const ribbonTabs: RibbonTab[] = ribbonFor(
+    experience,
+    printing
+      ? [printTab, { ...viewTab, groups: viewTab.groups.filter((g) => g.label !== "Palettes") }]
+      : [{ id: "home", label: "Home", groups: design.ribbon }, viewTab],
+  );
 
   /**
    * AutoCAD's editing commands on the picked piece: MOVE, COPY, ROTATE and SCALE ask for their value at the command
@@ -2243,7 +2297,7 @@ export function App() {
   helperNow.current = {
     context: {
       doc,
-      units,
+      units: isImperial() ? "in" : "mm",
       picked: edgePicks,
       selected: selected?.name ?? null,
       commands: commands.filter((c) => !c.disabled).map((c) => c.title),
@@ -2398,15 +2452,15 @@ export function App() {
         )}
         <Blurry
           commands={commands}
-          open={helperOpen}
+          open={helperOpen && can.helper}
           onOpen={setHelperOpen}
-          hidden={!!draft || focus}
+          hidden={!!draft || focus || !can.helper}
           context={helperContext}
           apply={helperApply}
           onBusy={setHelperBusy}
           panelRef={helperPanel}
         />
-        {layout.commandLine && !draft && (
+        {showCommandLine && !draft && (
           <div className="command-dock" ref={commandBox}>
             <CommandLine
               ref={commandLine}
@@ -2493,8 +2547,12 @@ export function App() {
             </button>
           </nav>
           <span className="divider" aria-hidden="true" />
-          <MenuBar menus={menus} />
-          <span className="divider" aria-hidden="true" />
+          {can.menus && (
+            <>
+              <MenuBar menus={menus} />
+              <span className="divider" aria-hidden="true" />
+            </>
+          )}
           <nav className="group" aria-label="Quick access">
             <button
               type="button"
@@ -2611,7 +2669,7 @@ export function App() {
           onDone={finishSketch}
           onCancel={() => setDraft(null)}
           references={doc.references}
-          commandLine={layout.commandLine ? { commands: sketchingCommands, onClose: toggleCommandLine } : null}
+          commandLine={showCommandLine ? { commands: sketchingCommands, onClose: toggleCommandLine } : null}
         />
       )}
 
@@ -2634,7 +2692,12 @@ export function App() {
                     : "Showing your last good design"}
         </span>
         <span className="hint">
-          <span className="pointer-readout" ref={pointerReadout} data-testid="pointer-readout" />
+          <span
+            className="pointer-readout"
+            ref={pointerReadout}
+            data-testid="pointer-readout"
+            title="Point under the pointer: X left/right, Y front/back, Z height"
+          />
           <span className="hint-text">
             {printing ? "Your part on the printer's plate" : "Click a piece to select it"}
             <span className="hint-keys" title="Help › Keyboard and mouse lists every control">
@@ -2642,35 +2705,39 @@ export function App() {
             </span>
           </span>
         </span>
-        {!draft && !focus && <BlurryButton open={helperOpen} busy={helperBusy} onOpen={setHelperOpen} />}
-        <button
-          type="button"
-          className="statusbar-toggle"
-          aria-label="Command line"
-          aria-pressed={layout.commandLine}
-          title={`${layout.commandLine ? "Hide" : "Show"} the command line, to type commands by name (Ctrl+9)`}
-          onClick={toggleCommandLine}
-        >
-          <Icon name="command" />
-          <span className="toggle-label">Command line</span>
-        </button>
+        {!draft && !focus && can.helper && <BlurryButton open={helperOpen} busy={helperBusy} onOpen={setHelperOpen} />}
+        {can.commandLine && (
+          <button
+            type="button"
+            className="statusbar-toggle"
+            aria-label="Command line"
+            aria-pressed={showCommandLine}
+            title={`${showCommandLine ? "Hide" : "Show"} the command line, to type commands by name (Ctrl+9)`}
+            onClick={toggleCommandLine}
+          >
+            <Icon name="command" />
+            <span className="toggle-label">Command line</span>
+          </button>
+        )}
         <UnitsSwitch />
         {!focus && screenModes}
       </footer>
 
       {settingsAt && (
         <SettingsWindow
-          value={{ appearance, units, workspace: layout, snaps }}
+          value={{ appearance, units: getLengthFormat(), workspace: layout, snaps, experience }}
           category={settingsAt}
           onCategory={setSettingsAt}
           onAppearance={changeAppearance}
-          onUnits={setUnits}
+          onUnits={setFormat}
           onWorkspace={(w) => arrange(() => w)}
           onSnaps={setSnaps}
+          onExperience={changeExperience}
           shortcuts={SHORTCUTS}
           onClose={() => setSettingsAt(null)}
         />
       )}
+      {experienceSaved === null && <Welcome onPick={changeExperience} />}
       {dialog && <HelpDialog kind={dialog} onClose={() => setDialog(null)} />}
       {calibratingPicture && (
         <CalibrateDialog

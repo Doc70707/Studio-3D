@@ -3,7 +3,7 @@
 // on the ribbon; Enter runs one, and an empty Enter runs the last one again. A command that needs a value (a
 // fillet's radius) asks for it here, with its default in angle brackets as AutoCAD does: Enter keeps it.
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
-import { lengthNumber, parseLength } from "@studio3d/document";
+import { lengthFigure, lengthText, parseLength, unitSuffix } from "@studio3d/document";
 import { commandsFor, type Command } from "./commands";
 import { Icon } from "./Icon";
 import { useUnits } from "./unitsSetting";
@@ -92,7 +92,7 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
       if (v.some((n) => n === null || n === undefined)) return fail(how);
       why = prompt.apply(v as [number, number, number]);
       if (why) return fail(why);
-      setSaid({ text: `${prompt.label} ${(v as number[]).map((n) => lengthNumber(n)).join(", ")} ${units}` });
+      setSaid({ text: `${prompt.label} ${(v as number[]).map((n) => lengthFigure(n)).join(", ")}${suffix()}` });
     } else {
       const kind = prompt.kind ?? "size";
       const plain = kind === "angle" || kind === "factor";
@@ -125,15 +125,15 @@ export const CommandLine = forwardRef<CommandLineHandle, Props>(function Command
   };
 
   // Space ends what is typed, so a mixed inch size is typed as AutoCAD writes it: 1-1/2.
-  const lengthOf = (t: string) => parseLength(t.replace(/(\d)-(?=\d+\s*\/)/g, "$1 "), units);
+  const lengthOf = (t: string) => parseLength(t.replace(/(\d)-(?=\d+\s*\/)/g, "$1 "));
   const showValue = (p: CommandPrompt, v: number | number[]) =>
     p.kind === "move"
-      ? `${(v as number[]).map((n) => lengthNumber(n)).join(",")} ${units}`
+      ? `${(v as number[]).map((n) => lengthFigure(n)).join(",")}${suffix()}`
       : p.kind === "angle"
         ? `${v}°`
         : p.kind === "factor"
           ? `${v}`
-          : `${lengthNumber(v as number)} ${units}`;
+          : lengthText(v as number);
   /**
    * Space runs what is typed, as Enter does, when it is a value being asked for, an empty line (the last command
    * again), or one word that matches a command's short name (L, FIL for FILLET). After everyday words it is a space.
@@ -250,6 +250,9 @@ function numberOf(t: string): number | null {
   const v = Number(m[2]) / (m[3] !== undefined ? Number(m[3]) : 1);
   return Number.isFinite(v) ? (m[1] ? -v : v) : null;
 }
+
+/** The unit after a row of sizes, with its space; none for feet and inches, whose marks are in each figure. */
+const suffix = () => (unitSuffix() ? ` ${unitSuffix()}` : "");
 
 const EXAMPLES: Record<"size" | "distance" | "angle" | "factor", (units: string) => string> = {
   size: (u) => `a size above 0, like ${u === "in" ? "1/8" : "2"}`,

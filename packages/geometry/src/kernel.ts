@@ -39,6 +39,8 @@ import {
   threadOf,
   threadVolume,
   boreDiameter,
+  bottomRadius,
+  drillPointDepth,
   headDepth,
   headOf,
   modelledThread,
@@ -198,6 +200,11 @@ export function buildBox(b: BoxFeature): BuildResult {
  * counterbore or the cone of a countersink; for a modelled thread, the thread plus the plain hole below it.
  */
 export function maxHoleVolume(h: HoleFeature, partHeight: number): number {
+  const tip = drillPointDepth(h);
+  return holeBodyVolume(h, partHeight) + (Math.PI * bottomRadius(h) ** 2 * tip) / 3;
+}
+
+function holeBodyVolume(h: HoleFeature, partHeight: number): number {
   const depth = h.depth === 0 ? partHeight : h.depth;
   const thread = modelledThread(h) ? threadOf(h) : null;
   if (thread) {
@@ -435,6 +442,8 @@ function holeTool(h: HoleFeature, doc: ProjectDocument, part: Part): Shape3D {
  */
 function localHoleTool(h: HoleFeature, deep: number, extra: number): Shape3D {
   const thread = modelledThread(h) ? threadOf(h) : null;
+  // A blind hole's drill point: the 118° cone below its depth (0 for a flat bottom or a through hole).
+  const tip = drillPointDepth(h);
   if (thread) {
     const threaded = Math.min(h.threadDepth ?? deep, deep);
     // A threaded tool is made in 5 mm steps of length (any extra pokes out of the face, cutting nothing), so a
@@ -444,8 +453,19 @@ function localHoleTool(h: HoleFeature, deep: number, extra: number): Shape3D {
       0,
       -threaded,
     ]);
-    if (threaded >= deep - 1e-9) return tool;
-    const rest = makeCylinder(thread.minor, deep - threaded, [0, 0, -deep], [0, 0, 1]);
+    if (threaded >= deep - 1e-9 && tip === 0) return tool;
+    // Below the thread: the plain hole at the thread's smallest diameter, ending in the drill point if it has one.
+    const top = Math.min(threaded, deep);
+    const rest =
+      tip === 0
+        ? makeCylinder(thread.minor, deep - threaded, [0, 0, -deep], [0, 0, 1])
+        : (draw([0, -deep - tip])
+            .lineTo([thread.minor, -deep])
+            .lineTo([thread.minor, -top + 0.01])
+            .lineTo([0, -top + 0.01])
+            .close()
+            .sketchOnPlane("XZ")
+            .revolve([0, 0, 1]) as Shape3D);
     try {
       return tool.fuse(rest);
     } finally {
@@ -455,10 +475,14 @@ function localHoleTool(h: HoleFeature, deep: number, extra: number): Shape3D {
   }
   const r = boreDiameter(h) / 2;
   const head = headOf(h);
-  if (!head) return makeCylinder(r, deep + extra, [0, 0, -deep], [0, 0, 1]);
+  if (!head && tip === 0) return makeCylinder(r, deep + extra, [0, 0, -deep], [0, 0, 1]);
+  // The hole's side profile, from the bottom (or the drill point's tip) up, spun round its axis.
+  const start = draw([0, -deep - tip]).lineTo([r, -deep]);
+  if (!head)
+    return start.lineTo([r, extra]).lineTo([0, extra]).close().sketchOnPlane("XZ").revolve([0, 0, 1]) as Shape3D;
   const R = head.diameter / 2;
   const down = headDepth(h);
-  const pen = draw([0, -deep]).lineTo([r, -deep]).lineTo([r, -down]);
+  const pen = start.lineTo([r, -down]);
   const side = head.kind === "counterbore" ? pen.lineTo([R, -down]) : pen.lineTo([R, 0]);
   return side.lineTo([R, extra]).lineTo([0, extra]).close().sketchOnPlane("XZ").revolve([0, 0, 1]) as Shape3D;
 }
@@ -492,6 +516,14 @@ function drill(part: Part, h: HoleFeature, doc: ProjectDocument, issues: Issue[]
       `The part is only ${fmt(height)} deep under ${h.name}, so the thread can't go deeper than that.`,
       h.id,
       "threadDepth",
+    );
+  const tip = drillPointDepth(h);
+  if (tip > 0 && h.depth + tip > height - 1e-9)
+    throw new ShapeCheckFailed(
+      `The drill point under ${h.name} would reach ${fmt(h.depth + tip)} deep, but the part is only ${fmt(height)} deep there. ` +
+        `Make the hole shallower, give it a flat bottom, or make it a through hole (depth 0).`,
+      h.id,
+      "depth",
     );
   const head = headOf(h);
   if (head && headDepth(h) >= height - 1e-9) {

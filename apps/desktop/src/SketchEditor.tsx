@@ -31,6 +31,7 @@ import {
   newId,
   lengthText,
   getDisplayUnits,
+  isImperial,
   MM_PER_INCH,
 } from "@studio3d/document";
 import type { DraftHole } from "./faceHoles";
@@ -196,7 +197,8 @@ export function SketchEditor(props: {
   const [ortho, setOrtho] = useState(false);
   const [angleStep, setAngleStep] = useState(0);
   const [snaps, setSnaps] = useSnaps();
-  const inches = useUnits() === "in";
+  useUnits();
+  const inches = isImperial();
   /** A snap picked from the right-click menu for the next point only (AutoCAD's snap override). */
   const [once, setOnce] = useState<SnapKind | null>(null);
   /** The right-click menu: where it opened, in window pixels and in sketch millimetres. */
@@ -1945,7 +1947,7 @@ function TypedBoxes(props: { pending: NonNullable<Pending>; typed: Typed; from: 
       {labels.map((label, i) => {
         const value = props.typed.values[i] ?? "";
         const active = i === props.typed.active;
-        const unit = label === "Angle" ? "°" : ` ${getDisplayUnits()}`;
+        const unit = label === "Angle" ? "°" : ` ${getDisplayUnits()}`; // plain numbers: inches in feet and inches
         return (
           <g
             key={label}

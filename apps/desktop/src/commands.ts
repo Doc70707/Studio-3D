@@ -28,6 +28,10 @@ export const COMMAND_WORDS: Record<string, { aliases: string[]; words: string[] 
   Cone: { aliases: ["CONE"], words: ["taper", "funnel", "point"] },
   Sphere: { aliases: ["SPHERE", "BALL"], words: ["ball", "dome", "globe", "round"] },
   Hole: { aliases: ["HOLE", "H"], words: ["drill", "bore", "screw hole", "opening", "through hole"] },
+  "Threaded hole": {
+    aliases: ["THOLE", "TAPHOLE"],
+    words: ["tapped hole", "tap", "thread a hole", "screw thread", "bolt hole with thread"],
+  },
   "Hole on a face": { aliases: ["HOLEFACE"], words: ["drill the side", "hole in a side", "hole on side"] },
   "Sketch on a face": { aliases: ["SKETCHFACE"], words: ["draw on a side", "draw on face", "emboss", "engrave"] },
   "Sketch on the plate": { aliases: ["SKETCH"], words: ["draw", "profile", "extrude", "drawing"] },
@@ -64,7 +68,11 @@ export const COMMAND_WORDS: Record<string, { aliases: string[]; words: string[] 
   Orthographic: { aliases: ["ORTHO", "PARALLEL"], words: ["flat view", "no perspective"] },
   "Fit all": { aliases: ["ZOOMEXTENTS", "ZE", "ZOOM", "Z"], words: ["zoom to fit", "show everything", "see it all"] },
   "Show sizes": { aliases: ["DIM", "DIMS", "SIZES"], words: ["dimensions", "measurements", "show measurements"] },
-  "Sizes in inches": { aliases: ["UNITS", "UN", "INCHES"], words: ["imperial", "inch", "metric", "millimetres", "mm"] },
+  "Sizes in inches": { aliases: ["INCHES"], words: ["imperial", "inch", "metric", "millimetres", "mm"] },
+  Units: {
+    aliases: ["UNITS", "UN"],
+    words: ["feet", "feet and inches", "centimetres", "metres", "fractions", "precision", "decimal places"],
+  },
   "Measure distance": {
     aliases: ["D", "DIST", "DI", "MEASURE", "MEA"],
     words: ["how far", "distance", "ruler", "length"],

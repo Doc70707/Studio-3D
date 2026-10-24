@@ -25,6 +25,8 @@ export interface ThreadSettings {
   fit: number;
   /** Cosmetic: drilled at the tap drill size and marked, not modelled (quick, and small files). */
   cosmetic: boolean;
+  /** A blind hole ends in a 118° drill point, as a drilled and tapped hole does. */
+  drillPoint: boolean;
 }
 
 /** Fits for printing. Machined threads use tolerance classes such as 6H; a printed one needs room to turn instead. */
@@ -56,21 +58,25 @@ export function suggestThread(diameter: number, standard?: ThreadStandard): Thre
   return best;
 }
 
-/** The dialog's starting settings: the hole's own thread if it has one, else the size its diameter suggests. */
-export function threadSettingsFor(h: HoleFeature): ThreadSettings {
+/**
+ * The dialog's starting settings: the hole's own thread if it has one, else the size its diameter suggests, from
+ * the inch (UNC) sizes when sizes are shown in inches or feet, and metric ones otherwise.
+ */
+export function threadSettingsFor(h: HoleFeature, imperial = false): ThreadSettings {
   return {
-    thread: h.thread ?? suggestThread(h.diameter),
+    thread: h.thread ?? suggestThread(h.diameter, imperial ? "UNC" : undefined),
     hand: h.hand === "left" ? "left" : "right",
     length: h.thread && h.threadDepth !== undefined ? h.threadDepth : null,
     depth: h.depth,
     fit: h.thread ? (h.fit ?? DEFAULT_FIT) : DEFAULT_FIT,
     cosmetic: h.thread ? !!h.simplified : false,
+    drillPoint: !!h.drillPoint,
   };
 }
 
 /** The hole's settings with the thread applied. A thread replaces a clearance size or a head recess. */
 export function withThread(h: HoleFeature, s: ThreadSettings): HoleFeature {
-  const { clearance: _c, head: _h, threadDepth: _d, simplified: _s, hand: _hand, ...rest } = h;
+  const { clearance: _c, head: _h, threadDepth: _d, simplified: _s, hand: _hand, drillPoint: _p, ...rest } = h;
   return {
     ...rest,
     thread: s.thread,
@@ -79,6 +85,7 @@ export function withThread(h: HoleFeature, s: ThreadSettings): HoleFeature {
     ...(s.hand === "left" && { hand: "left" as const }),
     ...(s.length !== null && { threadDepth: s.length }),
     ...(s.cosmetic && { simplified: true }),
+    ...(s.drillPoint && s.depth !== 0 && { drillPoint: true }),
   };
 }
 

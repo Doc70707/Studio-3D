@@ -139,9 +139,13 @@ What works today:
   inner edge (drag or arrow keys), swap sides and hide; View > Reset workspace puts everything back. Docked (solid,
   against the edges) or Floating (frosted glass over the view). The layout is remembered on this computer, and the
   part stays centred in the space the palettes leave open.
-- Settings (top bar, View > Settings…, Ctrl+, or OPTIONS): one window with five categories. Appearance: Midnight,
+- Kids, Easy or Advanced: asked at the first start (Easy is recommended) and changed any time in Settings >
+  Experience. Kids shows a few big shape buttons and Hollow, with no menus, command line or AI helper. Easy keeps the
+  everyday tools in the ribbon and the rarer ones (chamfer, pattern, mirror, revolve) one menu away. Advanced shows
+  everything. A mode only decides what is in view: the design, its steps and Undo are the same in all three.
+- Settings (top bar, View > Settings…, Ctrl+, or OPTIONS): one window with six categories. Appearance: Midnight,
   Graphite or Light theme, six accent colours and the part's colour, so it looks like the filament it will be printed
-  in. Viewport and grid: the plate, the grid and the background (below). Units: millimetres or inches. Snaps and
+  in. Viewport and grid: the plate, the grid and the background (below). Units: see below. Snaps and
   navigation: object snaps on or off and which ones, and the mouse and keys. Workspace: docked or floating palettes,
   comfortable or compact density, the ribbon and the command line. Every change shows at once while the part moves
   out from under the window; Cancel or Esc puts back everything changed since it opened, Done keeps it, and Reset
@@ -188,12 +192,21 @@ What works today:
   the hole (a 4.2 mm hole is an M5 tap drill), the 3D view previews the thread live, and checks explain a size that
   doesn't suit the hole with the right one a click away. Metric, fine, UNC and UNF; right- or left-hand; through or
   blind; part-way threads; a Snug, Normal or Loose fit for printing; Modelled, or Cosmetic (a tap-drill hole marked
-  with dashed rings). Apply is one undo step; Cancel leaves the hole as it was.
-- Millimetres or inches, one click: the mm | in switch at the end of the status bar (and in the sketch's bottom
-  bar while drawing), or View > Sizes in inches. Every box, label, measurement, grid and typed size follows it; the
-  part itself is always kept in millimetres, so switching changes nothing about it. Inch boxes take decimals,
-  fractions (`1/4`, `2 1/2`) and sizes with their own unit (`6 mm`, `1"`); the sketch grid steps in 1/16, 1/8, 1/4
-  and 1 inch. The choice is remembered.
+  with dashed rings). Apply is one undo step; Cancel leaves the hole as it was. With sizes in inches or feet, inch
+  (UNC) sizes are suggested first.
+- Threaded hole (Home ribbon, Create > Threaded hole…, or THOLE): click where the hole goes (Enter puts it in the
+  middle) and the Thread dialog opens on it; Cancel takes the hole back.
+- Drill point: a blind hole can end in the 118° cone a twist drill leaves (hole Properties, or the Thread dialog),
+  with its depth to the shoulder as on a drawing; a point that would break through the bottom is refused with what
+  to do.
+- Units (Settings > Units, View > Units…, or UNITS): millimetres, centimetres, metres, decimal inches, inch fractions
+  (2 3/8 in), feet, or feet and inches (5' 3 1/2"), each to a chosen precision (decimal places, or 1/8 to 1/64 in).
+  Metric or imperial, one click: the switch at the end of the status bar (and in the sketch's bottom bar while
+  drawing) goes to the last metric or imperial choice; View > Sizes in inches too. Every box, label, measurement,
+  grid and typed size follows it; the part itself is always kept in millimetres, so switching changes nothing about
+  it. Boxes take decimals, fractions (`1/4`, `2 1/2`) and sizes with their own unit (`6 mm`, `1"`, `2 ft`, `5'3"`);
+  with feet and inches a plain number is inches, as in AutoCAD. The sketch grid steps in 1/16, 1/8, 1/4 and 1 inch.
+  The choice is remembered.
 - Command line, as in AutoCAD and Civil 3D (Ctrl+9, View > Command line, or the switch in the status bar): type a
   command's name or short name (BOX, HOLE, FILLET or F, CHAMFER, SHELL, ARRAY, MIRROR, REC, CIRCLE, PLINE, POLYGON,
   DIST, ZE, UNITS, STL, PRINT…) or what you want in plain words ("round the edges"). Matches list above the line with

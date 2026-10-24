@@ -127,6 +127,11 @@ export interface HoleFeature extends Threadable {
   clearance?: { screw: ScrewSize; series: ClearanceSeries };
   /** A recess at the face for a screw head. Not used with a thread. */
   head?: HoleHead;
+  /**
+   * A blind hole ends in the 118° cone a twist drill leaves, as drilled and tapped holes do, instead of a flat
+   * bottom. The depth is to where the full diameter ends (the shoulder), as drawings give it; the point goes further.
+   */
+  drillPoint?: boolean;
 }
 
 /**
@@ -1052,6 +1057,21 @@ export function holeKindLabel(h: HoleFeature): string {
 }
 
 /** How deep a head recess reaches below the face: a counterbore's depth, or a 90° countersink's cone. */
+/** The angle of a standard twist drill's point. */
+export const DRILL_POINT_ANGLE = 118;
+
+/** The radius at the bottom of a hole: the thread's smallest for a modelled thread, else the bore's. */
+export function bottomRadius(h: HoleFeature): number {
+  const t = modelledThread(h) ? threadOf(h) : null;
+  return t ? t.minor : boreDiameter(h) / 2;
+}
+
+/** How far a blind hole's drill point reaches below its depth; 0 for a flat bottom or a through hole. */
+export function drillPointDepth(h: HoleFeature): number {
+  if (!h.drillPoint || h.depth === 0) return 0;
+  return bottomRadius(h) / Math.tan(((DRILL_POINT_ANGLE / 2) * Math.PI) / 180);
+}
+
 export function headDepth(h: HoleFeature): number {
   const head = headOf(h);
   if (!head) return 0;

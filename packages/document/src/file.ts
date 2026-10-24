@@ -88,7 +88,7 @@ const knownKeys = (type: Feature["type"]) =>
     ...(type === "cylinder" || type === "hole" ? ["thread", "fit", "hand"] : []),
     ...(type === "box" ? ["rotation"] : []),
     ...(type === "sketch" ? ["plane", "surface", "profiles", "revolve"] : []),
-    ...(type === "hole" ? ["face", "threadDepth", "simplified", "clearance", "head"] : []),
+    ...(type === "hole" ? ["face", "threadDepth", "simplified", "clearance", "head", "drillPoint"] : []),
     ...NUMBERS[type],
   ]);
 const DEFAULT_NAMES: Record<Feature["type"], string> = {
@@ -169,6 +169,7 @@ const finite = (v: unknown): v is number => typeof v === "number" && Number.isFi
 function holeKindProblem(f: Record<string, unknown>): string | null {
   if (f.threadDepth !== undefined && !finite(f.threadDepth)) return "has a thread depth that isn't a number";
   if (f.simplified !== undefined && typeof f.simplified !== "boolean") return "doesn't say how its thread is drawn";
+  if (f.drillPoint !== undefined && typeof f.drillPoint !== "boolean") return "doesn't say how its bottom is shaped";
   if (f.clearance !== undefined) {
     const c = f.clearance as Record<string, unknown> | null;
     if (typeof c !== "object" || !c || !isScrewSize(c.screw) || !CLEARANCE_SERIES.includes(c.series as never))

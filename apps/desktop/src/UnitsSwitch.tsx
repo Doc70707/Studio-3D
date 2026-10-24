@@ -1,15 +1,24 @@
-import { setUnits, useUnits } from "./unitsSetting";
+import { LENGTH_STYLES, isImperial } from "@studio3d/document";
+import { lastFormat, setSystem, useFormatKey } from "./unitsSetting";
 
-/** Millimetres or inches, one click: in the status bar, and in the sketch's bottom bar while drawing. */
+/**
+ * Metric or imperial, one click: in the status bar, and in the sketch's bottom bar while drawing. Each side names the
+ * unit it goes to (mm, cm or m; in or ft), the last one used; Settings › Units picks among them and their precision.
+ */
 export function UnitsSwitch() {
-  const units = useUnits();
+  useFormatKey();
+  const imperial = isImperial();
+  const name = (i: boolean) => {
+    const s = lastFormat(i).style;
+    return s === "ft-in" ? "ft-in" : LENGTH_STYLES[s].unit;
+  };
   return (
     <div className="segmented-small units-switch" role="group" aria-label="Units" title="Show and type sizes in">
-      <button type="button" aria-pressed={units === "mm"} onClick={() => setUnits("mm")}>
-        mm
+      <button type="button" aria-pressed={!imperial} onClick={() => setSystem(false)}>
+        {name(false)}
       </button>
-      <button type="button" aria-pressed={units === "in"} onClick={() => setUnits("in")}>
-        in
+      <button type="button" aria-pressed={imperial} onClick={() => setSystem(true)}>
+        {name(true)}
       </button>
     </div>
   );

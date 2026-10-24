@@ -46,6 +46,7 @@ export const HOW_TOS: HowTo[] = [
     steps: [
       "Click in at the end of the status bar (or View > Sizes in inches).",
       "Every size is then shown and typed in inches. Fractions like 1/4 and 2 1/2 work, and so does 6 mm.",
+      "View > Units… (or UNITS) picks inch fractions, feet, feet and inches, centimetres or metres, and the precision.",
       "The part itself never changes: switching back shows the same part in millimetres.",
     ],
     command: "Sizes in inches",

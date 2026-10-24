@@ -18,12 +18,20 @@ import {
 import { Icon, type IconName } from "./Icon";
 import { DEFAULT_SNAPS, SNAP_HINTS, SNAP_KINDS, SNAP_LABELS, type SnapKind } from "./precision";
 import type { SnapSettings } from "./snapSettings";
-import type { DisplayUnits } from "@studio3d/document";
+import { LENGTH_STYLES, LENGTH_STYLE_ORDER, inchFraction, type LengthStyle } from "@studio3d/document";
+import type { LengthFormat } from "./unitsSetting";
 import { DEFAULT_WORKSPACE, type Workspace } from "./workspace";
+import { DEFAULT_EXPERIENCE, EXPERIENCES, EXPERIENCE_ORDER, type Experience } from "./experience";
 
-export type SettingsCategory = "appearance" | "view" | "units" | "navigation" | "workspace";
+export type SettingsCategory = "experience" | "appearance" | "view" | "units" | "navigation" | "workspace";
 
 const CATEGORIES: { id: SettingsCategory; label: string; icon: IconName; hint: string }[] = [
+  {
+    id: "experience",
+    label: "Experience",
+    icon: "cube",
+    hint: "Kids, Easy or Advanced: how much of the app is on show",
+  },
   { id: "appearance", label: "Appearance", icon: "palette", hint: "Theme, accent colour and the part's colour" },
   { id: "view", label: "Viewport and grid", icon: "grid", hint: "The build plate, the grid and the background" },
   { id: "units", label: "Units", icon: "ruler", hint: "How sizes are shown and typed" },
@@ -33,9 +41,10 @@ const CATEGORIES: { id: SettingsCategory; label: string; icon: IconName; hint: s
 
 export interface SettingsValues {
   appearance: Appearance;
-  units: DisplayUnits;
+  units: LengthFormat;
   workspace: Workspace;
   snaps: SnapSettings;
+  experience: Experience;
 }
 
 interface Props {
@@ -43,12 +52,30 @@ interface Props {
   category: SettingsCategory;
   onCategory: (c: SettingsCategory) => void;
   onAppearance: (a: Appearance) => void;
-  onUnits: (u: DisplayUnits) => void;
+  onUnits: (u: { style: LengthStyle; precision?: number }) => void;
   onWorkspace: (w: Workspace) => void;
   onSnaps: (s: SnapSettings) => void;
+  onExperience: (e: Experience) => void;
   /** The mouse and keyboard reference, as shown in Help. */
   shortcuts: [string, string][];
   onClose: () => void;
+}
+
+/** 1234.5 mm in each style, as a preview on its button. */
+const EXAMPLE: Record<LengthStyle, string> = {
+  mm: "1234.5 mm",
+  cm: "123.45 cm",
+  m: "1.2345 m",
+  in: "48.602 in",
+  "in-frac": "48 19/32 in",
+  ft: "4.050 ft",
+  "ft-in": `4' 0 5/8"`,
+};
+
+/** "0.01", "1/16"… for a precision. */
+function precisionName(style: LengthStyle, p: number): string {
+  if (LENGTH_STYLES[style].fraction) return `${inchFraction(1 / p, p)}"`;
+  return p === 0 ? "1" : (1 / 10 ** p).toFixed(p);
 }
 
 const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
@@ -64,6 +91,7 @@ export function SettingsWindow(props: Props) {
     props.onUnits(before.units);
     props.onWorkspace(before.workspace);
     props.onSnaps(before.snaps);
+    props.onExperience(before.experience);
     props.onClose();
   };
   const cancelRef = useRef(cancel);
@@ -89,7 +117,8 @@ export function SettingsWindow(props: Props) {
         grid: DEFAULT_APPEARANCE.grid,
         background: DEFAULT_APPEARANCE.background,
       });
-    if (category === "units") props.onUnits("mm");
+    if (category === "experience") props.onExperience(DEFAULT_EXPERIENCE);
+    if (category === "units") props.onUnits({ style: "mm" });
     if (category === "navigation") props.onSnaps({ on: true, kinds: [...DEFAULT_SNAPS] });
     if (category === "workspace") {
       props.onWorkspace({
@@ -159,6 +188,25 @@ export function SettingsWindow(props: Props) {
           role="tabpanel"
           aria-labelledby={`settings-tab-${category}`}
         >
+          {category === "experience" && (
+            <Choices
+              label="Experience"
+              hint="Only changes which tools are in view. Your design, its steps and Undo stay exactly as they are."
+              options={EXPERIENCE_ORDER.map((id) => ({
+                id,
+                name: EXPERIENCES[id].label,
+                swatch: (
+                  <span className="experience-card">
+                    <span className="experience-blurb">{EXPERIENCES[id].blurb}</span>
+                  </span>
+                ),
+              }))}
+              value={value.experience}
+              onPick={(e) => props.onExperience(e)}
+              wide
+            />
+          )}
+
           {category === "appearance" && (
             <>
               <Choices
@@ -278,17 +326,36 @@ export function SettingsWindow(props: Props) {
           )}
 
           {category === "units" && (
-            <Choices
-              label="Sizes in"
-              hint="Only how sizes are shown and typed. The part stays exactly the same size; a size can always be typed with its own unit (6 mm, 1/4 in)."
-              options={[
-                { id: "mm", name: "Millimetres", swatch: null },
-                { id: "in", name: "Inches", swatch: null },
-              ]}
-              value={value.units}
-              onPick={(u) => props.onUnits(u as DisplayUnits)}
-              pills
-            />
+            <>
+              <Choices
+                label="Sizes in"
+                hint={`Only how sizes are shown and typed: the part stays exactly the same size. Any size can also be typed with its own unit (6 mm, 1/4 in, 2 ft, 5' 3").`}
+                options={LENGTH_STYLE_ORDER.map((id) => ({
+                  id,
+                  name: LENGTH_STYLES[id].label,
+                  swatch: <span className="unit-example">{EXAMPLE[id]}</span>,
+                }))}
+                value={value.units.style}
+                onPick={(style) => props.onUnits({ style })}
+                wide
+              />
+              <Choices
+                label="Precision"
+                hint={
+                  LENGTH_STYLES[value.units.style].fraction
+                    ? "The smallest fraction of an inch shown. Sizes are kept exactly; this only rounds what you read."
+                    : "Decimal places shown. Sizes are kept exactly; this only rounds what you read."
+                }
+                options={LENGTH_STYLES[value.units.style].precisions.map((p) => ({
+                  id: String(p),
+                  name: precisionName(value.units.style, p),
+                  swatch: null,
+                }))}
+                value={String(value.units.precision)}
+                onPick={(p) => props.onUnits({ style: value.units.style, precision: Number(p) })}
+                pills
+              />
+            </>
           )}
 
           {category === "navigation" && (

@@ -12,6 +12,7 @@ import {
   newDocument,
   parseProject,
   serializeProject,
+  threadOf,
   type BoxFeature,
   type HoleFeature,
   type ProjectDocument,
@@ -1445,6 +1446,49 @@ describe("clearance, tapped, counterbored and countersunk holes", { timeout: 120
     const slice = makeBaseBox(60, 1, 30).translate([0, -19.5, 0]);
     const kept = measureVolume(r.shape.intersect(slice));
     expect(kept).toBeCloseTo(1800 - frustum(12, 10, 1), 6);
+  });
+
+  const tipOf = (r: number) => r / Math.tan((59 * Math.PI) / 180); // a 118° drill point's length
+  const cone = (r: number) => (Math.PI * r * r * tipOf(r)) / 3;
+
+  it("a blind hole with a drill point ends in a 118° cone below its depth", async () => {
+    const h = hole({ diameter: 6, depth: 10, drillPoint: true });
+    const r = designed(design(block(), h));
+    expect(rel(r.measurements.volume, 72000 - cyl(6, 10) - cone(3))).toBeLessThan(1e-7);
+    expect(maxHoleVolume(h, 30)).toBeCloseTo(cyl(6, 10) + cone(3), 6);
+    expect(checkBinaryStl(await exportStl(r.shape)).watertight).toBe(true);
+    // A through hole has no bottom, so no point.
+    const through = designed(design(block(), hole({ diameter: 6, depth: 0, drillPoint: true })));
+    expect(rel(through.measurements.volume, 72000 - cyl(6, 30))).toBeLessThan(1e-9);
+  });
+
+  it("a simplified M6 tapped hole with a drill point: the 5 mm tap drill's own point", () => {
+    const h = hole({ depth: 12, thread: "M6", simplified: true, drillPoint: true });
+    const r = designed(design(block(), h));
+    expect(rel(r.measurements.volume, 72000 - cyl(5, 12) - cone(2.5))).toBeLessThan(1e-7);
+  });
+
+  it("a counterbored hole keeps its drill point at the bottom", () => {
+    const h = hole({ diameter: 6, depth: 15, drillPoint: true, head: { kind: "counterbore", diameter: 10, depth: 4 } });
+    const r = designed(design(block(), h));
+    expect(rel(r.measurements.volume, 72000 - cyl(6, 11) - cyl(10, 4) - cone(3))).toBeLessThan(1e-7);
+  });
+
+  it("a modelled M6 thread part way down a blind hole, then the plain hole and its drill point", () => {
+    const flat = hole({ depth: 14, thread: "M6", threadDepth: 8 });
+    const pointed = { ...flat, id: "h2", drillPoint: true };
+    const a = designed(design(block(), flat)).measurements.volume;
+    const b = designed(design(block(), pointed)).measurements.volume;
+    const minor = threadOf(flat)!.minor;
+    expect(Math.abs(a - b - cone(minor)) / cone(minor)).toBeLessThan(1e-3);
+  });
+
+  it("a drill point that would come out of the bottom of the part is refused, with what to do", () => {
+    const h = hole({ diameter: 6, depth: 29, drillPoint: true }); // 29 + 1.8 > 30
+    const r = buildDocument(design(block(), h));
+    expect(r.ok).toBe(false);
+    expect(r.issues[0]?.message).toContain("drill point");
+    expect(r.issues[0]?.field).toBe("depth");
   });
 
   it("a simplified M6 tapped hole is the 5 mm tap drill; no thread is built", () => {

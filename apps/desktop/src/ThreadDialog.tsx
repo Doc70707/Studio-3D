@@ -127,7 +127,13 @@ export function ThreadDialog(props: {
           </div>
         </div>
         {s.depth !== 0 && (
-          <NumberField label="Hole depth" value={s.depth} onCommit={(depth) => set({ depth })} compact />
+          <>
+            <NumberField label="Hole depth" value={s.depth} onCommit={(depth) => set({ depth })} compact />
+            <label className="check" title="The 118° cone a twist drill leaves below the hole's depth">
+              <input type="checkbox" checked={s.drillPoint} onChange={(e) => set({ drillPoint: e.target.checked })} />
+              Drill point at the bottom
+            </label>
+          </>
         )}
 
         <label className="check">

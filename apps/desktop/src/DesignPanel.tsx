@@ -62,8 +62,8 @@ import {
   type ShapeType,
   type SketchFeature,
   type ThreadSize,
-  getDisplayUnits,
-  lengthNumber,
+  lengthFigure,
+  unitSuffix,
   volumeText,
   type Vec3,
 } from "@studio3d/document";
@@ -105,6 +105,8 @@ interface Props {
   onPickHoleFace: (id: string | null) => void;
   /** Opens the Thread dialog for a hole. */
   onThreadHole: (id: string) => void;
+  /** Threaded hole: click where it goes, then pick its thread. */
+  onThreadedHole: () => void;
   onSketchOnPlate: () => void;
   onRevolve: () => void;
   onEditSketch: (id: string) => void;
@@ -203,6 +205,15 @@ export function useDesignPanel({
           name: "Add hole",
           title: "Add a hole: click on the part where it goes (Enter puts it in the middle)",
           onClick: () => (measurements ? sketching.onPickHoleFace(null) : add(newHole(doc, where))),
+        },
+        {
+          icon: "threadedHole",
+          label: "Threaded",
+          name: "Threaded hole",
+          title: "Threaded hole: click on the part where it goes, then pick the thread, its depth and the fit",
+          onClick: sketching.onThreadedHole,
+          disabled: !measurements,
+          reason: "Add a shape first",
         },
       ],
     },
@@ -334,7 +345,7 @@ export function useDesignPanel({
                       {REFERENCE_PLANES.find((p) => p.plane === r.plane)!.label} ·{" "}
                       {referenceSize(r)
                         .map((v) => mm(v))
-                        .join(" × ")}{" "}
+                        .join(" × ")}
                       {unit()}
                       {r.calibrated ? "" : " · not calibrated"}
                     </span>
@@ -513,23 +524,24 @@ export function placeNew(measurements: Measurements | null): { x: number; y: num
   };
 }
 /** A size as shown: in millimetres or inches, whichever is picked. */
-const mm = (n: number) => `${lengthNumber(n)}`;
-const unit = () => getDisplayUnits();
+const mm = (n: number) => lengthFigure(n);
+/** The unit after a size, with its space: " mm", or nothing for feet and inches, whose marks are in the figure. */
+const unit = () => (unitSuffix() ? ` ${unitSuffix()}` : "");
 
 /** A short description of a shape's size. */
 function summary(s: ShapeFeature): string {
   switch (s.type) {
     case "box":
-      return `${mm(s.width)} × ${mm(s.depth)} × ${mm(s.height)} ${unit()}${s.wall > 0 ? `, ${mm(s.wall)} walls` : ""}`;
+      return `${mm(s.width)} × ${mm(s.depth)} × ${mm(s.height)}${unit()}${s.wall > 0 ? `, ${mm(s.wall)} walls` : ""}`;
     case "cylinder":
-      if (s.thread) return `${s.thread} ${s.mode === "add" ? "threaded rod" : "thread"} × ${mm(s.height)} ${unit()}`;
-      return `Ø${mm(s.diameter)} × ${mm(s.height)} ${unit()}`;
+      if (s.thread) return `${s.thread} ${s.mode === "add" ? "threaded rod" : "thread"} × ${mm(s.height)}${unit()}`;
+      return `Ø${mm(s.diameter)} × ${mm(s.height)}${unit()}`;
     case "tube":
-      return `Ø${mm(s.outerDiameter)} / Ø${mm(s.innerDiameter)} × ${mm(s.height)} ${unit()}`;
+      return `Ø${mm(s.outerDiameter)} / Ø${mm(s.innerDiameter)} × ${mm(s.height)}${unit()}`;
     case "cone":
-      return `Ø${mm(s.bottomDiameter)} to Ø${mm(s.topDiameter)} × ${mm(s.height)} ${unit()}`;
+      return `Ø${mm(s.bottomDiameter)} to Ø${mm(s.topDiameter)} × ${mm(s.height)}${unit()}`;
     case "sphere":
-      return `Ø${mm(s.diameter)} ${unit()}`;
+      return `Ø${mm(s.diameter)}${unit()}`;
   }
 }
 
@@ -540,12 +552,12 @@ function sketchSummary(sk: SketchFeature): string {
     [...counts].map(([label, n]) => `${n} ${label.toLowerCase()}${n === 1 ? "" : "s"}`).join(", ") || "empty";
   const how =
     sk.revolve !== undefined
-      ? `${sk.mode === "add" ? "spun" : "cut"} ${mm(sk.revolve)}°`
+      ? `${sk.mode === "add" ? "spun" : "cut"} ${sk.revolve}°`
       : sk.mode === "add"
-        ? `out ${mm(sk.depth)} ${unit()}`
+        ? `out ${mm(sk.depth)}${unit()}`
         : sk.depth === 0
           ? "cut through"
-          : `cut ${mm(sk.depth)} ${unit()} deep`;
+          : `cut ${mm(sk.depth)}${unit()} deep`;
   return `On the ${sk.surface} · ${what} · ${how}`;
 }
 
@@ -557,16 +569,16 @@ function stepSummary(f: Feature, doc: ProjectDocument): string {
       return [
         holeKindLabel(f),
         ...(headOf(f) ? [`${headOf(f)!.kind} Ø${mm(headOf(f)!.diameter)}`] : []),
-        f.depth === 0 ? "through" : `${mm(f.depth)} ${unit()} deep`,
+        f.depth === 0 ? "through" : `${mm(f.depth)}${unit()} deep`,
         ...(f.face ? [f.face.surface] : []),
       ].join(" · ");
     case "sketch":
       return sketchSummary(f);
     case "hollow":
-      return `${mm(f.wall)} ${unit()} walls · ${f.open === "none" ? "closed inside" : `open at the ${f.open}`}`;
+      return `${mm(f.wall)}${unit()} walls · ${f.open === "none" ? "closed inside" : `open at the ${f.open}`}`;
     case "fillet":
     case "chamfer":
-      return `${mm(f.size)} ${unit()} · ${EDGE_SETS.find((x) => x.edges === f.edges)?.label.toLowerCase() ?? "edges"}`;
+      return `${mm(f.size)}${unit()} · ${EDGE_SETS.find((x) => x.edges === f.edges)?.label.toLowerCase() ?? "edges"}`;
     case "pattern":
     case "mirror": {
       const src = doc.features.find((x) => x.id === f.source)?.name ?? "?";
@@ -764,6 +776,16 @@ function HoleProps(props: {
         <input type="checkbox" checked={through} onChange={(e) => onChange({ depth: e.target.checked ? 0 : 5 })} />
         All the way through
       </label>
+      {!through && (
+        <label className="check" title="Ends in the 118° cone a twist drill leaves, as drilled and tapped holes do. The depth is to where the full width ends.">
+          <input
+            type="checkbox"
+            checked={!!hole.drillPoint}
+            onChange={(e) => onChange({ drillPoint: e.target.checked ? true : undefined })}
+          />
+          Drill point at the bottom (118°)
+        </label>
+      )}
       <button type="button" className="add thread-open" onClick={props.onThread}>
         <Icon name="hole" />
         {hole.thread ? "Thread settings…" : "Thread this hole…"}
@@ -832,7 +854,7 @@ function TappedOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (p
       </div>
       {hole.simplified && (
         <p className="props-note">
-          Drawn as the {mm(tapDrill(size))} {unit()} tap drill for {threadLabel(size)}; the thread isn't modelled.
+          Drawn as the {mm(tapDrill(size))}{unit()} tap drill for {threadLabel(size)}; the thread isn't modelled.
         </p>
       )}
     </div>
@@ -916,7 +938,7 @@ function ScrewOptions(props: { hole: HoleFeature; issues: Issue[]; onChange: (pa
       </div>
       {screw && (
         <p className="props-note" data-testid="clearance-size">
-          {mm(boreDiameter(hole))} {unit()} across, the ISO 273 {hole.clearance!.series} size for an {screw} screw.
+          {mm(boreDiameter(hole))}{unit()} across, the ISO 273 {hole.clearance!.series} size for an {screw} screw.
         </p>
       )}
       <div className="field compact">
@@ -1042,7 +1064,7 @@ function FacePosition(props: {
         />
       </div>
       <p className="props-note" aria-label="Face size (measured)">
-        The {face.surface} is {mm(face.width)} × {mm(face.height)} {unit()}
+        The {face.surface} is {mm(face.width)} × {mm(face.height)}{unit()}
         {hole.face!.on ? "; the hole follows it when the shape changes." : "."}
       </p>
     </div>
@@ -1243,13 +1265,13 @@ function Facts({ box, measurements }: { box: BoxFeature | null; measurements: Me
     <dl className="facts" data-testid="measurements" aria-label="Part size (measured)">
       <dt>Outside size</dt>
       <dd>
-        {mm(x)} × {mm(y)} × {mm(z)} {unit()}
+        {mm(x)} × {mm(y)} × {mm(z)}{unit()}
       </dd>
       {box && box.wall > 0 && (
         <>
           <dt>Inside space</dt>
           <dd>
-            {mm(box.width - 2 * box.wall)} × {mm(box.depth - 2 * box.wall)} × {mm(box.height - box.wall)} {unit()}
+            {mm(box.width - 2 * box.wall)} × {mm(box.depth - 2 * box.wall)} × {mm(box.height - box.wall)}{unit()}
           </dd>
         </>
       )}

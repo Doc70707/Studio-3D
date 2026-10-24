@@ -18,11 +18,23 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
     trace: "retain-on-failure",
     contextOptions: { reducedMotion: "reduce" },
+    // Every test starts in Advanced mode, with every tool in view, unless it says otherwise; the first-start chooser
+    // and the other modes have their own tests (e2e/experience.spec.ts).
+    storageState: {
+      cookies: [],
+      origins: [
+        { origin: "http://localhost:4173", localStorage: [{ name: "studio3d.experience", value: "advanced" }] },
+      ],
+    },
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 }, launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
+        launchOptions: { args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] },
+      },
     },
   ],
   webServer: { command: "npm run preview", url: "http://localhost:4173", reuseExistingServer: !process.env.CI },

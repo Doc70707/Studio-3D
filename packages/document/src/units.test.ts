@@ -2,6 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   fromDisplay,
   getDisplayUnits,
+  getPrecision,
+  inchFraction,
+  isImperial,
+  lengthEditText,
+  lengthFixed,
+  setLengthFormat,
+  unitSuffix,
+  type LengthStyle,
   lengthNumber,
   lengthText,
   parseLength,
@@ -46,6 +54,83 @@ describe("millimetres or inches", () => {
   });
 
   it("refuses what isn't a size", () => {
-    for (const bad of ["", "abc", "1/0", "1 5", "12 ft", "1..2", "--1"]) expect(parseLength(bad)).toBeNull();
+    for (const bad of ["", "abc", "1/0", "1 5", "12 yd", "1..2", "--1", "5' 3 5"]) expect(parseLength(bad)).toBeNull();
+  });
+});
+
+describe("centimetres, metres, inch fractions, feet, and feet and inches", () => {
+  it("writes sizes in each style, the part staying the same size", () => {
+    const cases: [LengthStyle, string][] = [
+      ["mm", "1234.57 mm"],
+      ["cm", "123.46 cm"],
+      ["m", "1.235 m"],
+      ["in", "48.605 in"],
+      ["in-frac", "48 19/32 in"],
+      ["ft", "4.05 ft"],
+      ["ft-in", `4' 0 5/8"`],
+    ];
+    for (const [s, text] of cases) {
+      setLengthFormat(s);
+      expect(lengthText(1234.5678)).toBe(text);
+    }
+    setLengthFormat("ft-in");
+    expect(lengthText(25.4 * 63.5)).toBe(`5' 3 1/2"`);
+    expect(lengthText(25.4 * 3.25)).toBe(`3 1/4"`);
+    expect(lengthText(0)).toBe(`0"`);
+    expect(unitSuffix()).toBe("");
+  });
+
+  it("rounds to the precision picked", () => {
+    setLengthFormat("mm", 0);
+    expect(lengthText(12.3456)).toBe("12 mm");
+    setLengthFormat("mm", 3);
+    expect(lengthText(12.3456)).toBe("12.346 mm");
+    setLengthFormat("in-frac", 8);
+    expect(lengthText(25.4 * 0.3)).toBe("1/4 in");
+    setLengthFormat("in-frac", 64);
+    expect(lengthText(25.4 * 0.3)).toBe("19/64 in");
+    setLengthFormat("cm", 7); // not offered: the style's own default
+    expect(getPrecision()).toBe(2);
+    expect(inchFraction(-1.5, 16)).toBe("-1 1/2");
+    expect(inchFraction(2, 16)).toBe("2");
+  });
+
+  it("keeps the exact length in a box being edited", () => {
+    setLengthFormat("in-frac", 8);
+    expect(lengthEditText(25.4 * 0.3)).toBe("0.3"); // not a 64th: decimals, not the rounded 1/4
+    expect(lengthEditText(25.4 * 2.375)).toBe("2 3/8");
+    setLengthFormat("ft-in");
+    expect(lengthEditText(25.4 * 63.5)).toBe(`5' 3 1/2"`);
+    expect(lengthEditText(25.4 * 63.3)).toBe(`63.3"`);
+    setLengthFormat("m");
+    expect(lengthEditText(1234.5678)).toBe("1.234568");
+  });
+
+  it("reads feet, feet and inches, centimetres and metres, and bare numbers in the shown style", () => {
+    expect(parseLength("2 ft")).toBeCloseTo(609.6, 9);
+    expect(parseLength(`5'3 1/2"`)).toBeCloseTo(25.4 * 63.5, 9);
+    expect(parseLength(`5' 3"`)).toBeCloseTo(25.4 * 63, 9);
+    expect(parseLength(`5'-3"`)).toBeCloseTo(25.4 * 63, 9);
+    expect(parseLength("2 ft 3 in")).toBeCloseTo(25.4 * 27, 9);
+    expect(parseLength("5'")).toBeCloseTo(1524, 9);
+    expect(parseLength("-1'6\"")).toBeCloseTo(-457.2, 9);
+    expect(parseLength("1.2 m")).toBeCloseTo(1200, 9);
+    setLengthFormat("cm");
+    expect(parseLength("2.5")).toBe(25);
+    setLengthFormat("ft-in");
+    expect(parseLength("18")).toBeCloseTo(457.2, 9); // a bare number is inches, as in AutoCAD
+    setLengthFormat("ft");
+    expect(parseLength("1.5")).toBeCloseTo(457.2, 9);
+    expect(getDisplayUnits()).toBe("ft");
+    expect(isImperial()).toBe(true);
+  });
+
+  it("a readout keeps its decimals, so it doesn't jump as the pointer moves", () => {
+    expect(lengthFixed(12.3)).toBe("12.30");
+    expect(lengthFixed(-0.001)).toBe("0.00");
+    setLengthFormat("m");
+    expect(lengthFixed(1500)).toBe("1.500");
+    setLengthFormat("in-frac", 16);
+    expect(lengthFixed(25.4 * 2.375)).toBe("2 3/8");
   });
 });
