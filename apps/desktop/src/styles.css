@@ -2952,6 +2952,7 @@ button.link:hover {
   right: 12px;
   display: grid;
   grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); /* a long category scrolls inside; Cancel and Done stay in the window */
   width: min(640px, calc(100vw - 24px));
   height: min(560px, calc(100% - var(--safe-top, 76px) - 72px));
   border: 1px solid var(--chrome-edge);
@@ -3296,6 +3297,13 @@ button.link:hover {
 
 .settings-actions .spacer {
   flex: 1;
+}
+
+/* A long category name gives way first ("Reset snaps and nav…"), so Cancel and Done always fit in the window. */
+.settings-actions button:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .settings-actions button {
