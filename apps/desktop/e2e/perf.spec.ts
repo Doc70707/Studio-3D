@@ -1,5 +1,6 @@
 // Time from a change to the model being up to date, in the real app (geometry in its worker, drawing in WebGL).
-// Skipped unless PERF=1, since times depend on the machine: `PERF=1 npx playwright test perf`.
+// Skipped unless PERF=1, since times depend on the machine: `PERF=1 npx playwright test perf` (PERF_GRID=off to compare
+// drawing without the grid).
 import { expect, test, type Page } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
@@ -57,4 +58,45 @@ test("edit to up-to-date times", async ({ page }) => {
   await measure("block + M6 thread: move the hole", "Hole 1 left / right position", ["1", "2", "3", "4", "5", "6"]);
   console.table(rows);
   writeFileSync(`${OUT}perf-app.json`, JSON.stringify(rows, null, 2));
+});
+
+test("start-up and drawing times", async ({ page }) => {
+  const started = Date.now();
+  await page.goto("/");
+  await expect(host(page)).toHaveAttribute("data-geometry", "current", { timeout: 120_000 });
+  const ready = Date.now() - started;
+  if (process.env.PERF_GRID === "off") await page.keyboard.press("F7");
+
+  // Frames drawn while the view is orbited for two seconds (left-drag), and the slowest frame among them.
+  const view = (await host(page).boundingBox())!;
+  const frames = page.evaluate(
+    () =>
+      new Promise<number[]>((resolve) => {
+        const times: number[] = [];
+        const end = performance.now() + 2000;
+        const tick = (t: number) => {
+          times.push(t);
+          if (t < end) requestAnimationFrame(tick);
+          else resolve(times);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+  await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2);
+  await page.mouse.down();
+  for (let i = 0; i < 60; i++) {
+    await page.mouse.move(view.x + view.width / 2 + i * 4, view.y + view.height / 2 + Math.sin(i / 6) * 30);
+    await page.waitForTimeout(30);
+  }
+  await page.mouse.up();
+  const times = await frames;
+  const gaps = times.slice(1).map((t, i) => t - times[i]!);
+  const rows = {
+    "start to model up to date (ms)": ready,
+    "frames per second while orbiting": Math.round((gaps.length / (times.at(-1)! - times[0]!)) * 1000),
+    "slowest frame (ms)": Math.round(Math.max(...gaps)),
+    "median frame (ms)": Math.round(median(gaps)),
+  };
+  console.table(rows);
+  writeFileSync(`${OUT}perf-drawing.json`, JSON.stringify(rows, null, 2));
 });
