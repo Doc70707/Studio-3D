@@ -532,6 +532,26 @@ describe("sketches", () => {
     expect(rel(r.measurements.volume, 72000 - 200 * 30)).toBeLessThan(1e-9);
   });
 
+  it("drawings on the level, front and side planes Blurry uses land where its tool says", () => {
+    const on = (plane: SketchFeature["plane"], profiles: Profile[], mode: "add" | "cut", depth: number) =>
+      newSketch({ units: "mm", features: [] }, plane, "plane", profiles, mode, depth);
+    // Level at the block's top (z 30), cut 5 down: a pocket from z 25 to 30.
+    const level = on({ origin: [0, 0, 30], xDir: [1, 0, 0], normal: [0, 0, 1] }, [rect(-5, -5, 10, 10)], "cut", 5);
+    const pocket = designed({ units: "mm", features: [block(), level] });
+    expect(rel(pocket.measurements.volume, 72000 - 500)).toBeLessThan(1e-9);
+    expect(pocket.issues).toEqual([]);
+    // Front at y = 10, pushed 20 towards the front: centred on y = 0, drawing up is height.
+    const front = on({ origin: [0, 10, 0], xDir: [1, 0, 0], normal: [0, -1, 0] }, [rect(0, 0, 40, 15)], "add", 20);
+    const f = designed({ units: "mm", features: [front] });
+    expect(f.measurements.min.map((v) => +v.toFixed(9))).toEqual([0, -10, 0]);
+    expect(f.measurements.max.map((v) => +v.toFixed(9))).toEqual([40, 10, 15]);
+    // Side at x = -30, pushed 6 right: drawing across is plate y.
+    const side = on({ origin: [-30, 0, 0], xDir: [0, 1, 0], normal: [1, 0, 0] }, [rect(0, 0, 25, 12)], "add", 6);
+    const g = designed({ units: "mm", features: [side] });
+    expect(g.measurements.min.map((v) => +v.toFixed(9))).toEqual([-30, 0, 0]);
+    expect(g.measurements.max.map((v) => +v.toFixed(9))).toEqual([-24, 25, 12]);
+  });
+
   it("an L-shaped outline drawn on the plate becomes the whole part (a bracket)", () => {
     const L: Profile = {
       kind: "polygon",

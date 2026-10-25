@@ -31,6 +31,8 @@
   --warning: #ffd36b;
   --accent: #5ea8ff;
   --accent-rgb: 94 168 255;
+  --accent-glow: #5ea8ff; /* the accent as it looks on dark: Blurry glows in it on every theme */
+  --accent-glow-rgb: 94 168 255;
   --button: #3b82f6;
   --button-strong: #2563eb;
   --on-accent: #ffffff;
@@ -1167,6 +1169,15 @@ input:focus-visible {
 .toast button:hover {
   background: var(--fill-hover);
   color: var(--text);
+}
+
+/* The same arrival for something that isn't centred with translateX(-50%) (menus, dialogs at a side). */
+@keyframes materialize-in-place {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+    filter: blur(6px);
+  }
 }
 
 @keyframes materialize {
@@ -3477,7 +3488,7 @@ button.link:hover {
   padding: 12px;
   border-radius: var(--radius-md);
   background: var(--menu-bg);
-  animation: materialize 160ms var(--ease);
+  animation: materialize-in-place 160ms var(--ease);
 }
 
 .snap-menu label {
@@ -4018,7 +4029,7 @@ button.link:hover {
   background: var(--glass-strong);
   display: grid;
   gap: 10px;
-  animation: materialize 240ms var(--ease);
+  animation: materialize-in-place 240ms var(--ease);
 }
 .thread-dialog header {
   display: flex;
@@ -4421,7 +4432,7 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
   border-radius: 14px;
   background: var(--glass-strong);
   pointer-events: auto;
-  animation: materialize 220ms var(--ease-out);
+  animation: materialize-in-place 220ms var(--ease-out);
 }
 
 .command-row {
@@ -4620,10 +4631,12 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
   pointer-events: none;
 }
 
-/* His colour, from his own design: a warm orange glow, the same on every theme. */
+/* His glow is the accent colour picked in Settings, as light (the bright shade on every theme), so he changes with it
+   at once. Inside he is dark, tinted a little by the same colour, so his white outline reads on light themes too. */
 :root {
-  --blurry: #f39a4c;
-  --blurry-glow: rgba(243, 154, 76, 0.55);
+  --blurry: var(--accent-glow);
+  --blurry-glow: rgb(var(--accent-glow-rgb) / 0.55);
+  --blurry-inside: color-mix(in srgb, var(--blurry) 16%, #191c24);
 }
 
 .statusbar .blurry-button .blurry-face {
@@ -4785,7 +4798,15 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
 
 .blurry-message {
   margin: 8px 0;
-  animation: materialize 220ms var(--ease-out);
+  animation: blurry-say 220ms var(--ease-out);
+}
+
+/* A new message rises into place where it will stay (not "materialize", which also centres what it moves). */
+@keyframes blurry-say {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 .blurry-message p {
@@ -4849,9 +4870,15 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
 }
 
 .blurry-done svg {
+  flex: none;
   width: 14px;
   height: 14px;
   color: var(--accent);
+}
+
+/* A change the geometry engine couldn't build is shown as not done, never with a tick. */
+.blurry-done li.failed svg {
+  color: var(--warning);
 }
 
 .blurry-cost {
@@ -4872,14 +4899,14 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
   }
 }
 
-/* His main buttons in his own warm orange, dark text on it as in his design. */
+/* His main buttons are the app's own, in the accent colour. */
 .blurry-panel button.primary:not(:disabled) {
-  background: var(--blurry);
-  color: #1d130b;
+  background: var(--button);
+  color: var(--on-accent);
 }
 
 .blurry-panel button.primary:not(:disabled):hover {
-  background: #f7aa66;
+  background: var(--button-strong);
 }
 
 .blurry-ask button svg {
@@ -4980,8 +5007,8 @@ button:active:not(:disabled):not([role^="menuitem"]):not(.menu-item):not(.link) 
   max-width: 85%;
   padding: 7px 12px;
   border-radius: 14px 14px 4px 14px;
-  background: var(--accent);
-  color: #07162e;
+  background: var(--button);
+  color: var(--on-accent);
   font-weight: 550;
 }
 

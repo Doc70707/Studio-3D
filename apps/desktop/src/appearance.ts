@@ -301,7 +301,15 @@ export function viewportColors(a: Appearance): ViewportColors {
 /** Every CSS variable the appearance sets, by name without the leading dashes. */
 export function cssVariables(a: Appearance): Record<string, string> {
   const accent = accentColors(a);
-  return { ...THEMES[a.theme].colors, ...accent, "accent-rgb": channels(accent.accent).join(" ") };
+  // The accent as light, for glows (Blurry's): the bright dark-theme shade on every theme, since a glow is light.
+  const glow = ACCENTS[a.accent].dark.accent;
+  return {
+    ...THEMES[a.theme].colors,
+    ...accent,
+    "accent-rgb": channels(accent.accent).join(" "),
+    "accent-glow": glow,
+    "accent-glow-rgb": channels(glow).join(" "),
+  };
 }
 
 export function parseAppearance(text: string | null): Appearance {

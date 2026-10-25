@@ -5,7 +5,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
 import { answer, type Answer } from "./helperAnswers";
-import { askClaude, problemText, type HelperContext } from "./helperAI";
+import { askClaude, problemText, type BuildReport, type HelperContext } from "./helperAI";
 import type { HelperChange } from "./helperTools";
 import type { Command } from "./commands";
 import { whereIs } from "./CommandLine";
@@ -41,8 +41,10 @@ export interface BlurryProps {
   hidden: boolean;
   /** The part and the app as they are now, for Claude. */
   context: () => HelperContext;
-  /** Makes one checked change to the part (one undo step). */
-  apply: (change: HelperChange) => void;
+  /** Makes a checked change to the part; changes sharing a group are one undo step. */
+  apply: (change: HelperChange, group: string) => void;
+  /** Waits for the part to be rebuilt, and says how it came out. */
+  whenBuilt: () => Promise<BuildReport>;
   /** Told when Claude starts and stops answering, so his button can glow meanwhile. */
   onBusy: (busy: boolean) => void;
   /** His open panel, which the 3D view keeps the part clear of. */
@@ -110,6 +112,8 @@ export function Blurry(props: BlurryProps) {
       history: history.current,
       context: props.context,
       apply: props.apply,
+      whenBuilt: props.whenBuilt,
+      group: `blurry-${Date.now()}-${id}`,
       onText: (t) => change(id, (m) => ({ ...m, text: t })),
       onAction: (a) => change(id, (m) => ({ ...m, actions: [...(m.actions ?? []), a] })),
       signal: stop.signal,
@@ -212,8 +216,8 @@ export function Blurry(props: BlurryProps) {
                     {!!m.actions?.length && (
                       <ul className="blurry-done" aria-label="What Blurry did">
                         {m.actions.map((a, i) => (
-                          <li key={i}>
-                            <Icon name="check" />
+                          <li key={i} className={a.ok ? undefined : "failed"}>
+                            <Icon name={a.ok ? "check" : "alert"} />
                             {a.said}
                           </li>
                         ))}
@@ -395,8 +399,9 @@ const GHOST_ARM =
   "M132.2 94.5 C131.4 94.6 128.8 94.6 127.1 95.3 C125.4 95.9 122.8 96.9 122.0 98.4 C121.2 99.8 121.4 102.0 122.0 103.9 C122.7 105.7 124.5 108.0 126.1 109.5 C127.6 110.9 130.5 112.2 131.4 112.8";
 
 /**
- * Blurry himself, drawn the way his app draws him: a white line with a soft orange glow and a wide halo round it,
- * dot eyes and a smile. Inside he is dark and warm, so he looks the same on light themes as on his own black screen.
+ * Blurry himself, drawn the way his app draws him: a white line with a soft glow and a wide halo round it, dot eyes
+ * and a smile. The glow is the accent colour picked in Settings (--blurry), so he changes with it; inside he is dark,
+ * so he looks the same on light themes as on his own black screen.
  */
 export function BlurryFace({ size, waving }: { size: number; waving?: boolean }) {
   const id = useId();
@@ -431,7 +436,7 @@ export function BlurryFace({ size, waving }: { size: number; waving?: boolean })
         </filter>
       </defs>
       <g className="blurry-body">
-        <path d={GHOST_BODY} fill="#2e2925" />
+        <path d={GHOST_BODY} style={{ fill: "var(--blurry-inside)" }} />
         <path d={GHOST_BODY} style={{ fill: "var(--blurry)" }} opacity="0.13" />
         <g opacity="0.45" filter={`url(#${halo})`}>
           {drawing("var(--blurry)")}

@@ -379,6 +379,8 @@ export function useProject() {
       setNotice,
       busy,
       run,
+      /** Any checked change as one undoable step; changes sharing a "group:" key stay one step. */
+      editAs: edit,
       updateFeature,
       addFeature,
       addSteps,
@@ -411,6 +413,7 @@ export function useProject() {
       notice,
       busy,
       run,
+      edit,
       updateFeature,
       addFeature,
       addSteps,

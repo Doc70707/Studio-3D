@@ -7,18 +7,31 @@ import {
   EDGE_SETS,
   OPEN_SIDES,
   SHAPES,
+  SPIN_PLANE,
+  SPIN_SURFACE,
   THREADS,
+  isCopyStep,
+  isCopyable,
   isShape,
+  moveFeature,
   newEdgeStep,
   newHole,
   newHollow,
+  newId,
+  newMirror,
+  newPattern,
   newShape,
+  newSketch,
+  nextName,
   parseProject,
   serializeProject,
   validateDocument,
   type Feature,
+  type Point2,
+  type Profile,
   type ProjectDocument,
   type ShapeType,
+  type SketchPlane,
   type Vec3,
 } from "@studio3d/document";
 
@@ -137,6 +150,80 @@ export const HELPER_TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: "draw_outline",
+    description:
+      "Draw flat outlines and push them into a solid: for any shape the other tools don't make (an L bracket, a " +
+      "phone stand's side, a hook, a star, a plate with a notch), or to cut a pocket or a slot. on picks the drawing " +
+      "surface: 'level' is flat at height z (drawing x, y = plate x, y), pushed up by depth to add, or down from z " +
+      "into the part to cut (depth 0 = all the way through); 'front' stands upright at y = offset facing the front " +
+      "(drawing x = plate x, drawing up = height z), pushed towards the front (-y) by depth; 'side' stands upright " +
+      "at x = offset facing right (drawing x = plate y, drawing up = height z), pushed right (+x) by depth. To " +
+      "centre a front or side drawing, set offset to half the depth (front: offset = +depth/2). outlines: each is " +
+      '{"points": [[x, y], ...]} (corners in order, at least 3, not crossing itself), {"circle": [x, y], ' +
+      '"diameter": d} or {"rectangle": [x, y], "width": w, "height": h} (x, y = bottom-left corner). Outlines ' +
+      "inside another make a hole in it. revolve: degrees (up to 360) to spin a 'front' drawing at offset 0 round " +
+      "its up line (x = 0) like a lathe, for round parts (a vase, a knob, a bottle); its corners must have x >= 0. " +
+      MM,
+    input_schema: {
+      type: "object",
+      properties: {
+        on: { type: "string", enum: ["level", "front", "side"] },
+        z: { type: "number" },
+        offset: { type: "number" },
+        outlines: { type: "array", items: { type: "object" } },
+        mode: { type: "string", enum: ["add", "cut"] },
+        depth: { type: "number" },
+        revolve: { type: "number" },
+      },
+      required: ["on", "outlines"],
+    },
+  },
+  {
+    name: "copy_step",
+    description:
+      "Make an independent copy of a shape, hole or drawing step, moved by dx, dy, dz (dz is ignored for holes). " +
+      `The copy can then be changed on its own with change_step. ${MM}`,
+    input_schema: {
+      type: "object",
+      properties: { step: { type: "string" }, dx: { type: "number" }, dy: { type: "number" }, dz: { type: "number" } },
+      required: ["step"],
+    },
+  },
+  {
+    name: "pattern_step",
+    description:
+      "Repeat a shape, hole or drawing step. kind 'grid': count copies in a row along x, spacing apart, and rows " +
+      "rows along y, rowSpacing apart (count and rows include the original). kind 'circle': count copies round " +
+      "the point cx, cy, spread over angle degrees (360 = evenly all the way round). The copies follow the " +
+      `original when it changes. ${MM}`,
+    input_schema: {
+      type: "object",
+      properties: {
+        step: { type: "string" },
+        kind: { type: "string", enum: ["grid", "circle"] },
+        count: { type: "number" },
+        spacing: { type: "number" },
+        rows: { type: "number" },
+        rowSpacing: { type: "number" },
+        angle: { type: "number" },
+        cx: { type: "number" },
+        cy: { type: "number" },
+      },
+      required: ["step"],
+    },
+  },
+  {
+    name: "mirror_step",
+    description:
+      "Add a mirror image of a shape, hole or drawing step across an upright line: axis 'x' mirrors left to right " +
+      `across x = at, axis 'y' front to back across y = at. ${MM}`,
+    input_schema: {
+      type: "object",
+      properties: { step: { type: "string" }, axis: { type: "string", enum: ["x", "y"] }, at: { type: "number" } },
+      required: ["step"],
+    },
+  },
+  {
     name: "run_command",
     description:
       "Run one of the app's own commands by its exact title from the command list (for example 'Sizes in inches', " +
@@ -182,11 +269,71 @@ const checked = (change: HelperChange, id: string, next: ProjectDocument, said: 
 };
 
 /** Shapes go in before the first hole or hollow, as the Add buttons put them. */
-function withAdded(doc: ProjectDocument, f: Feature): ProjectDocument {
+export function withAdded(doc: ProjectDocument, f: Feature): ProjectDocument {
   if (!isShape(f)) return { ...doc, features: [...doc.features, f] };
   const first = doc.features.findIndex((g) => g.type === "hole" || g.type === "hollow");
   const at = first === -1 ? doc.features.length : first;
   return { ...doc, features: [...doc.features.slice(0, at), f, ...doc.features.slice(at)] };
+}
+
+const point = (v: unknown): Point2 | null =>
+  Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number" && Number.isFinite(n))
+    ? [v[0] as number, v[1] as number]
+    : null;
+
+/** One outline from a tool call, or what is wrong with it. */
+function profileOf(o: unknown): Profile | string {
+  const r = record(o);
+  if (!r) return "each outline is an object.";
+  if (Array.isArray(r.points)) {
+    const points = r.points.map(point);
+    if (points.some((p) => !p)) return "points are [x, y] pairs of numbers.";
+    if (points.length < 3) return "an outline needs at least 3 corners.";
+    return { kind: "polygon", points: points as Point2[] };
+  }
+  if (r.circle !== undefined) {
+    const c = point(r.circle);
+    const d = num(r.diameter);
+    if (!c || d === undefined) return 'a circle is {"circle": [x, y], "diameter": d}.';
+    return { kind: "circle", x: c[0], y: c[1], diameter: d };
+  }
+  if (r.rectangle !== undefined) {
+    const c = point(r.rectangle);
+    const [w, h] = [num(r.width), num(r.height)];
+    if (!c || w === undefined || h === undefined)
+      return 'a rectangle is {"rectangle": [x, y], "width": w, "height": h}.';
+    return { kind: "rectangle", x: c[0], y: c[1], width: w, height: h };
+  }
+  return "give points, a circle or a rectangle.";
+}
+
+/** The x of every extreme point of a profile, to keep a spun drawing on one side of its axis. */
+const profileXs = (p: Profile): number[] =>
+  p.kind === "polygon" ? p.points.map((q) => q[0]) : p.kind === "circle" ? [p.x - p.diameter / 2] : [p.x];
+
+/** The document after a checked change (not a command, which runs in the app). */
+export function applyChange(doc: ProjectDocument, change: HelperChange): ProjectDocument {
+  if (change.kind === "add") return withAdded(doc, change.feature);
+  if (change.kind === "update") {
+    const patch = change.patch;
+    return {
+      ...doc,
+      features: doc.features.map((f) => {
+        if (f.id !== change.id) return f;
+        const next = { ...f } as unknown as Record<string, unknown>;
+        for (const [k, v] of Object.entries(patch))
+          if (v === undefined) delete next[k];
+          else next[k] = v;
+        return next as unknown as Feature;
+      }),
+    };
+  }
+  if (change.kind === "remove")
+    return {
+      ...doc,
+      features: doc.features.filter((f) => f.id !== change.id && !(isCopyStep(f) && f.source === change.id)),
+    };
+  return doc;
 }
 
 /**
@@ -283,6 +430,76 @@ export function planTool(
     return { ok: true, change: { kind: "remove", id: f.id }, said: `Removed ${f.name}` };
   }
 
+  if (name === "draw_outline") {
+    const on = args.on;
+    if (on !== "level" && on !== "front" && on !== "side") return fail("on must be level, front or side.");
+    const raw = Array.isArray(args.outlines) ? args.outlines : [];
+    if (!raw.length) return fail("outlines needs at least one outline.");
+    const profiles: Profile[] = [];
+    for (const [i, o] of raw.entries()) {
+      const p = profileOf(o);
+      if (typeof p === "string") return fail(`Outline ${i + 1}: ${p}`);
+      profiles.push(p);
+    }
+    const mode = args.mode === "cut" ? "cut" : "add";
+    if (mode === "cut" && !doc.features.length) return fail("There's nothing to cut yet: add something first.");
+    const offset = num(args.offset) ?? 0;
+    const revolve = num(args.revolve);
+    let feature;
+    if (revolve !== undefined) {
+      if (on !== "front" || offset !== 0) return fail("Only a front drawing at offset 0 can be spun (revolve).");
+      if (!(revolve > 0 && revolve <= 360)) return fail("revolve is in degrees, more than 0 and up to 360.");
+      const left = profiles.some((p) => profileXs(p).some((x) => x < -1e-9));
+      if (left) return fail("A spun drawing must stay right of its up line: every x must be 0 or more.");
+      feature = { ...newSketch(doc, SPIN_PLANE, SPIN_SURFACE, profiles, mode, 10), revolve };
+      feature.name = nextName(doc, "Revolve");
+    } else {
+      const plane: SketchPlane =
+        on === "level"
+          ? { origin: [0, 0, num(args.z) ?? 0], xDir: [1, 0, 0], normal: [0, 0, 1] }
+          : on === "front"
+            ? { origin: [0, offset, 0], xDir: [1, 0, 0], normal: [0, -1, 0] }
+            : { origin: [offset, 0, 0], xDir: [0, 1, 0], normal: [1, 0, 0] };
+      const surface = on === "level" ? "level plane" : on === "front" ? "front plane" : "side plane";
+      const depth = num(args.depth) ?? (mode === "cut" ? 0 : 5);
+      feature = newSketch(doc, plane, surface, profiles, mode, depth);
+    }
+    const said = `${mode === "cut" ? "Cut" : "Added"} ${feature.name}`;
+    return checked({ kind: "add", feature }, feature.id, withAdded(doc, feature), said);
+  }
+
+  if (name === "copy_step") {
+    const f = findStep(doc, args.step);
+    if (!f) return fail(`There is no step called "${String(args.step)}". The steps are: ${stepNames(doc)}.`);
+    if (!isCopyable(f)) return fail(`${f.name} can't be copied: only shapes, holes and drawings can.`);
+    const base =
+      f.type === "hole" ? "Hole" : f.type === "sketch" ? (f.revolve ? "Revolve" : "Sketch") : SHAPES[f.type].label;
+    const by: [number, number, number] = [num(args.dx) ?? 0, num(args.dy) ?? 0, num(args.dz) ?? 0];
+    const feature = { ...moveFeature(f, by), id: newId(), name: nextName(doc, base) } as Feature;
+    return checked(
+      { kind: "add", feature },
+      feature.id,
+      withAdded(doc, feature),
+      `Copied ${f.name} as ${feature.name}`,
+    );
+  }
+
+  if (name === "pattern_step" || name === "mirror_step") {
+    const f = findStep(doc, args.step);
+    if (!f) return fail(`There is no step called "${String(args.step)}". The steps are: ${stepNames(doc)}.`);
+    if (!isCopyable(f)) return fail(`${f.name} can't be repeated: only shapes, holes and drawings can.`);
+    let feature: Feature;
+    if (name === "mirror_step") {
+      feature = { ...newMirror(doc, f.id, num(args.at) ?? 0), ...(args.axis === "y" ? { axis: "y" as const } : {}) };
+    } else {
+      const p = { ...newPattern(doc, f.id), ...(args.kind === "circle" ? { kind: "circle" as const } : {}) };
+      for (const k of ["count", "spacing", "rows", "rowSpacing", "angle", "cx", "cy"] as const)
+        if (num(args[k]) !== undefined) Object.assign(p, { [k]: args[k] });
+      feature = p;
+    }
+    return checked({ kind: "add", feature }, feature.id, withAdded(doc, feature), `Added ${feature.name} of ${f.name}`);
+  }
+
   if (name === "run_command") {
     const title = typeof args.title === "string" ? args.title.trim() : "";
     const found = context.commands.find((c) => c.toLowerCase() === title.toLowerCase());
@@ -299,8 +516,10 @@ export function describeModel(doc: ProjectDocument): string {
   return doc.features
     .map((f, i) => {
       const { id: _id, name, type, ...rest } = f as unknown as Record<string, unknown> & { name: string };
-      // Sketch outlines are long lists of points: their count is enough to talk about them.
-      if (Array.isArray(rest.profiles)) rest.profiles = `${rest.profiles.length} outline(s)`;
+      // Long sketch outlines are lists of points: their count is enough to talk about them. Short ones are kept,
+      // so Claude can redraw them with change_step.
+      if (Array.isArray(rest.profiles) && JSON.stringify(rest.profiles).length > 600)
+        rest.profiles = `${rest.profiles.length} outline(s)`;
       if (Array.isArray(rest.picked)) rest.picked = `${rest.picked.length} picked edge(s)`;
       return `${i + 1}. ${name} (${String(type)}) ${JSON.stringify(rest)}`;
     })

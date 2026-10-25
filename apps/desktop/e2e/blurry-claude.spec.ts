@@ -92,7 +92,9 @@ test.beforeEach(async ({ page }) => {
   await current(page);
 });
 
-test("with Claude on, a request becomes real checked steps: a hole, then threaded, each undoable", async ({ page }) => {
+test("with Claude on, a request becomes real checked steps: a hole, then threaded, and one undo takes it back", async ({
+  page,
+}) => {
   const sent = await standIn(page, [
     [{ text: "I'll add a 6 mm hole." }, { tool: "add_hole", input: { diameter: 6, x: 15, y: 0, depth: 0 } }],
     [{ tool: "change_step", input: { step: "Hole 1", changes: { thread: "m5", simplified: true } } }],
@@ -128,13 +130,79 @@ test("with Claude on, a request becomes real checked steps: a hole, then threade
   const second = JSON.stringify(sent[1]!.postDataJSON().messages.at(-1));
   expect(second).toContain("tool_result");
   expect(second).toContain("Done: Added Hole 1.");
+  // Claude hears how the part came out once it was rebuilt, with its size, before it answers.
+  expect(second).toMatch(/The part built fine; it is now 60(\.0)? mm wide, 40(\.0)? mm deep, 30(\.0)? mm tall/);
+  expect(JSON.stringify(body.messages[0].content)).toContain("designing the part");
 
-  // Each change is its own step in the history: two undos take both back.
+  // Everything Blurry did for one request is one step in the history: one undo takes it all back.
   await panel(page).getByRole("button", { name: "Close Blurry" }).click();
   await page.keyboard.press("Control+z");
-  await expect(page.getByLabel("Hole 1 thread")).toHaveValue("");
-  await page.keyboard.press("Control+z");
   await expect(steps(page).filter({ hasText: "Hole 1" })).toHaveCount(0);
+  await page.keyboard.press("Control+y");
+  await expect(page.getByLabel("Hole 1 thread")).toHaveValue("M5");
+});
+
+test("a change the geometry engine can't build is shown as not done, and Claude is told so it can fix it", async ({
+  page,
+}) => {
+  const sent = await standIn(page, [
+    [{ tool: "add_shape", input: { shape: "box", mode: "cut", sizes: { width: 300, depth: 300, height: 300 } } }],
+    [{ tool: "remove_step", input: { step: "Box 1" } }],
+    [{ text: "That cut would have removed the whole part, so I took it out again. Nothing changed." }],
+  ]);
+  await turnOnClaude(page);
+  await ask(page, "cut a huge box out of it");
+  const reply = panel(page).getByTestId("blurry-says").last();
+  await expect(reply).toContainText("Nothing changed.");
+  const did = reply.getByRole("list", { name: "What Blurry did" });
+  await expect(did.locator("li.failed")).toContainText("The part didn't build");
+  await expect(did).toContainText("Removed Box 1");
+  const told = JSON.stringify(sent[1]!.postDataJSON().messages.at(-1));
+  expect(told).toContain("But the part didn't build");
+  expect(told).toContain("Box 1 would cut away the whole part");
+  await expect(steps(page)).toHaveCount(1);
+  await current(page);
+});
+
+test("from a description, Claude draws an outline into a real part: an L bracket with screw holes", async ({
+  page,
+}) => {
+  const L = {
+    points: [
+      [-30, 0],
+      [30, 0],
+      [30, 4],
+      [-26, 4],
+      [-26, 40],
+      [-30, 40],
+    ],
+  };
+  const sent = await standIn(page, [
+    [
+      { text: "I'll make a 60 mm wide L bracket, 20 mm deep, 4 mm thick." },
+      { tool: "remove_step", input: { step: "Box" } },
+      { tool: "draw_outline", input: { on: "front", offset: 10, outlines: [L], depth: 20 } },
+    ],
+    [
+      { tool: "add_hole", input: { diameter: 4.5, x: 10, y: 0, depth: 0 } },
+      { tool: "copy_step", input: { step: "Hole 1", dx: 12 } },
+    ],
+    [{ text: "Your bracket is ready: 60 by 20 mm, with two 4.5 mm screw holes. One Ctrl+Z takes it all back." }],
+  ]);
+  await turnOnClaude(page);
+  await ask(page, "make me a small L bracket with two screw holes in the base");
+  await expect(panel(page).getByTestId("blurry-says").last()).toContainText("Your bracket is ready");
+  await current(page);
+  await expect(steps(page).filter({ hasText: /Sketch 1|Hole 1|Hole 2/ })).toHaveCount(3);
+  await expect(steps(page).filter({ hasText: "Box" })).toHaveCount(0);
+  const built = JSON.stringify(sent[1]!.postDataJSON().messages.at(-1));
+  expect(built).toMatch(/it is now 60(\.0)? mm wide, 20(\.0)? mm deep, 40(\.0)? mm tall/);
+  await page.screenshot({ path: `${OUT}blurry-bracket.png` });
+
+  await panel(page).getByRole("button", { name: "Close Blurry" }).click();
+  await page.keyboard.press("Control+z");
+  await expect(steps(page).filter({ hasText: "Box" })).toHaveCount(1);
+  await expect(steps(page)).toHaveCount(1);
 });
 
 test("a change the checks refuse never reaches the part; Claude is told why and says so", async ({ page }) => {

@@ -81,6 +81,9 @@ import {
   LINE_WIDTH,
   isImperial,
   lengthFixed,
+  getLengthStyle,
+  LENGTH_STYLES,
+  GROUP_KEY,
   lengthText,
   unitSuffix,
 } from "@studio3d/document";
@@ -119,8 +122,8 @@ import { UnitsSwitch } from "./UnitsSwitch";
 import { Icon } from "./Icon";
 import { CommandLine, type CommandLineHandle, type CommandPrompt } from "./CommandLine";
 import { Blurry, BlurryButton } from "./Blurry";
-import type { HelperContext } from "./helperAI";
-import type { HelperChange } from "./helperTools";
+import type { BuildReport, HelperContext } from "./helperAI";
+import { applyChange, type HelperChange } from "./helperTools";
 import { indexCommands, type Command } from "./commands";
 import { type Tool as SketchTool } from "./SketchEditor";
 import { platform, type MeshFormat, type SlicerProgram } from "./platform";
@@ -168,6 +171,8 @@ export function App() {
   const [engine, setEngine] = useState<Engine>("starting");
   const [engineError, setEngineError] = useState<string | null>(null);
   const [kernelIssues, setKernelIssues] = useState<Issue[]>([]);
+  /** The document the engine last answered for, built or not. */
+  const builtFrom = useRef<ProjectDocument | null>(null);
   const [built, setBuilt] = useState<Built | null>(null);
   const [building, setBuilding] = useState(false);
   /** The last mesh shown, so a click can be matched to a face. */
@@ -241,9 +246,31 @@ export function App() {
   const [helperOpen, setHelperOpen] = useState(false);
   const [helperBusy, setHelperBusy] = useState(false);
   /** What Blurry with Claude sees and does, kept current on every render (his answers outlive a render). */
-  const helperNow = useRef<{ context: HelperContext; apply: (c: HelperChange) => void } | null>(null);
+  const helperNow = useRef<{ context: HelperContext; apply: (c: HelperChange, group: string) => void } | null>(null);
   const helperContext = useCallback(() => helperNow.current!.context, []);
-  const helperApply = useCallback((c: HelperChange) => helperNow.current!.apply(c), []);
+  const helperApply = useCallback((c: HelperChange, group: string) => helperNow.current!.apply(c, group), []);
+  /** Blurry waiting to hear how the part came out after its changes. */
+  const helperWaiting = useRef<((r: BuildReport) => void)[]>([]);
+  const helperBuild = useRef<BuildReport | null>(null);
+  const helperWhenBuilt = useCallback(
+    () =>
+      new Promise<BuildReport>((resolve) => {
+        if (helperBuild.current) return resolve(helperBuild.current);
+        helperWaiting.current.push(resolve);
+        // A build that never settles (the engine stopped) still gets an honest answer.
+        setTimeout(() => {
+          const i = helperWaiting.current.indexOf(resolve);
+          if (i < 0) return;
+          helperWaiting.current.splice(i, 1);
+          resolve({
+            ok: false,
+            problems: ["The part is still being built, so I can't tell yet whether it worked."],
+            size: null,
+          });
+        }, 90_000);
+      }),
+    [],
+  );
   const waitingStep = useRef<{ title: string; count: number } | null>(null);
   /** Threaded hole: how many steps there were when it started; the next hole added gets the Thread dialog. */
   const threadNext = useRef<number | null>(null);
@@ -459,6 +486,7 @@ export function App() {
       client.rebuild(shownDoc).then(
         (r) => {
           if (r.status === "superseded") return;
+          builtFrom.current = shownDoc;
           setBuilding(false);
           if (r.status === "built") {
             meshRef.current = r.mesh;
@@ -481,6 +509,22 @@ export function App() {
   const shownCurrent = inputOk && !building && !hasErrors(kernelIssues) && built?.doc === shownDoc;
   const upToDate = shownCurrent && shownDoc === modelDoc;
   const exportable = upToDate && !empty;
+  // How the part came out, for Blurry: settled only once the engine has answered for exactly this document.
+  const builtSize = built && built.doc === shownDoc ? partSizeText(built.measurements.size) : null;
+  helperBuild.current = empty
+    ? { ok: true, problems: [], size: null }
+    : !inputOk
+      ? { ok: false, problems: problemLines(inputIssues, shownDoc), size: null }
+      : building || builtFrom.current !== shownDoc
+        ? null
+        : hasErrors(kernelIssues)
+          ? { ok: false, problems: problemLines(kernelIssues, shownDoc), size: null }
+          : { ok: true, problems: [], size: builtSize };
+  useEffect(() => {
+    const report = helperBuild.current;
+    if (!report || helperWaiting.current.length === 0) return;
+    helperWaiting.current.splice(0).forEach((resolve) => resolve(report));
+  });
 
   // Print Studio checks the exact STL that would go to a slicer, made from the design as it is now.
   const printer = printerById(doc.print?.printer);
@@ -2297,16 +2341,28 @@ export function App() {
   helperNow.current = {
     context: {
       doc,
-      units: isImperial() ? "in" : "mm",
+      units: `${LENGTH_STYLES[getLengthStyle()].label.toLowerCase()} (like ${lengthText(25.4 * 5.25)})`,
       picked: edgePicks,
-      selected: selected?.name ?? null,
+      selected: selected ? `${selected.name} (${selected.type})` : null,
       commands: commands.filter((c) => !c.disabled).map((c) => c.title),
+      workspace: `${printing ? "in Print Studio, getting the part ready to print" : "designing the part"}, in ${experience} mode`,
+      size: builtSize,
     },
-    apply: (change) => {
-      if (change.kind === "add") addAndSelect(change.feature);
-      else if (change.kind === "update") project.updateFeature(change.id, change.patch);
-      else if (change.kind === "remove") project.removeFeature(change.id);
-      else commands.find((c) => c.title === change.title && !c.disabled)?.run();
+    // Every change for one question is one undo step, and goes through the same checks as a typed change.
+    apply: (change, group) => {
+      if (change.kind === "command") {
+        commands.find((c) => c.title === change.title && !c.disabled)?.run();
+        return;
+      }
+      project.editAs((d) => applyChange(d, change), GROUP_KEY + group);
+      if (change.kind === "add") {
+        if (
+          (change.feature.type === "fillet" || change.feature.type === "chamfer") &&
+          change.feature.edges === "picked"
+        )
+          setEdgePicks([]);
+        setSelection({ id: change.feature.id, face: null });
+      } else if (change.kind === "remove" && selection?.id === change.id) setSelection(null);
     },
   };
   /** After a typed command, the size it asks for (see the effect that sets the prompt). */
@@ -2457,6 +2513,7 @@ export function App() {
           hidden={!!draft || focus || !can.helper}
           context={helperContext}
           apply={helperApply}
+          whenBuilt={helperWhenBuilt}
           onBusy={setHelperBusy}
           panelRef={helperPanel}
         />
@@ -2978,4 +3035,19 @@ function holeWallOfRim(mesh: MeshData, edge: number): number {
     const t = v[0]! * d[0] + v[1]! * d[1] + v[2]! * d[2];
     return Math.hypot(...v.map((x, i) => x - t * d[i]!)) < 1e-6;
   });
+}
+
+/** A part's outside size for reading: "60 mm wide, 40 mm deep, 30 mm tall". */
+function partSizeText([x, y, z]: readonly number[]): string {
+  return `${lengthText(x!)} wide, ${lengthText(y!)} deep, ${lengthText(z!)} tall`;
+}
+
+/** The errors that stopped a build, each naming its step. */
+function problemLines(issues: Issue[], doc: ProjectDocument): string[] {
+  return issues
+    .filter((i) => i.severity === "error")
+    .map((i) => {
+      const step = doc.features.find((f) => f.id === i.featureId);
+      return step && !i.message.includes(step.name) ? `${step.name}: ${i.message}` : i.message;
+    });
 }
