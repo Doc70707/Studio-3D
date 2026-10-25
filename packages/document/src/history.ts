@@ -35,6 +35,16 @@ export function record(h: History, next: ProjectDocument, key: string | null, no
   return { past, present: next, future: [], lastKey: key, lastAt: now };
 }
 
+/**
+ * Takes back the last step as if it never happened, when it is the one made under `key`: for a change that turned
+ * out not to work (a helper's change the part couldn't be built with). Unlike undo, it can't be redone.
+ */
+export function withdraw(h: History, key: string): History {
+  const prev = h.past[h.past.length - 1];
+  if (!prev || h.lastKey !== key) return h;
+  return { past: h.past.slice(0, -1), present: prev, future: h.future, lastKey: null, lastAt: 0 };
+}
+
 export const canUndo = (h: History) => h.past.length > 0;
 export const canRedo = (h: History) => h.future.length > 0;
 

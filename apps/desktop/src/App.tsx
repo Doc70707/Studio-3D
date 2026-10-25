@@ -519,7 +519,7 @@ export function App() {
         ? null
         : hasErrors(kernelIssues)
           ? { ok: false, problems: problemLines(kernelIssues, shownDoc), size: null }
-          : { ok: true, problems: [], size: builtSize };
+          : { ok: true, problems: [], warnings: problemLines(issues, shownDoc, "warning"), size: builtSize };
   useEffect(() => {
     const report = helperBuild.current;
     if (!report || helperWaiting.current.length === 0) return;
@@ -2347,6 +2347,7 @@ export function App() {
       commands: commands.filter((c) => !c.disabled).map((c) => c.title),
       workspace: `${printing ? "in Print Studio, getting the part ready to print" : "designing the part"}, in ${experience} mode`,
       size: builtSize,
+      top: built && built.doc === shownDoc ? built.measurements.max[2] : null,
     },
     // Every change for one question is one undo step, and goes through the same checks as a typed change.
     apply: (change, group) => {
@@ -2514,6 +2515,7 @@ export function App() {
           context={helperContext}
           apply={helperApply}
           whenBuilt={helperWhenBuilt}
+          takeBack={(group) => project.withdraw(GROUP_KEY + group)}
           onBusy={setHelperBusy}
           panelRef={helperPanel}
         />
@@ -3042,10 +3044,10 @@ function partSizeText([x, y, z]: readonly number[]): string {
   return `${lengthText(x!)} wide, ${lengthText(y!)} deep, ${lengthText(z!)} tall`;
 }
 
-/** The errors that stopped a build, each naming its step. */
-function problemLines(issues: Issue[], doc: ProjectDocument): string[] {
+/** The errors that stopped a build (or its warnings), each naming its step. */
+function problemLines(issues: Issue[], doc: ProjectDocument, severity: Issue["severity"] = "error"): string[] {
   return issues
-    .filter((i) => i.severity === "error")
+    .filter((i) => i.severity === severity)
     .map((i) => {
       const step = doc.features.find((f) => f.id === i.featureId);
       return step && !i.message.includes(step.name) ? `${step.name}: ${i.message}` : i.message;

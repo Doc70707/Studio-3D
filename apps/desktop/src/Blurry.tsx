@@ -6,7 +6,8 @@ import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
 import { answer, type Answer } from "./helperAnswers";
 import { askClaude, problemText, type BuildReport, type HelperContext } from "./helperAI";
-import type { HelperChange } from "./helperTools";
+import { planTool, type HelperChange } from "./helperTools";
+import { planLocal, type LocalPlan } from "./helperLocal";
 import type { Command } from "./commands";
 import { whereIs } from "./CommandLine";
 import { Icon } from "./Icon";
@@ -26,7 +27,7 @@ interface Said {
 }
 
 const HELLO =
-  "Hi, I'm Blurry. Ask me how to do something, or tell me what to add: a hole, rounded edges, a thread. I'll find it for you.";
+  'Hi, I\'m Blurry. Tell me what to make, like "add a 20 mm cube" or "an M5 hole 10 deep", or ask me how to do something.';
 const HELLO_CLAUDE =
   'Hi, I\'m Blurry, with Claude turned on. Ask me anything about your part, or tell me what to make: "add a 20 mm cube", "put an M5 thread in the hole".';
 const STARTERS = ["How do I thread a hole?", "Round just one edge", "Work in inches", "Get it ready to print"];
@@ -45,6 +46,8 @@ export interface BlurryProps {
   apply: (change: HelperChange, group: string) => void;
   /** Waits for the part to be rebuilt, and says how it came out. */
   whenBuilt: () => Promise<BuildReport>;
+  /** Takes back a group of changes that didn't work, leaving no undo step behind. */
+  takeBack: (group: string) => void;
   /** Told when Claude starts and stops answering, so his button can glow meanwhile. */
   onBusy: (busy: boolean) => void;
   /** His open panel, which the 3D view keeps the part clear of. */
@@ -98,6 +101,12 @@ export function Blurry(props: BlurryProps) {
     setText("");
     add({ from: "you", text: question });
     if (!key) {
+      const now = props.context();
+      const plan = planLocal(question, { top: now.top ?? null, picked: now.picked.length });
+      if (plan) {
+        void makeLocally(plan);
+        return;
+      }
       const a = answer(question, props.commands);
       add({ from: "blurry", text: a.text, answer: a });
       return;
@@ -135,6 +144,47 @@ export function Blurry(props: BlurryProps) {
         stopper.current = null;
         setBusy(false);
       });
+  };
+
+  /**
+   * Makes what a request read on this computer asks for, through the same checks as Claude's changes. Nothing is
+   * said to be done until the part has been rebuilt; a change that doesn't build is taken back and explained.
+   */
+  const makeLocally = async (plan: LocalPlan) => {
+    const id = add({ from: "blurry", text: "", pending: true, actions: [] });
+    setBusy(true);
+    const group = `blurry-${Date.now()}-${id}`;
+    const made: string[] = [];
+    let refused: string | null = null;
+    for (const call of plan.calls) {
+      const c = props.context();
+      const outcome = planTool(c.doc, call.tool, call.input, { picked: c.picked, commands: c.commands });
+      if (!outcome.ok) {
+        refused = outcome.error;
+        break;
+      }
+      props.apply(outcome.change, group);
+      made.push(outcome.said);
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    const report = made.length ? await props.whenBuilt() : null;
+    let reply: string;
+    let actions = made.map((said) => ({ said, ok: true }));
+    if (report && !report.ok) {
+      // Leave the part as it was, and say why.
+      props.takeBack(group);
+      actions = [{ said: `It didn't build: ${report.problems.join(" ")}`, ok: false }];
+      reply = "I tried, but the part didn't build with that, so I took it back. Try other sizes or another place.";
+    } else if (refused) {
+      reply = `I couldn't do that: ${refused}`;
+    } else {
+      const sizes = plan.assumed.length ? ` You didn't say a size, so I used ${plan.assumed.join(" and ")}.` : "";
+      const size = report?.size ? ` The part is now ${report.size}.` : "";
+      const heads = report?.warnings?.length ? ` But note: ${report.warnings.join(" ")}` : "";
+      reply = `Done.${sizes}${size}${heads} Ctrl+Z takes it back.`;
+    }
+    change(id, (m) => ({ ...m, pending: false, text: reply, actions }));
+    setBusy(false);
   };
 
   const run = (c: Command) => {

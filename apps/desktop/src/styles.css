@@ -2088,11 +2088,12 @@ input:focus-visible {
 .selection-bar {
   position: absolute;
   top: calc(var(--safe-top, 76px) + 12px);
-  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px)) / 2);
+  /* Centred in the open view left of the view controls (76 px wide, 12 px from the edge), never under them. */
+  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px) - 100px) / 2);
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - 2 * var(--gap));
+  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - 100px - 2 * var(--gap));
   padding: 8px 8px 8px 16px;
   border-radius: 16px;
   background: var(--glass-strong);

@@ -56,12 +56,16 @@ export interface HelperContext {
   workspace?: string;
   /** The part's outside size as last built, in the units shown, or null with nothing built. */
   size?: string | null;
+  /** The height of the part's top in millimetres, for "on top", or null with nothing built. */
+  top?: number | null;
 }
 
 /** How the part came out after a change: built, or the problems that stopped it. */
 export interface BuildReport {
   ok: boolean;
   problems: string[];
+  /** Built, but worth knowing: a piece that doesn't touch the rest, a hole that cuts nothing. */
+  warnings?: string[];
   size: string | null;
 }
 
@@ -106,7 +110,10 @@ function contextText(c: HelperContext): string {
 
 /** What a tool call's result says once the part has been rebuilt after it. */
 export function buildText(r: BuildReport): string {
-  if (r.ok) return r.size ? `The part built fine; it is now ${r.size}.` : "The plate is empty now.";
+  if (r.ok) {
+    const built = r.size ? `The part built fine; it is now ${r.size}.` : "The plate is empty now.";
+    return r.warnings?.length ? `${built} The app warns: ${r.warnings.join(" ")}` : built;
+  }
   return `But the part didn't build: ${r.problems.join(" ")} Fix that step or remove it, or tell the person why.`;
 }
 

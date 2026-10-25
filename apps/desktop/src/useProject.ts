@@ -18,6 +18,7 @@ import {
   serializeRecovery,
   startHistory,
   undo as undoStep,
+  withdraw,
   type Feature,
   type Preserved,
   type PrintSetup,
@@ -166,6 +167,8 @@ export function useProject() {
   );
 
   const undo = useCallback(() => setHistory(undoStep), []);
+  /** Takes back the last step without a trace if it was made under `key`. */
+  const withdrawStep = useCallback((key: string) => setHistory((h) => withdraw(h, key)), []);
   const redo = useCallback(() => setHistory(redoStep), []);
 
   const run = useCallback(async (task: () => Promise<void>) => {
@@ -381,6 +384,7 @@ export function useProject() {
       run,
       /** Any checked change as one undoable step; changes sharing a "group:" key stay one step. */
       editAs: edit,
+      withdraw: withdrawStep,
       updateFeature,
       addFeature,
       addSteps,
@@ -414,6 +418,7 @@ export function useProject() {
       busy,
       run,
       edit,
+      withdrawStep,
       updateFeature,
       addFeature,
       addSteps,
