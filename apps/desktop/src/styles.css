@@ -2088,12 +2088,11 @@ input:focus-visible {
 .selection-bar {
   position: absolute;
   top: calc(var(--safe-top, 76px) + 12px);
-  /* Centred in the open view left of the view controls (76 px wide, 12 px from the edge), never under them. */
-  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px) - 100px) / 2);
+  left: calc(var(--safe-left, 0px) + (100% - var(--safe-left, 0px) - var(--safe-right, 0px)) / 2);
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - 100px - 2 * var(--gap));
+  max-width: calc(100% - var(--safe-left, 0px) - var(--safe-right, 0px) - 2 * var(--gap));
   padding: 8px 8px 8px 16px;
   border-radius: 16px;
   background: var(--glass-strong);
@@ -2690,17 +2689,27 @@ button.link:hover {
   box-shadow: var(--shadow);
 }
 
-/* Floating: frosted glass over the 3D view, with the view showing between. */
+/* Floating: the tools are a few frosted cards over the 3D view, the same distance from each other and from the
+   window's edges. The menus and the tools are one card along the top, each palette is only as tall as what it holds,
+   and the 3D view shows everywhere else (clicks there reach it). */
 
 .style-floating {
-  gap: 12px var(--gap);
+  --gap: 12px;
+  /* The gaps between rows are margins, so the bar and its tools can touch, and a minimised ribbon leaves none. */
+  gap: 0 var(--gap);
   padding: var(--gap);
 }
 
-.style-floating .topbar {
-  padding: 0;
+.style-floating > .dock,
+.style-floating > .statusbar {
+  margin-top: var(--gap);
 }
 
+:root[data-density="compact"] .style-floating {
+  --gap: 8px;
+}
+
+.style-floating .topbar,
 .style-floating .ribbon,
 .style-floating .palette {
   background: var(--glass-strong);
@@ -2711,9 +2720,30 @@ button.link:hover {
   box-shadow: var(--shadow);
 }
 
-.style-floating .ribbon {
+/* The header card: the bar's pills melt into it, so it reads as one surface instead of four. */
+.style-floating .topbar {
+  padding: 3px 6px;
   border-radius: var(--radius-lg);
-  overflow: visible;
+}
+
+.style-floating .topbar > .glass {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* With the tools showing, they are the lower half of the same card, under a hairline. */
+.style-floating:has(> .ribbon:not(.minimized)) > .topbar {
+  border-bottom-color: transparent;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: none;
+}
+
+.style-floating .ribbon {
+  border-top-color: var(--glass-edge);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 .style-floating .ribbon-panel {
@@ -2722,25 +2752,87 @@ button.link:hover {
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
+/* Minimised, the tools aren't part of the card: a tab's tools drop down under it as their own card. */
+.style-floating .ribbon.minimized {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .style-floating .ribbon.minimized .ribbon-panel {
+  margin-top: var(--gap);
   background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-edge);
   border-radius: var(--radius-lg);
-  margin-top: 6px;
+}
+
+/* Palettes are as tall as their contents, up to the room there is, and scroll beyond that. */
+.style-floating .dock {
+  pointer-events: none;
+}
+
+.style-floating .dock > * {
+  pointer-events: auto;
 }
 
 .style-floating .palette {
+  align-self: flex-start;
+  height: auto;
+  max-height: 100%;
+  border-radius: var(--radius-lg);
+}
+
+/* Folded, a palette is a small tab with its name, not a strip down the whole window. */
+.style-floating .palette.collapsed .palette-strip {
+  height: max-content;
+  padding: 16px 0;
   border-radius: var(--radius-lg);
 }
 
 .style-floating .palette-header {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom-color: var(--glass-edge);
 }
 
 .style-floating .dock:empty {
   display: none;
 }
 
+/* What floats inside the view keeps the same distance from the cards as they keep from each other. */
+.style-floating .view-nav {
+  top: calc(var(--safe-top, 76px) + var(--gap));
+  right: calc(var(--safe-right, 0px) + var(--gap));
+}
+
+.style-floating .blurry,
+.style-floating .command-dock {
+  bottom: calc(var(--status-room, 54px) + var(--gap));
+}
+
+/* Focus canvas keeps only the bar, as small pills over the view. */
+.style-floating.focus > .topbar {
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.style-floating.focus > .topbar > .glass {
+  background: var(--glass);
+  border-color: var(--glass-edge);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+
 @media (prefers-reduced-transparency: reduce) {
+  .style-floating .topbar,
   .style-floating .ribbon,
   .style-floating .palette {
     -webkit-backdrop-filter: none;
@@ -3468,10 +3560,6 @@ button.link:hover {
 .ribbon-button .icon {
   width: 20px;
   height: 20px;
-}
-
-.style-floating .ribbon {
-  border-radius: var(--radius-md);
 }
 
 /* ---------- Snaps menu and "mid between 2 points" (v0.34) ---------- */
