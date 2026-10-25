@@ -137,8 +137,10 @@ What works today:
   tabs that minimises to its tab names (double-click a tab, as in Civil 3D); a Browser palette with the part's steps
   and a Properties palette with the sizes of the step being worked on. Palettes fold to a strip, resize from their
   inner edge (drag or arrow keys), swap sides and hide; View > Reset workspace puts everything back. Docked (solid,
-  against the edges) or Floating (frosted glass over the view). The layout is remembered on this computer, and the
-  part stays centred in the space the palettes leave open.
+  against the edges) or Floating: a few frosted cards over the view, the menus and tools as one card along the top,
+  each palette only as tall as what it holds (folded, a small tab), all the same 12 px from each other and the
+  window's edges, with the 3D view showing and taking clicks everywhere else. The layout is remembered on this
+  computer, and the part stays centred in the space the palettes leave open.
 - Kids, Easy or Advanced: asked at the first start (Easy is recommended) and changed any time in Settings >
   Experience. Kids shows a few big shape buttons and Hollow, with no menus, command line or AI helper. Easy keeps the
   everyday tools in the ribbon and the rarer ones (chamfer, pattern, mirror, revolve) one menu away. Advanced shows
@@ -231,18 +233,26 @@ What works today:
   let go of all. Then Fillet or Chamfer on the bar that appears, the ribbon, the menu, or FILLET in the command line,
   rounds just those. The edges are kept by where their middles are, so an earlier change that moves one says so
   plainly instead of rounding the wrong edge.
-- Blurry, the built-in helper: the glowing neon ghost from the Blurry app's own icon, in the status bar (or Ctrl+K). Ask in your own words ("how
-  do I thread a hole?", "make a cube", "work in inches"); he answers with short steps from the app's own how-tos and
-  offers the real commands as buttons, each showing where it lives on the ribbon so you learn it. A button runs the
-  same step the menus make, undone with Ctrl+Z. He works with no internet and no account, and says plainly when he
-  doesn't know. Nothing of his sits over the 3D view until asked: his panel opens above the status bar, and the part
+- Blurry, the built-in helper: the glowing neon ghost from the Blurry app's own icon, in the status bar (or Ctrl+K).
+  He glows in the accent colour picked in Settings, changing with it at once, on light and dark themes. Ask in your
+  own words ("how do I thread a hole?", "work in inches"); he answers with short steps from the app's own how-tos
+  and offers the real commands as buttons, each showing where it lives on the ribbon so you learn it. Tell him what
+  to make and he makes it, even with no key and no internet: "add a 20 mm cube", "a cylinder 12 wide and 40 tall",
+  "an M5 hole 10 deep", "round the top edges 2 mm", "hollow it with 2 mm walls" (sizes in the units shown unless
+  you write others; new shapes stand on the part's top). He says which sizes he chose when you gave none, says
+  "Done" only once the part has been rebuilt with the change, and when it can't be built he takes it back and says
+  why. Anything else he says plainly he doesn't know. Nothing of his sits over the 3D view until asked: his panel opens above the status bar, and the part
   slides aside to stay in full view. He steps aside while you sketch; Esc or Ctrl+K puts him away.
 - Blurry with Claude (optional, your own Anthropic API key, entered under the key button in his panel): he then
   answers anything about your part in plain words and makes what you ask for, such as "add a 20 mm cube" or "put an
-  M5 thread in Hole 1". He works only through a short list of tools (add a shape, add a hole, round or chamfer
-  edges, hollow out, change or remove a step, run one of the app's commands), and every change is checked exactly
-  as a typed step is before it touches the part, so a bad request is refused with the reason and nothing half-done
-  is left. Each change is one undo step; each answer shows roughly what it cost on your Anthropic account. The key
+  M5 thread in Hole 1", or from a description ("a small L bracket with two screw holes", "a vase"). He works only
+  through a short list of tools (add a shape, add a hole, round or chamfer edges, hollow out, draw outlines on the
+  level, front or side plane and push or spin them into solids, copy, pattern or mirror a step, change or remove a
+  step, run one of the app's commands), and every change is checked exactly as a typed step is before it touches
+  the part. After his changes the part is rebuilt and he is told whether it built, its warnings and its new size,
+  so he never says something was made when it wasn't; a step that didn't build is shown as not done. He also knows
+  the workspace, the mode, what is selected and the unit style. Everything he does for one request is one undo
+  step; each answer shows roughly what it cost on your Anthropic account. The key
   is kept in Windows Credential Manager, never in a file, and is sent only to Anthropic. Without a key, or with no
   internet, he answers from his own how-tos as before. Model: Claude Opus 5.5.
 - Feel: the camera glides to a new view on a critically damped spring and can be grabbed mid-way; on/off and
