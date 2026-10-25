@@ -1,7 +1,20 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { boundsRadius, placeCamera, type Bounds, type StandardView } from "./views";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import {
+  boundsCenter,
+  boundsRadius,
+  fitDistance,
+  orthoHalfHeight,
+  perspectiveDistance,
+  placeCamera,
+  type Bounds,
+  type Projection,
+  type StandardView,
+} from "./views";
 import { dimensionLines, labelPoint, type Dimension } from "./dimensions";
+import { INCH_GRID, MM_GRID, buildGround, snapStep, type GridScale } from "./grid";
+import { blendPose, prefersReducedMotion, settled, springProgress, type Pose } from "./glide";
 
 export interface ViewportOptions {
   /** Build plate size in millimetres. */
@@ -17,7 +30,44 @@ export interface DisplayMesh {
   edges: Float32Array;
 }
 
+/** Part edges are drawn a little see-through, so they define the shape without outlining it like a cartoon. */
+const EDGE_OPACITY = 0.6;
+
 /** Pixels along each edge of the view that floating panels cover. The scene is centred and fitted in the rest. */
+/** The colours of the part and the build plate, so they can follow the app's theme and the user's choice. */
+export interface ViewportColors {
+  part: number;
+  /** The part's edge lines: darker than the part on a light part, lighter on a dark one. */
+  edge: number;
+  plate: number;
+  gridMinor: number;
+  gridMajor: number;
+  /** The part's measurement lines: light on a dark background, dark on a light one. */
+  dimension?: number;
+}
+
+/**
+ * What lies around the part while designing: a build plate of a chosen size, or none, so the part floats on a plain
+ * background with only a grid, as in AutoCAD's model space. The grid can be hidden either way (F7).
+ */
+export interface Surroundings {
+  plate: boolean;
+  grid: boolean;
+}
+
+/** Without a plate, the grid reaches this far each way from the middle (mm), fading towards its edge. */
+export const MODEL_SPACE_REACH = 10000;
+/** With no part, the standard views frame at most this much of a big plate (mm), so the start isn't a speck. */
+const HOME_AREA = 300;
+
+export const DEFAULT_VIEWPORT_COLORS: ViewportColors = {
+  part: 0x6cb4ff,
+  edge: 0x123a6b,
+  plate: 0x1b2233,
+  gridMinor: 0x2f3a52,
+  gridMajor: 0x4a5878,
+};
+
 export interface SafeArea {
   top: number;
   right: number;
@@ -27,8 +77,11 @@ export interface SafeArea {
 
 export interface CameraState {
   view: StandardView | "custom";
+  projection: Projection;
   position: [number, number, number];
   target: [number, number, number];
+  /** The orthographic camera's zoom (scrolling changes this instead of moving the camera); 1 in perspective. */
+  zoom: number;
 }
 
 const FOV = 45;
@@ -45,6 +98,16 @@ const AXIS_DIRS: Record<Axis, [number, number, number]> = { x: [1, 0, 0], y: [0,
 const AXIS_COLORS: Record<Axis, number> = { x: 0xf0605a, y: 0x5fd068, z: 0x5b9cff };
 /** How long the move arrows look on screen, in pixels. */
 const GIZMO_PIXELS = 90;
+
+/** A reference picture to show: where its corners are and how see-through it is. */
+export interface ReferencePicture {
+  id: string;
+  /** The picture (a data: URL). */
+  src: string;
+  corners: [number, number, number][];
+  opacity: number;
+  onTop: boolean;
+}
 
 /** True when this browser/webview can create a WebGL2 context. */
 export function isWebGLAvailable(): boolean {
@@ -63,15 +126,28 @@ export function isWebGLAvailable(): boolean {
 export class Viewport {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
+  private readonly perspectiveCamera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 20000);
+  private readonly orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 40000);
+  /** The camera in use: perspective or orthographic. Both sit in the same place and look at the same point. */
+  private camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.perspectiveCamera;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private plateBounds: Bounds;
+  private plate: THREE.Group;
   /** What the standard views frame: the part with room around it for its measurements, or the plate when empty. */
   private framed: Bounds | null = null;
   private partBounds: Bounds | null = null;
   private view: StandardView | "custom" = "iso";
   private frameRequested = false;
+  private grid: GridScale = MM_GRID;
+  /** The part's soft shadow on the plate. */
+  private shadow: THREE.Mesh | null = null;
+  /** The camera's glide to a new view, while one is running. */
+  private glideFrame = 0;
+  private gliding = false;
+  private glideGoal: Pose | null = null;
+  /** Set once the view is on screen: the first view is placed, not glided to. */
+  private ready = false;
   private listeners = new Set<(s: CameraState) => void>();
   private model: THREE.Group | null = null;
   private surface: THREE.Mesh | null = null;
@@ -89,11 +165,28 @@ export class Viewport {
   } | null = null;
   private moveListeners = new Set<(e: MoveEvent) => void>();
   private sketchLines: THREE.LineSegments | null = null;
+  private threadMarks: THREE.LineSegments | null = null;
+  private edgePicks: THREE.Group | null = null;
+  private layers: THREE.Group | null = null;
+  private references: THREE.Group | null = null;
+  /** Pictures already loaded, by id, so changing a picture's place or see-through doesn't load it again. */
+  private textures = new Map<string, { src: string; texture: THREE.Texture }>();
   private readonly raycaster = new THREE.Raycaster();
   private dimensionGroup: THREE.Group | null = null;
-  private labels: { el: HTMLElement; at: THREE.Vector3 }[] = [];
+  private colors: ViewportColors = DEFAULT_VIEWPORT_COLORS;
+  private plateSize: { width: number; depth: number; volume?: { height: number; fits: boolean } } = {
+    width: 0,
+    depth: 0,
+  };
+  private surroundings: Surroundings = { plate: true, grid: true };
+  /** How far the camera is from what it looks at; grid lines fade out a few times further away than that. */
+  private readonly gridFocus = { value: 1e9 };
+  private labels: { el: HTMLElement; at: THREE.Vector3; from: THREE.Vector3; to: THREE.Vector3 }[] = [];
   private readonly labelLayer: HTMLDivElement;
   private safeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
+  /** Where the open area is gliding to, while it is. */
+  private safeAreaGoal: SafeArea | null = null;
+  private areaFrame = 0;
   /** Vertical field of view and aspect of the uncovered area, used to fit standard views. */
   private fit = { fov: FOV, aspect: 1 };
 
@@ -119,12 +212,25 @@ export class Viewport {
     container.appendChild(this.labelLayer);
 
     this.camera.up.set(0, 0, 1);
+    this.orthoCamera.up.set(0, 0, 1);
 
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-    sun.position.set(200, -300, 400);
-    this.scene.add(sun);
-    this.scene.add(buildPlate(w, d));
+    // A soft studio: a room's light reflected in the part, a key light from above, and a dim fill from the other side
+    // so no face goes black. Neutral tone mapping keeps the part's colour true to the filament picked.
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.6;
+    pmrem.dispose();
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3f4a, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 1.6);
+    key.position.set(120, -180, 400);
+    this.scene.add(key);
+    const fill = new THREE.DirectionalLight(0xdfe8ff, 0.45);
+    fill.position.set(-300, 250, 150);
+    this.scene.add(fill);
+    this.plateSize = { width: w, depth: d };
+    this.plate = this.buildSurroundings();
+    this.scene.add(this.plate);
 
     // Dragging a move arrow comes before orbiting: registered first, on the capture phase, so the orbit never sees it.
     const canvas = this.renderer.domElement;
@@ -136,37 +242,162 @@ export class Viewport {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
     this.controls.screenSpacePanning = true;
+    // Mouse like AutoCAD and Civil 3D: hold the wheel to pan, Shift + wheel to orbit, scroll to zoom at the pointer.
+    // Left-drag still orbits and right-drag still pans. (OrbitControls orbits when Shift is held with a pan button.)
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+    this.controls.zoomToCursor = true;
+    // Pressing the wheel would otherwise start the browser's auto-scroll; a double-click of the wheel fits the part.
+    // Double-clicking the wheel fits everything on screen (as in AutoCAD). The browser counts the clicks, using the
+    // system's double-click speed.
+    canvas.addEventListener("auxclick", (e) => {
+      if (e.button === 1 && e.detail === 2) this.zoomExtents();
+    });
+    canvas.addEventListener("pointerdown", (e) => e.button === 1 && e.preventDefault()); // no autoscroll
     this.controls.addEventListener("change", () => {
-      this.view = "custom";
+      if (!this.gliding) this.view = "custom";
       this.requestRender();
     });
-    this.controls.addEventListener("start", () => (this.view = "custom"));
+    // Grabbing the view mid-glide stops the glide where it is, so the camera follows the mouse at once.
+    this.controls.addEventListener("start", () => {
+      this.stopGlide();
+      this.view = "custom";
+    });
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
     this.setView("iso");
+    this.ready = true;
   }
 
   setView(view: StandardView): void {
     if (this.partBounds) this.framed = roomAround(this.partBounds);
     const p = placeCamera(view, this.framed ?? this.plateBounds, this.fit.fov, this.fit.aspect);
-    this.camera.up.set(...p.up);
-    this.camera.position.set(...p.position);
-    this.controls.target.set(...p.target);
+    this.moveCamera({
+      position: new THREE.Vector3(...p.position),
+      target: new THREE.Vector3(...p.target),
+      up: new THREE.Vector3(...p.up),
+    });
+    this.view = view;
+  }
+
+  /**
+   * Moves the camera to a new pose: a short glide that turns, slides and zooms together, or a jump when the person's
+   * system asks for less motion or the view isn't on screen yet.
+   */
+  private moveCamera(to: Pose): void {
+    this.stopGlide();
+    const from: Pose = {
+      position: this.camera.position.clone(),
+      target: this.controls.target.clone(),
+      up: this.camera.up.clone(),
+    };
+    const far = from.position.distanceTo(to.position) + from.target.distanceTo(to.target) + from.up.distanceTo(to.up);
+    if (!this.ready || prefersReducedMotion() || far < 1e-6) return this.poseCamera(to);
+    const start = performance.now();
+    this.gliding = true;
+    this.glideGoal = to;
+    this.container.dataset.cameraGliding = "true";
+    const step = (now: number) => {
+      const k = springProgress((now - start) / 1000);
+      if (settled(k)) {
+        this.poseCamera(to);
+        this.stopGlide();
+        return;
+      }
+      this.poseCamera(blendPose(from, to, k));
+      this.glideFrame = requestAnimationFrame(step);
+    };
+    this.glideFrame = requestAnimationFrame(step);
+  }
+
+  private poseCamera(p: Pose): void {
+    this.camera.up.copy(p.up);
+    this.camera.position.copy(p.position);
+    this.controls.target.copy(p.target);
     this.camera.lookAt(this.controls.target);
+    this.frameOrtho();
+    this.controls.update();
+    this.requestRender();
+  }
+
+  private stopGlide(): void {
+    if (this.glideFrame) cancelAnimationFrame(this.glideFrame);
+    this.glideFrame = 0;
+    this.gliding = false;
+    this.glideGoal = null;
+    delete this.container.dataset.cameraGliding;
+  }
+
+  /** Puts the camera where a running glide is heading, at once (before switching projection, say). */
+  private finishGlide(): void {
+    const goal = this.glideGoal;
+    if (!goal) return;
+    const view = this.view;
+    this.poseCamera(goal);
+    this.stopGlide();
+    this.view = view;
+  }
+
+  get projection(): Projection {
+    return this.camera === this.orthoCamera ? "orthographic" : "perspective";
+  }
+
+  /**
+   * Switches between perspective and a true orthographic projection (parallel lines stay parallel). The camera keeps
+   * its place, direction and target, and the part stays the same size on screen.
+   */
+  setProjection(projection: Projection): void {
+    if (projection === this.projection) return;
+    this.finishGlide();
+    const from = this.camera;
+    const target = this.controls.target;
+    const to = projection === "orthographic" ? this.orthoCamera : this.perspectiveCamera;
+    to.up.copy(from.up);
+    if (from instanceof THREE.OrthographicCamera) {
+      // Move back to the distance at which perspective shows what the zoomed orthographic view shows.
+      const d = perspectiveDistance(from.top, from.zoom, this.fullFov());
+      const dir = from.position.clone().sub(target).normalize();
+      to.position.copy(target).addScaledVector(dir, d);
+    } else to.position.copy(from.position);
+    to.lookAt(target);
+    this.camera = to;
+    this.controls.object = to;
+    this.frameOrtho();
+    this.resize();
+    const view = this.view; // the camera hasn't turned, so a standard view stays that view
     this.controls.update();
     this.view = view;
     this.requestRender();
   }
 
+  /**
+   * Sizes the orthographic camera to show, at the target, what perspective shows from the camera's distance, with
+   * zoom back at 1. Called whenever the camera is placed (standard views, fit, looking at a face).
+   */
+  private frameOrtho(): void {
+    if (this.camera !== this.orthoCamera) return;
+    const half = orthoHalfHeight(this.camera.position.distanceTo(this.controls.target), this.fullFov());
+    this.orthoCamera.zoom = 1;
+    this.orthoCamera.top = half;
+    this.orthoCamera.bottom = -half;
+    this.applyAspect();
+  }
+
+  /** The vertical field of view of the whole (virtual) frame, which includes the parts panels cover. */
+  private fullFov(): number {
+    return FOV;
+  }
+
   /** Shows a model, replacing the previous one. Pass null to clear. */
   setModel(mesh: DisplayMesh | null): void {
     if (this.model) {
+      ((this.shadow?.material as THREE.MeshBasicMaterial | undefined)?.map as THREE.Texture | null)?.dispose();
       this.scene.remove(this.model);
       disposeObject(this.model);
       this.model = null;
       this.surface = null;
+      this.shadow = null;
     }
     if (mesh) {
       const group = new THREE.Group();
@@ -177,10 +408,13 @@ export class Viewport {
       g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
       const surface = new THREE.Mesh(
         g,
-        new THREE.MeshStandardMaterial({
-          color: 0x6cb4ff,
-          roughness: 0.45,
-          metalness: 0.05,
+        // Satin plastic, like a good print: soft highlights and a faint sheen from the room.
+        new THREE.MeshPhysicalMaterial({
+          color: this.colors.part,
+          roughness: 0.5,
+          metalness: 0,
+          clearcoat: 0.25,
+          clearcoatRoughness: 0.45,
           polygonOffset: true,
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1,
@@ -190,9 +424,17 @@ export class Viewport {
       this.surface = surface;
       const e = new THREE.BufferGeometry();
       e.setAttribute("position", new THREE.BufferAttribute(mesh.edges, 3));
-      group.add(new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color: 0x123a6b })));
+      group.add(
+        new THREE.LineSegments(
+          e,
+          new THREE.LineBasicMaterial({ color: this.colors.edge, transparent: true, opacity: EDGE_OPACITY }),
+        ),
+      );
+      group.visible = !this.layers;
       this.scene.add(group);
       this.model = group;
+      this.shadow = contactShadow(mesh.positions, mesh.indices);
+      if (this.shadow) group.add(this.shadow);
     }
     this.requestRender();
   }
@@ -399,6 +641,173 @@ export class Viewport {
     this.requestRender();
   }
 
+  /**
+   * Shows edges picked for a fillet or chamfer (line pairs, x, y, z), drawn over the part, and the edge under the
+   * pointer that a click would pick, fainter. Null clears either.
+   */
+  setEdgePicks(picked: Float32Array | null, hover: Float32Array | null = null): void {
+    if (this.edgePicks) {
+      this.scene.remove(this.edgePicks);
+      disposeObject(this.edgePicks);
+      this.edgePicks = null;
+    }
+    const group = new THREE.Group();
+    group.name = "edge-picks";
+    const add = (lines: Float32Array | null, name: string, opacity: number) => {
+      if (!lines?.length) return;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(lines, 3));
+      const l = new THREE.LineSegments(
+        g,
+        new THREE.LineBasicMaterial({ color: 0xffc94d, depthTest: false, transparent: true, opacity }),
+      );
+      l.name = name;
+      l.renderOrder = 4;
+      group.add(l);
+    };
+    add(hover, "edge-hover", 0.55);
+    add(picked, "edge-picked", 1);
+    if (group.children.length) {
+      this.edgePicks = group;
+      this.scene.add(group);
+    }
+    this.requestRender();
+  }
+
+  /**
+   * Marks cosmetic threads (line pairs, x, y, z): dashed circles at the thread's full size where it starts and ends,
+   * seen through the part like hidden lines in a drawing. Null clears them.
+   */
+  setThreadMarks(lines: Float32Array | null): void {
+    if (this.threadMarks) {
+      this.scene.remove(this.threadMarks);
+      disposeObject(this.threadMarks);
+      this.threadMarks = null;
+    }
+    if (lines && lines.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(lines, 3));
+      const marks = new THREE.LineSegments(
+        g,
+        new THREE.LineDashedMaterial({
+          color: 0xffc94d,
+          dashSize: 0.8,
+          gapSize: 0.6,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.9,
+        }),
+      );
+      marks.computeLineDistances();
+      marks.name = "thread-marks";
+      marks.renderOrder = 3;
+      this.threadMarks = marks;
+      this.scene.add(marks);
+    }
+    this.requestRender();
+  }
+
+  /**
+   * Shows the part's sliced layers in its place, as outlines (x, y, z line pairs): the layers below the current one
+   * faint, and the current one's walls bright, its infill lines (`infill`) orange, over its filled area (`fill`: its
+   * outlines, x, y pairs, counter-clockwise outsides and clockwise holes, at height z). Null shows the part again.
+   */
+  setLayers(
+    layers: {
+      below: Float32Array;
+      current: Float32Array;
+      infill?: Float32Array;
+      fill?: { z: number; loops: Float64Array[] };
+    } | null,
+  ): void {
+    if (this.layers) {
+      this.scene.remove(this.layers);
+      disposeObject(this.layers);
+      this.layers = null;
+    }
+    if (layers) {
+      const group = new THREE.Group();
+      group.name = "layers";
+      const lines = (positions: Float32Array, color: number, opacity: number) => {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        const m = new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity });
+        return new THREE.LineSegments(g, m);
+      };
+      if (layers.below.length) group.add(lines(layers.below, 0x6cb4ff, 0.35));
+      if (layers.current.length) group.add(lines(layers.current, 0xffc94d, 1));
+      if (layers.infill?.length) group.add(lines(layers.infill, 0xff9a5c, 1));
+      if (layers.fill) {
+        const fill = new THREE.Mesh(
+          layerFill(layers.fill.loops),
+          new THREE.MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.45, side: THREE.DoubleSide }),
+        );
+        fill.position.z = layers.fill.z;
+        group.add(fill);
+      }
+      this.scene.add(group);
+      this.layers = group;
+    }
+    if (this.model) this.model.visible = !this.layers;
+    this.requestRender();
+  }
+
+  /**
+   * Shows reference pictures: each a flat picture with the given corners (bottom-left, bottom-right, top-right,
+   * top-left). They are only shown, never picked or measured. `onTop` draws one over the part instead of behind it.
+   */
+  setReferences(pictures: ReferencePicture[]): void {
+    if (this.references) {
+      this.scene.remove(this.references);
+      disposeObject(this.references);
+      this.references = null;
+    }
+    const keep = new Set(pictures.map((p) => p.id));
+    for (const [id, t] of this.textures)
+      if (!keep.has(id)) {
+        t.texture.dispose();
+        this.textures.delete(id);
+      }
+    if (!pictures.length) return this.requestRender();
+    const group = new THREE.Group();
+    group.name = "references";
+    for (const p of pictures) {
+      let cached = this.textures.get(p.id);
+      if (!cached || cached.src !== p.src) {
+        cached?.texture.dispose();
+        const texture = new THREE.TextureLoader().load(p.src, () => this.requestRender());
+        texture.colorSpace = THREE.SRGBColorSpace;
+        cached = { src: p.src, texture };
+        this.textures.set(p.id, cached);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(p.corners.flat()), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+      g.setIndex([0, 1, 2, 0, 2, 3]);
+      const mesh = new THREE.Mesh(
+        g,
+        new THREE.MeshBasicMaterial({
+          map: cached.texture,
+          transparent: true,
+          opacity: p.opacity,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          depthTest: !p.onTop,
+          // Lying on the plate, it is drawn just above the plate's own surface.
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -4,
+        }),
+      );
+      mesh.name = `reference:${p.id}`;
+      mesh.renderOrder = p.onTop ? 4 : 1;
+      group.add(mesh);
+    }
+    this.references = group;
+    this.scene.add(group);
+    this.requestRender();
+  }
+
   /** The point on the model under a point of the window, or null. */
   pickPoint(clientX: number, clientY: number): [number, number, number] | null {
     if (!this.surface) return null;
@@ -410,6 +819,24 @@ export class Viewport {
     this.raycaster.setFromCamera(ndc, this.camera);
     const hit = this.raycaster.intersectObject(this.surface, false)[0];
     return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  }
+
+  /** Where a point of the model is in the window (client pixels) and how deep, or null when behind the camera. */
+  toClient(p: [number, number, number]): [number, number, number] | null {
+    const v = new THREE.Vector3(...p).project(this.camera);
+    if (v.z > 1 || v.z < -1) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    // The third number is the depth: smaller is nearer the eye.
+    return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height, v.z];
+  }
+
+  /** The point on the plate (height 0) under a point of the window, or null when looking away from it. */
+  pickPlate(clientX: number, clientY: number): [number, number, number] | null {
+    const hit = this.ray(clientX, clientY).intersectPlane(
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+      new THREE.Vector3(),
+    );
+    return hit ? [hit.x, hit.y, 0] : null;
   }
 
   /** Shows measurement lines with labels that always face the screen. Replaces the previous ones. */
@@ -432,13 +859,14 @@ export class Viewport {
         const line = new THREE.LineSegments(
           g,
           new THREE.LineBasicMaterial({
-            color: kind === "part" ? 0xdfe6f5 : 0xffc94d,
+            color: kind === "part" ? (this.colors.dimension ?? 0xdfe6f5) : 0xffc94d,
             depthTest: false,
             transparent: true,
             opacity: 0.85,
           }),
         );
         line.renderOrder = 4;
+        line.name = `${kind}-dimensions`;
         group.add(line);
       }
       this.scene.add(group);
@@ -448,11 +876,33 @@ export class Viewport {
         el.className = `dimension-label ${d.kind}`;
         el.dataset.testid = "dimension";
         el.textContent = d.text;
+        el.style.visibility = "hidden"; // until the next frame puts it in its place
         this.labelLayer.appendChild(el);
-        this.labels.push({ el, at: new THREE.Vector3(...labelPoint(d)) });
+        this.labels.push({
+          el,
+          at: new THREE.Vector3(...labelPoint(d)),
+          from: new THREE.Vector3(...d.from),
+          to: new THREE.Vector3(...d.to),
+        });
       }
     }
     this.requestRender();
+  }
+
+  /** Fits the whole part (or the plate, when there is none) in view, looking from the same direction as now. */
+  zoomExtents(): void {
+    if (this.view !== "custom") return this.setView(this.view);
+    if (this.partBounds) this.framed = roomAround(this.partBounds);
+    const bounds = this.framed ?? this.plateBounds;
+    const target = boundsCenter(bounds);
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    const d = fitDistance(boundsRadius(bounds), this.fit.fov, this.fit.aspect);
+    this.moveCamera({
+      position: new THREE.Vector3(target[0] + dir.x * d, target[1] + dir.y * d, target[2] + dir.z * d),
+      target: new THREE.Vector3(...target),
+      up: this.camera.up.clone(),
+    });
+    this.view = "custom";
   }
 
   /** Points the camera straight at a flat surface, with `up` pointing up on screen, framing `size` mm. */
@@ -464,17 +914,16 @@ export class Viewport {
   ): void {
     const half = (this.fit.fov * Math.PI) / 360;
     const distance = (Math.max(size, 10) * 0.75) / Math.tan(half) / Math.min(1, this.fit.aspect);
-    this.camera.up.set(...up);
-    this.camera.position.set(
-      target[0] + normal[0] * distance,
-      target[1] + normal[1] * distance,
-      target[2] + normal[2] * distance,
-    );
-    this.controls.target.set(...target);
-    this.camera.lookAt(this.controls.target);
-    this.controls.update();
+    this.moveCamera({
+      position: new THREE.Vector3(
+        target[0] + normal[0] * distance,
+        target[1] + normal[1] * distance,
+        target[2] + normal[2] * distance,
+      ),
+      target: new THREE.Vector3(...target),
+      up: new THREE.Vector3(...up),
+    });
     this.view = "custom";
-    this.requestRender();
   }
 
   /**
@@ -496,15 +945,126 @@ export class Viewport {
     if (!fits) this.setView(this.view);
   }
 
-  /** Keeps the scene centred in the part of the view that floating panels don't cover. */
-  setSafeArea(area: SafeArea): void {
-    const same = (Object.keys(area) as (keyof SafeArea)[]).every(
-      (k) => Math.round(area[k]) === Math.round(this.safeArea[k]),
+  /** Recolours the part and the plate in place; nothing is rebuilt and the camera stays put. */
+  setColors(colors: ViewportColors): void {
+    this.colors = colors;
+    this.model?.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial)
+        o.material.color.set(colors.part);
+      if (o instanceof THREE.LineSegments && o.material instanceof THREE.LineBasicMaterial)
+        o.material.color.set(colors.edge);
+    });
+    const sizes = this.dimensionGroup?.getObjectByName("part-dimensions");
+    if (sizes instanceof THREE.LineSegments && sizes.material instanceof THREE.LineBasicMaterial)
+      sizes.material.color.set(colors.dimension ?? 0xdfe6f5);
+    const { width, depth, volume } = this.plateSize;
+    if (width > 0) this.setPlate(width, depth, volume);
+    else this.requestRender();
+  }
+
+  /**
+   * Swaps the build plate for one of this size, centred on the origin. With a height, the printer's whole build
+   * volume is outlined too: in the accent colour when the part fits, red when it doesn't. The camera stays put.
+   */
+  setPlate(width: number, depth: number, volume?: { height: number; fits: boolean }): void {
+    this.scene.remove(this.plate);
+    disposeObject(this.plate);
+    this.plateSize = { width, depth, volume };
+    this.plate = this.buildSurroundings();
+    this.scene.add(this.plate);
+    // A printer's plate is framed whole; a big design plate only around its middle, where a new part starts.
+    const [hw, hd] = volume ? [width / 2, depth / 2] : [Math.min(width, HOME_AREA) / 2, Math.min(depth, HOME_AREA) / 2];
+    this.plateBounds = { min: [-hw, -hd, 0], max: [hw, hd, volume?.height ?? 0] };
+    this.requestRender();
+  }
+
+  /** Shows or hides the build plate and its grid. A printer's plate (with its build volume) always shows. */
+  setSurroundings(s: Surroundings): void {
+    if (s.plate === this.surroundings.plate && s.grid === this.surroundings.grid) return;
+    this.surroundings = s;
+    const { width, depth, volume } = this.plateSize;
+    if (width > 0) this.setPlate(width, depth, volume);
+  }
+
+  /** What is drawn around the part now: "plate", or "model space" (no plate), and whether the grid shows. */
+  get surroundingsShown(): { plate: boolean; grid: boolean } {
+    return { plate: !!this.plateSize.volume || this.surroundings.plate, grid: this.surroundings.grid };
+  }
+
+  private buildSurroundings(): THREE.Group {
+    const { width, depth, volume } = this.plateSize;
+    const { plate, grid } = this.surroundingsShown;
+    const group = new THREE.Group();
+    group.add(
+      buildGround({
+        width: plate ? width : MODEL_SPACE_REACH * 2,
+        depth: plate ? depth : MODEL_SPACE_REACH * 2,
+        surface: plate,
+        grid,
+        scale: this.grid,
+        colors: this.colors,
+        focus: this.gridFocus,
+      }),
     );
+    if (volume) group.add(buildVolume(width, depth, volume.height, volume.fits));
+    return group;
+  }
+
+  /** Squares on the plate: 10 mm (heavier every 50), or half inches (heavier every 2 inches). */
+  /** The grid squares (mm) a grid snap uses now: the finest still clearly drawn where the camera looks. */
+  gridStep(): number {
+    const h = Math.max(1, this.renderer.domElement.clientHeight);
+    const cam = this.camera;
+    const mmPerPixel =
+      cam instanceof THREE.PerspectiveCamera
+        ? (2 * cam.position.distanceTo(this.controls.target) * Math.tan((cam.fov * Math.PI) / 360)) / h
+        : (cam.top - cam.bottom) / cam.zoom / h;
+    return snapStep(mmPerPixel, this.grid);
+  }
+
+  setGridUnits(units: "mm" | "in"): void {
+    const grid = units === "in" ? INCH_GRID : MM_GRID;
+    if (grid === this.grid) return;
+    this.grid = grid;
+    const { width, depth, volume } = this.plateSize;
+    if (width > 0) this.setPlate(width, depth, volume);
+  }
+
+  /**
+   * Keeps the scene centred in the part of the view that floating panels don't cover. With `slide`, the scene glides
+   * over to the new centre (a panel opening beside it), starting from wherever it is now, so it can be reversed.
+   */
+  setSafeArea(area: SafeArea, slide = false): void {
+    const goal = this.safeAreaGoal ?? this.safeArea;
+    const same = (Object.keys(area) as (keyof SafeArea)[]).every((k) => Math.round(area[k]) === Math.round(goal[k]));
     if (same) return;
-    this.safeArea = { ...area };
-    this.resize();
-    if (this.view !== "custom") this.setView(this.view);
+    if (this.areaFrame) cancelAnimationFrame(this.areaFrame);
+    this.areaFrame = 0;
+    this.safeAreaGoal = null;
+    const settle = () => {
+      this.safeArea = { ...area };
+      this.safeAreaGoal = null;
+      delete this.container.dataset.areaSliding;
+      this.resize();
+      if (this.view !== "custom") this.setView(this.view);
+    };
+    if (!slide || !this.ready || prefersReducedMotion()) return settle();
+    const from = { ...this.safeArea };
+    const start = performance.now();
+    this.safeAreaGoal = { ...area };
+    this.container.dataset.areaSliding = "true";
+    const step = (now: number) => {
+      const k = springProgress((now - start) / 1000);
+      if (settled(k)) {
+        this.areaFrame = 0;
+        return settle();
+      }
+      const at = (key: keyof SafeArea) => from[key] + (area[key] - from[key]) * k;
+      this.safeArea = { top: at("top"), right: at("right"), bottom: at("bottom"), left: at("left") };
+      this.resize();
+      this.areaFrame = requestAnimationFrame(step);
+    };
+    this.areaFrame = requestAnimationFrame(step);
   }
 
   getCameraState(): CameraState {
@@ -513,8 +1073,10 @@ export class Viewport {
     const t = this.controls.target;
     return {
       view: this.view,
+      projection: this.projection,
       position: [r(x), r(y), r(z)],
       target: [r(t.x), r(t.y), r(t.z)],
+      zoom: r(this.camera.zoom),
     };
   }
 
@@ -524,6 +1086,9 @@ export class Viewport {
   }
 
   dispose(): void {
+    this.stopGlide();
+    if (this.areaFrame) cancelAnimationFrame(this.areaFrame);
+    this.textures.forEach((t) => t.texture.dispose());
     this.resizeObserver.disconnect();
     this.controls.dispose();
     disposeObject(this.scene);
@@ -546,10 +1111,12 @@ export class Viewport {
     const dy = top - bottom;
     const fullW = w + Math.abs(dx);
     const fullH = h + Math.abs(dy);
-    this.camera.aspect = fullW / fullH;
-    if (dx === 0 && dy === 0) this.camera.clearViewOffset();
-    else this.camera.setViewOffset(fullW, fullH, dx < 0 ? -dx : 0, dy < 0 ? -dy : 0, w, h);
-    this.camera.updateProjectionMatrix();
+    this.frameAspect = fullW / fullH;
+    for (const camera of [this.perspectiveCamera, this.orthoCamera]) {
+      if (dx === 0 && dy === 0) camera.clearViewOffset();
+      else camera.setViewOffset(fullW, fullH, dx < 0 ? -dx : 0, dy < 0 ? -dy : 0, w, h);
+    }
+    this.applyAspect();
     const half = (FOV * Math.PI) / 360;
     this.fit = {
       fov: (2 * Math.atan(Math.tan(half) * (visH / fullH)) * 180) / Math.PI,
@@ -558,14 +1125,31 @@ export class Viewport {
     this.requestRender();
   }
 
+  /** Width over height of the whole (virtual) frame, for both cameras. */
+  private frameAspect = 1;
+
+  private applyAspect(): void {
+    this.perspectiveCamera.aspect = this.frameAspect;
+    this.perspectiveCamera.updateProjectionMatrix();
+    const half = this.orthoCamera.top;
+    this.orthoCamera.left = -half * this.frameAspect;
+    this.orthoCamera.right = half * this.frameAspect;
+    this.orthoCamera.updateProjectionMatrix();
+  }
+
   /** Keeps the move arrows the same size on screen however far away they are. */
   private sizeGizmo(): void {
     if (!this.gizmo) return;
     const h = this.container.clientHeight || 1;
     const view = this.camera.view?.enabled ? this.camera.view : null;
     const shown = view ? view.height / view.fullHeight : 1; // the part of the camera's frame on screen
-    const distance = this.camera.position.distanceTo(this.gizmo.position);
-    const worldHeight = 2 * distance * Math.tan((this.camera.fov * Math.PI) / 360) * shown;
+    const worldHeight =
+      this.camera instanceof THREE.OrthographicCamera
+        ? ((this.camera.top - this.camera.bottom) / this.camera.zoom) * shown
+        : 2 *
+          this.camera.position.distanceTo(this.gizmo.position) *
+          Math.tan((this.camera.fov * Math.PI) / 360) *
+          shown;
     this.gizmo.scale.setScalar((GIZMO_PIXELS * worldHeight) / h);
   }
 
@@ -575,20 +1159,44 @@ export class Viewport {
     const { clientWidth: w, clientHeight: h } = this.container;
     const p = new THREE.Vector3();
     const placed: { x: number; y: number; w: number; h: number }[] = [];
-    for (const { el, at } of this.labels) {
+    const ends = [new THREE.Vector3(), new THREE.Vector3()];
+    for (const { el, at, from, to } of this.labels) {
       p.copy(at).project(this.camera);
       const visible = p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2;
       el.style.visibility = visible ? "visible" : "hidden";
       const lw = el.offsetWidth + 4;
       const lh = el.offsetHeight + 2;
+      // Zoomed far out, a size shorter on screen than half its label would bury the part under numbers: it waits
+      // until the part is big enough to read, as in a drawing (the numbers are in Properties meanwhile).
+      ends[0]!.copy(from).project(this.camera);
+      ends[1]!.copy(to).project(this.camera);
+      const onScreen = Math.hypot(((ends[1]!.x - ends[0]!.x) / 2) * w, ((ends[1]!.y - ends[0]!.y) / 2) * h);
+      if (onScreen < lw * 0.5) {
+        el.style.visibility = "hidden";
+        continue;
+      }
       const x = ((p.x + 1) / 2) * w;
       let y = ((1 - p.y) / 2) * h;
-      // Labels that would cover one already placed step down until they're clear, so every number stays readable.
-      const hits = (yy: number) =>
-        placed.some((q) => Math.abs(q.x - x) < (q.w + lw) / 2 && Math.abs(q.y - yy) < (q.h + lh) / 2);
-      for (let i = 0; i < 8 && hits(y); i++) y += lh;
-      placed.push({ x, y, w: lw, h: lh });
-      el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+      // A label that would cover one already placed moves a little way to the nearest clear spot beside its line.
+      // When there's none close by, it is left out for now (the number is in Properties), rather than piling
+      // labels up far from what they measure; turning or zooming the view brings it back.
+      const hits = (xx: number, yy: number) =>
+        placed.some((q) => Math.abs(q.x - xx) < (q.w + lw) / 2 && Math.abs(q.y - yy) < (q.h + lh) / 2);
+      let spot: [number, number] | null = hits(x, y) ? null : [x, y];
+      for (const [dx, dy] of NUDGES) {
+        if (spot) break;
+        if (!hits(x + dx * lw, y + dy * lh)) spot = [x + dx * lw, y + dy * lh];
+      }
+      // A label under the bars or palettes would sit on their text: it waits until the view brings it back out.
+      const a = this.safeArea;
+      const open = (sx: number, sy: number) =>
+        sx - lw / 2 >= a.left && sx + lw / 2 <= w - a.right && sy - lh / 2 >= a.top && sy + lh / 2 <= h - a.bottom;
+      if (!spot || !visible || !open(spot[0], spot[1])) {
+        el.style.visibility = "hidden";
+        continue;
+      }
+      placed.push({ x: spot[0], y: spot[1], w: lw, h: lh });
+      el.style.transform = `translate(${spot[0]}px, ${spot[1]}px) translate(-50%, -50%)`;
     }
   }
 
@@ -599,6 +1207,8 @@ export class Viewport {
     requestAnimationFrame(() => {
       this.frameRequested = false;
       this.sizeGizmo();
+      this.gridFocus.value =
+        this.camera instanceof THREE.PerspectiveCamera ? this.camera.position.distanceTo(this.controls.target) : 1e9;
       this.renderer.render(this.scene, this.camera);
       this.placeLabels();
       const s = this.getCameraState();
@@ -606,6 +1216,20 @@ export class Viewport {
     });
   }
 }
+
+/** Where a crowded label may move, in label heights and widths: just above or below first, then to the sides. */
+const NUDGES: [number, number][] = [
+  [0, -1],
+  [0, 1],
+  [0.6, 0],
+  [-0.6, 0],
+  [0.6, -1],
+  [-0.6, -1],
+  [0.6, 1],
+  [-0.6, 1],
+  [0, -2],
+  [0, 2],
+];
 
 /** The part's box with space around it for measurement labels, never smaller than 60 mm across. */
 function roomAround(b: Bounds): Bounds {
@@ -672,39 +1296,103 @@ function disposeObject(root: THREE.Object3D): void {
   });
 }
 
-/** Build plate: a flat surface with 10 mm and 50 mm grid lines and X/Y axis lines through the origin. */
-function buildPlate(width: number, depth: number): THREE.Group {
-  const group = new THREE.Group();
-  group.name = "build-plate";
-
-  const surface = new THREE.Mesh(
-    new THREE.PlaneGeometry(width, depth),
-    new THREE.MeshStandardMaterial({
-      color: 0x1b2233,
-      roughness: 0.9,
-      transparent: true,
-      opacity: 0.72,
-    }),
+/** The outline of a printer's build volume: a box of thin lines from the plate up to the most it can print. */
+function buildVolume(width: number, depth: number, height: number, fits: boolean): THREE.LineSegments {
+  const box = new THREE.EdgesGeometry(new THREE.BoxGeometry(width, depth, height));
+  box.translate(0, 0, height / 2);
+  const lines = new THREE.LineSegments(
+    box,
+    new THREE.LineBasicMaterial({ color: fits ? 0x5ea8ff : 0xff6b6b, transparent: true, opacity: fits ? 0.45 : 0.85 }),
   );
-  surface.position.z = -0.01;
-  group.add(surface);
+  lines.name = "build-volume";
+  return lines;
+}
 
-  const minor: number[] = [];
-  const major: number[] = [];
-  const line = (arr: number[], x1: number, y1: number, x2: number, y2: number) => arr.push(x1, y1, 0, x2, y2, 0);
-  for (let x = -width / 2; x <= width / 2 + 1e-9; x += 10)
-    line(Math.abs(x % 50) < 1e-9 ? major : minor, x, -depth / 2, x, depth / 2);
-  for (let y = -depth / 2; y <= depth / 2 + 1e-9; y += 10)
-    line(Math.abs(y % 50) < 1e-9 ? major : minor, -width / 2, y, width / 2, y);
-
-  const lines = (pts: number[], color: number) => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-    return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color }));
+/**
+ * A soft shadow under the part, as if lit by a bright overcast sky: the part seen from above, blurred, darkest where
+ * the part touches the plate. Drawn on a 2D canvas from the triangles, so it costs nothing per frame.
+ */
+function contactShadow(positions: Float32Array, indices: Uint32Array): THREE.Mesh | null {
+  if (typeof document === "undefined" || indices.length === 0) return null;
+  let [x0, y0, x1, y1, z0] = [Infinity, Infinity, -Infinity, -Infinity, Infinity];
+  for (let i = 0; i < positions.length; i += 3) {
+    x0 = Math.min(x0, positions[i]!);
+    x1 = Math.max(x1, positions[i]!);
+    y0 = Math.min(y0, positions[i + 1]!);
+    y1 = Math.max(y1, positions[i + 1]!);
+    z0 = Math.min(z0, positions[i + 2]!);
+  }
+  const margin = Math.max(x1 - x0, y1 - y0) * 0.25 + 6;
+  [x0, y0, x1, y1] = [x0 - margin, y0 - margin, x1 + margin, y1 + margin];
+  const size = 256;
+  const k = size / Math.max(x1 - x0, y1 - y0);
+  const [w, h] = [Math.ceil((x1 - x0) * k), Math.ceil((y1 - y0) * k)];
+  const canvas = document.createElement("canvas");
+  [canvas.width, canvas.height] = [w, h];
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const fill = (near: number | null) => {
+    ctx.beginPath();
+    for (let i = 0; i < indices.length; i += 3) {
+      const t = [indices[i]!, indices[i + 1]!, indices[i + 2]!];
+      if (near !== null && t.some((v) => positions[v * 3 + 2]! > z0 + near)) continue;
+      t.forEach((v, j) => {
+        const px = (positions[v * 3]! - x0) * k;
+        const py = (y1 - positions[v * 3 + 1]!) * k;
+        if (j === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+    }
+    ctx.fill();
   };
-  group.add(lines(minor, 0x2f3a52));
-  group.add(lines(major, 0x4a5878));
-  group.add(lines([-width / 2, 0, 0.02, width / 2, 0, 0.02], 0xd9534f)); // X axis, red
-  group.add(lines([0, -depth / 2, 0.02, 0, depth / 2, 0.02], 0x5cb85c)); // Y axis, green
-  return group;
+  ctx.fillStyle = "#000";
+  // A wide, light shadow of the whole part, then a tight, darker one where it sits on the plate.
+  ctx.globalAlpha = 0.38;
+  ctx.filter = `blur(${Math.round(size * 0.05)}px)`;
+  fill(null);
+  ctx.globalAlpha = 0.6;
+  ctx.filter = `blur(${Math.round(size * 0.012)}px)`;
+  fill(0.5);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(x1 - x0, y1 - y0),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false }),
+  );
+  plane.name = "part-shadow";
+  plane.position.set((x0 + x1) / 2, (y0 + y1) / 2, Math.min(z0, 0) - 0.004);
+  plane.renderOrder = 1; // over the plate, which is see-through too
+  return plane;
+}
+
+/** A layer's material as flat triangles: each outside outline with the holes that lie inside it. */
+function layerFill(loops: Float64Array[]): THREE.BufferGeometry {
+  const area = (l: Float64Array) => {
+    let a = 0;
+    for (let i = 0, n = l.length / 2, j = n - 1; i < n; j = i++)
+      a += l[2 * j]! * l[2 * i + 1]! - l[2 * i]! * l[2 * j + 1]!;
+    return a / 2;
+  };
+  const inside = (x: number, y: number, l: Float64Array) => {
+    let c = false;
+    for (let i = 0, n = l.length / 2, j = n - 1; i < n; j = i++) {
+      const [xi, yi, xj, yj] = [l[2 * i]!, l[2 * i + 1]!, l[2 * j]!, l[2 * j + 1]!];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  const path = (l: Float64Array) => {
+    const pts: THREE.Vector2[] = [];
+    for (let i = 0; i < l.length; i += 2) pts.push(new THREE.Vector2(l[i]!, l[i + 1]!));
+    return pts;
+  };
+  // Smallest outsides first, so a hole goes to the innermost outside around it (an island inside a hole).
+  const outsides = loops.filter((l) => area(l) > 0).sort((a, b) => area(a) - area(b));
+  const shapes = outsides.map((l) => new THREE.Shape(path(l)));
+  for (const hole of loops.filter((l) => area(l) < 0)) {
+    const k = outsides.findIndex((o) => inside(hole[0]!, hole[1]!, o));
+    if (k >= 0) shapes[k]!.holes.push(new THREE.Path(path(hole)));
+  }
+  return new THREE.ShapeGeometry(shapes);
 }

@@ -1,6 +1,6 @@
 [package]
 name = "studio3d"
-version = "0.10.0"
+version = "0.47.0"
 description = "Studio 3D: beginner-first 3D design for printing"
 edition = "2021"
 rust-version = "1.80"
@@ -16,6 +16,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# The helper's Anthropic key, kept in Windows Credential Manager (or the macOS keychain), never in a file.
+keyring = { version = "=3.6.3", features = ["windows-native", "apple-native"] }
 
 [profile.release]
 codegen-units = 1

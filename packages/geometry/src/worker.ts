@@ -53,7 +53,7 @@ function rebuildWaiting() {
   const mesh = tessellate(r.shape);
   // Which step made each face, so clicking the part can pick out a piece. Not knowing never stops the model showing.
   try {
-    mesh.owners = faceOwners(mesh, r.pieces ?? [], req.document);
+    mesh.owners = faceOwners(mesh, r.pieces ?? []);
   } catch {
     mesh.owners = [];
   } finally {

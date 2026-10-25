@@ -15,6 +15,8 @@ import {
   type ShapeFeature,
   newHollow,
   type HollowFeature,
+  newEdgeStep,
+  type EdgeFeature,
   newHole,
   holeDiameter,
   shapeSize,
@@ -26,6 +28,23 @@ import {
   moveFeature,
   movableAxes,
   newSketch,
+  boxSideFace,
+  boxSideOf,
+  canFollow,
+  holeCentre,
+  measuredFrom,
+  type HoleFace,
+  THREADS,
+  THREAD_SIZES,
+  threadLabel,
+  tapDrill,
+  SCREW_SIZES,
+  CLEARANCE,
+  COUNTERBORE,
+  COUNTERSINK,
+  boreDiameter,
+  headDepth,
+  type ProjectDocument,
 } from "./index";
 
 const app = { name: "Studio 3D", version: "test" };
@@ -138,9 +157,17 @@ describe("holes in project files", () => {
     expect(r.ok && r.document.features.map((f) => f.type)).toEqual(["box", "hole", "hole"]);
   });
 
+  it("opens a design whose shapes were all removed, and one with only a hole left, so nothing saved is refused", () => {
+    // Removing every shape is allowed; what's left is explained by the checks, not refused as damaged.
+    const empty = parseProject(withFeatures([]));
+    expect(empty.ok && empty.document.features).toEqual([]);
+    expect(empty.ok && validateDocument(empty.document)).toEqual([]);
+    const onlyHole = parseProject(withFeatures([hole]));
+    expect(onlyHole.ok).toBe(true);
+    if (onlyHole.ok) expect(validateDocument(onlyHole.document)[0]?.message).toMatch(/needs a shape to start from/);
+  });
+
   it.each([
-    ["a hole before the box", () => [hole]],
-    ["no shapes at all", () => []],
     [
       "a shape that neither adds nor cuts",
       () => {
@@ -269,6 +296,53 @@ describe("hollow", () => {
   });
 });
 
+describe("fillets and chamfers", () => {
+  const withEdges = (type: EdgeFeature["type"], over: Partial<EdgeFeature> = {}) => {
+    const doc = newDocument();
+    return { ...doc, features: [...doc.features, { ...newEdgeStep(doc, type), ...over }] };
+  };
+
+  it("start sensibly for printing, and are checked", () => {
+    expect(withEdges("fillet").features[1]).toMatchObject({ name: "Fillet 1", size: 1, edges: "all" });
+    expect(withEdges("chamfer").features[1]).toMatchObject({ name: "Chamfer 1", size: 0.6, edges: "bottom" });
+    expect(validateDocument(withEdges("fillet"))).toEqual([]);
+    expect(validateDocument(withEdges("fillet", { size: 0 }))[0]!.message).toContain("radius needs to be at least");
+    expect(validateDocument(withEdges("chamfer", { size: NaN }))[0]!.field).toBe("size");
+    expect(movableAxes(withEdges("fillet").features[1]!)).toEqual([]);
+  });
+
+  it("are saved and opened again unchanged; unknown edge choices are refused as damaged", () => {
+    const doc = withEdges("chamfer", { size: 0.8, edges: "vertical" });
+    const r = parseProject(serializeProject(doc, app));
+    expect(r.ok && r.document).toEqual(doc);
+    const bad = parseProject(serializeProject(doc, app).replace('"edges": "vertical"', '"edges": "some"'));
+    expect(!bad.ok && bad.error).toContain("which edges");
+  });
+
+  it("picked edges are saved by their middles, need at least one, and damaged picks are refused", () => {
+    const doc = withEdges("fillet", { size: 2, edges: "picked", picked: [[30, -20, 15]] });
+    expect(validateDocument(doc)).toEqual([]);
+    const r = parseProject(serializeProject(doc, app));
+    expect(r.ok && r.document).toEqual(doc);
+    expect(validateDocument(withEdges("fillet", { edges: "picked", picked: [] }))[0]!.message).toBe(
+      "Pick at least one edge in the 3D view.",
+    );
+    const text = serializeProject(doc, app);
+    // Only the picks are damaged: ids and the save time can hold any digits, so "15" alone isn't safe to replace.
+    const picks = text.slice(text.indexOf('"picked": ['));
+    const at = text.length - picks.length;
+    const damaged = [
+      text.slice(0, at) + picks.replace("15", '"x"'),
+      text.slice(0, at) + picks.replace('"picked": [', '"picked": [[1], '),
+    ];
+    for (const d of damaged) expect(d).not.toBe(text);
+    for (const d of damaged) {
+      const bad = parseProject(d);
+      expect(!bad.ok && bad.error).toContain("picked edges");
+    }
+  });
+});
+
 describe("threads", () => {
   const cylinder = (over: Partial<CylinderFeature> = {}) =>
     ({ ...newShape(newDocument(), "cylinder"), thread: "M8", fit: 0.3, diameter: 8, ...over }) as CylinderFeature;
@@ -330,5 +404,145 @@ describe("moving a step", () => {
     const hol = newHollow(doc);
     expect(moveFeature(hol, [1, 1, 1])).toBe(hol);
     expect(movableAxes(hol)).toEqual([]);
+  });
+});
+
+describe("holes on a face", () => {
+  const b: BoxFeature = { ...DEFAULT_BOX, id: "b", name: "Box", mode: "add", x: 0, y: 0, z: 0, wall: 0 };
+  const face = (over: Partial<HoleFace> = {}): HoleFace => ({
+    ...boxSideFace(b, "front"),
+    on: { shape: "b", side: "front" },
+    across: "left",
+    up: "bottom",
+    ...over,
+  });
+
+  it("switching which edge a hole is measured from keeps it in the same place", () => {
+    const f = face();
+    const at = holeCentre(f, 12, 7);
+    for (const across of ["left", "right", "centre"] as const)
+      for (const up of ["bottom", "top", "centre"] as const) {
+        const { x, y } = measuredFrom(f, at, across, up);
+        expect(holeCentre({ ...f, across, up }, x, y)).toEqual(at);
+      }
+    expect(measuredFrom(f, at, "right", "top")).toEqual({ x: 48, y: 23 });
+    expect(measuredFrom(f, at, "centre", "centre")).toEqual({ x: -18, y: -8 });
+  });
+
+  it("which side of a box a face is, from the way it points", () => {
+    expect(boxSideOf([0, -1, 0])).toBe("front");
+    expect(boxSideOf([0, 0, 1])).toBe("top");
+    expect(boxSideOf([0.6, 0.8, 0])).toBeNull();
+    expect(canFollow({ ...b, wall: 2 }, "top")).toBe(false); // an open container's top is its rim
+    expect(canFollow({ ...b, wall: 2 }, "front")).toBe(true);
+    expect(canFollow({ ...b, mode: "cut" }, "front")).toBe(false);
+  });
+
+  it("the document check names the edge a hole runs off, using the box's current size", () => {
+    const h: HoleFeature = { ...newHole({ units: "mm", features: [b] }), x: 58, y: 10, diameter: 6, face: face() };
+    const issues = validateDocument({ units: "mm", features: [b, h] });
+    expect(issues).toEqual([
+      expect.objectContaining({ field: "x", message: expect.stringContaining("right edge of the front face") }),
+    ]);
+    // Widen the box and the same hole fits.
+    expect(validateDocument({ units: "mm", features: [{ ...b, width: 80 }, h] })).toEqual([]);
+  });
+
+  it("a hole's face with a bad shape is a damaged file", () => {
+    const h = { ...newHole({ units: "mm", features: [b] }), face: { ...face(), across: "sideways" } };
+    const text = serializeProject({ units: "mm", features: [b, h as HoleFeature] }, { name: "t", version: "t" });
+    const r = parseProject(text);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toContain("doesn't say which edges it is measured from");
+  });
+});
+
+describe("thread sizes and screw holes", () => {
+  const h = (over: Partial<HoleFeature> = {}): HoleFeature => ({ ...newHole(newDocument()), id: "h", ...over });
+
+  it("inch threads come from their size in inches and threads per inch", () => {
+    expect(THREADS["1/4-20 UNC"]).toMatchObject({ diameter: 6.35, pitch: 1.27, standard: "UNC" });
+    expect(THREADS["#10-32 UNF"].diameter).toBeCloseTo(4.826, 9);
+    expect(THREADS["#10-32 UNF"].pitch).toBeCloseTo(0.79375, 9);
+    expect(threadLabel("M5")).toBe("M5 × 0.8");
+    expect(threadLabel("M10x1.25")).toBe("M10 × 1.25 fine");
+    expect(threadLabel("3/8-16 UNC")).toBe("3/8-16 UNC");
+  });
+
+  it("tap drills: the sourced size where there is one, else major diameter minus pitch", () => {
+    expect(tapDrill("M8")).toBe(6.8);
+    expect(tapDrill("M12x1.5")).toBe(10.5);
+    expect(tapDrill("1/4-20 UNC")).toBeCloseTo(0.201 * 25.4, 9);
+    expect(
+      THREAD_SIZES.every((s) => tapDrill(s) < THREADS[s].diameter && tapDrill(s) > THREADS[s].diameter * 0.7),
+    ).toBe(true);
+  });
+
+  it("clearance and head sizes are larger than the screw, smallest to largest", () => {
+    for (const s of SCREW_SIZES) {
+      const c = CLEARANCE[s];
+      expect(THREADS[s].diameter).toBeLessThan(c.fine);
+      expect(c.fine).toBeLessThan(c.medium);
+      expect(c.medium).toBeLessThan(c.coarse);
+      expect(COUNTERBORE[s].diameter).toBeGreaterThan(c.coarse);
+      expect(COUNTERSINK[s]).toBeGreaterThan(c.coarse);
+    }
+  });
+
+  it("the size a hole cuts follows its kind", () => {
+    expect(boreDiameter(h({ clearance: { screw: "M4", series: "coarse" } }))).toBe(4.8);
+    expect(boreDiameter(h({ thread: "M6", simplified: true }))).toBe(5);
+    const cb = h({
+      clearance: { screw: "M5", series: "medium" },
+      head: { kind: "counterbore", diameter: 9.5, depth: 5 },
+    });
+    expect(holeDiameter(cb)).toBe(9.5);
+    expect(headDepth(h({ diameter: 6, head: { kind: "countersink", diameter: 12 } }))).toBe(3);
+    expect(holeDiameter(h({ thread: "M6", head: { kind: "countersink", diameter: 12 } }))).toBeLessThan(7); // no head
+  });
+
+  it("explains bad thread depths and heads, and never changes them", () => {
+    const msg = (over: Partial<HoleFeature>) =>
+      validateDocument({ units: "mm", features: [box(), h(over)] })[0]?.message;
+    expect(msg({ thread: "M6", depth: 10, threadDepth: 12 })).toBe(
+      "The thread can't go deeper than the hole: use 10 mm or less.",
+    );
+    expect(msg({ thread: "M6", threadDepth: 1 })).toBe(
+      "The M6 × 1 thread needs at least two turns: make it at least 2 mm deep.",
+    );
+    expect(msg({ thread: "M6", clearance: { screw: "M6", series: "fine" } })).toContain(
+      "both threaded and a clearance",
+    );
+    expect(msg({ diameter: 6, head: { kind: "counterbore", diameter: 5, depth: 3 } })).toBe(
+      "The counterbore needs to be wider than the hole (6 mm).",
+    );
+    expect(msg({ diameter: 6, head: { kind: "counterbore", diameter: 10, depth: 0 } })).toBe(
+      "Counterbore depth needs to be more than 0 mm.",
+    );
+    expect(msg({ diameter: 6, depth: 2, head: { kind: "countersink", diameter: 12 } })).toContain(
+      "as deep as the hole",
+    );
+  });
+
+  it("saves and opens every hole kind; damaged ones are reported", () => {
+    const doc: ProjectDocument = {
+      units: "mm",
+      features: [
+        box(),
+        h({ id: "a", thread: "1/4-20 UNC", fit: 0.3, depth: 10, threadDepth: 6, simplified: false }),
+        h({
+          id: "b",
+          clearance: { screw: "M5", series: "medium" },
+          head: { kind: "counterbore", diameter: 9.5, depth: 5 },
+        }),
+        h({ id: "c", clearance: { screw: "M6", series: "fine" }, head: { kind: "countersink", diameter: 13.44 } }),
+      ],
+    };
+    const back = parseProject(serializeProject(doc, app));
+    expect(back.ok && back.document).toEqual(doc);
+    const broken = JSON.parse(serializeProject(doc, app));
+    broken.document.features[2].clearance.screw = "M7";
+    const r = parseProject(JSON.stringify(broken));
+    expect(!r.ok && r.error).toContain("clearance hole size this version doesn't know");
   });
 });

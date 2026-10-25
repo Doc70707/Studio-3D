@@ -1,4 +1,5 @@
-// A small STL reader and checker, written independently of the kernel, used by tests.
+// A small STL reader and checker, written independently of the kernel. Tests use it on exported files, and Print
+// Studio runs it on the exact file that would go to a slicer.
 // "Watertight" here means every edge is shared by exactly two triangles, in opposite directions.
 
 export interface StlReport {
@@ -8,6 +9,8 @@ export interface StlReport {
   volume: number;
   min: [number, number, number];
   max: [number, number, number];
+  /** Separate pieces: groups of triangles that share no corner with each other. */
+  bodies: number;
 }
 
 export function checkBinaryStl(buf: ArrayBuffer): StlReport {
@@ -29,6 +32,15 @@ export function checkBinaryStl(buf: ArrayBuffer): StlReport {
   const min: [number, number, number] = [Infinity, Infinity, Infinity];
   const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
   const directed = new Map<string, number>();
+  // Corners joined by a triangle belong to the same piece (union-find over corner ids).
+  const parent: number[] = [];
+  const root = (v: number): number => {
+    while (parent[v] !== v) v = parent[v] = parent[parent[v]!]!;
+    return v;
+  };
+  const join = (a: number, b: number) => {
+    parent[root(a)] = root(b);
+  };
   let volume = 0;
 
   for (let t = 0; t < n; t++) {
@@ -46,6 +58,9 @@ export function checkBinaryStl(buf: ArrayBuffer): StlReport {
     // Signed volume of the tetrahedron with the origin (divergence theorem).
     volume += (a[0]! * (b[1]! * c[2]! - b[2]! * c[1]!) - a[1]! * (b[0]! * c[2]! - b[2]! * c[0]!) + a[2]! * (b[0]! * c[1]! - b[1]! * c[0]!)) / 6;
     const vi = p.map((q) => id(q[0]!, q[1]!, q[2]!));
+    for (const v of vi) if (parent[v] === undefined) parent[v] = v;
+    join(vi[0]!, vi[1]!);
+    join(vi[0]!, vi[2]!);
     for (let e = 0; e < 3; e++) {
       const k = `${vi[e]}>${vi[(e + 1) % 3]}`;
       directed.set(k, (directed.get(k) ?? 0) + 1);
@@ -60,5 +75,7 @@ export function checkBinaryStl(buf: ArrayBuffer): StlReport {
     if (count !== 1) consistentWinding = false;
     if (count + reverse !== 2) watertight = false;
   }
-  return { triangles: n, watertight, consistentWinding, volume, min, max };
+  const roots = new Set<number>();
+  for (let v = 0; v < parent.length; v++) roots.add(root(v));
+  return { triangles: n, watertight, consistentWinding, volume, min, max, bodies: roots.size };
 }

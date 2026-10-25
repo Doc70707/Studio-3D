@@ -36,8 +36,10 @@ jobs:
           python-version: "3.13"
       - name: Independent STL check (trimesh) on files exported by the tests
         run: |
-          python -m pip install --quiet trimesh==5.1.1 numpy
+          python -m pip install --quiet trimesh==5.1.1 numpy lxml networkx
           python -I scripts/verify_stl.py test-output
+      - name: Independent G-code check on files written by the tests
+        run: python -I scripts/verify_gcode.py test-output
       - name: Licence check (npm + Rust) and notices up to date
         run: |
           npm run licenses

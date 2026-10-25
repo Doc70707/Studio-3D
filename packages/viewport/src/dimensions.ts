@@ -31,7 +31,12 @@ export function dimensionLines(d: Dimension): number[] {
 /** Where the label goes: the middle of the measurement line. */
 export const labelPoint = (d: Dimension): Vec3 => lerp(add(d.from, d.offset), add(d.to, d.offset), 0.5);
 
-const fmt = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+let fmt = (n: number) => `${Math.round(n * 100) / 100 + 0} mm`;
+
+/** How sizes on the part are written (millimetres by default; the app passes its own for inches). */
+export function setDimensionFormat(format: (mm: number) => string): void {
+  fmt = format;
+}
 
 /**
  * The overall size of a part: width along the front edge, depth along the right edge and height up the

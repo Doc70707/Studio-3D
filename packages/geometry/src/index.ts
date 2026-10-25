@@ -1,4 +1,15 @@
 export { GeometryClient, type RebuildOutcome } from "./client";
-export { createGeometryWorker } from "./createWorker";
-export type { Measurements, MeshData } from "./protocol";
+export { createGeometryWorker, createSlicerWorker } from "./createWorker";
+export type { EdgeInfo, FaceInfo, Measurements, MeshData } from "./protocol";
 export * from "./faces";
+export { checkBinaryStl, type StlReport } from "./stl-check";
+export { stlTo3mf, type ThreeMfOptions } from "./threemf";
+export { layerBounds, loopArea, sliceStl, type Layer, type SliceResult } from "./slice";
+export { offsetLoops } from "./offset";
+export { layerWalls, MISSED_TOLERANCE_MM2, type LayerWalls } from "./walls";
+export { slicePart, type SlicedLayer, type SlicedPart, type SlicerSettings } from "./slicer";
+export { SlicerClient } from "./slicerClient";
+export { layerPaths, pathLength, type PathRole, type ToolPath } from "./toolpath";
+export { PLA, writeGcode, type GcodeMaterial, type GcodeOptions } from "./gcode";
+export { checkGcode, expectedFilament, movesTime, TYPICAL_ACCELERATION, type GcodeReport } from "./gcodeCheck";
+export { makeGcode, type PrintJob, type PrintJobResult } from "./printJob";

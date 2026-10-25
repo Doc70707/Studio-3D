@@ -11,9 +11,21 @@ const cyl = (d: number, h: number) => Math.PI * (d / 2) ** 2 * h;
 const current = (page: Page) => expect(host(page)).toHaveAttribute("data-geometry", "current");
 const canvas = (page: Page) => page.getByTestId("sketch-canvas");
 
-/** Where a sketch point (in mm) is on screen. */
+/** Where a sketch point (in mm) is on screen, once the drawing and its canvas have stopped moving. */
 async function at(page: Page, u: number, v: number): Promise<[number, number]> {
   const c = canvas(page);
+  let last = "";
+  await expect
+    .poll(
+      async () => {
+        const now = `${JSON.stringify(await c.boundingBox())} ${await c.getAttribute("data-origin")} ${await c.getAttribute("data-scale")}`;
+        const still = now === last;
+        last = now;
+        return still;
+      },
+      { intervals: [150] },
+    )
+    .toBe(true);
   const box = (await c.boundingBox())!;
   const k = Number(await c.getAttribute("data-scale"));
   const [ox, oy] = (await c.getAttribute("data-origin"))!.split(",").map(Number) as [number, number];
@@ -21,13 +33,13 @@ async function at(page: Page, u: number, v: number): Promise<[number, number]> {
 }
 const clickAt = async (page: Page, u: number, v: number) => page.mouse.click(...(await at(page, u, v)));
 
-/** The middle of the part of the 3D view the panels don't cover. */
+/** The middle of the part of the 3D view the bars and palettes leave open, where the views centre the part. */
 async function middleOfView(page: Page): Promise<[number, number]> {
-  const panel = (await page.locator(".panel").boundingBox())!;
-  const top = (await page.locator(".topbar").boundingBox())!;
-  const status = (await page.locator(".statusbar").boundingBox())!;
-  const vp = page.viewportSize()!;
-  return [(panel.x + panel.width + vp.width) / 2, (top.y + top.height + status.y) / 2];
+  const view = (await page.locator("main.viewport-host").boundingBox())!;
+  const [top, left, bottom, right] = (await page.locator("main.viewport-host").getAttribute("data-safe-area"))!
+    .split(",")
+    .map(Number) as [number, number, number, number];
+  return [view.x + (left + view.width - right) / 2, view.y + (top + view.height - bottom) / 2];
 }
 
 /** Picks the top face of the part by clicking it in the top view. */
@@ -115,6 +127,58 @@ test("circles are drawn by centre and edge, and the exact size can be typed", as
   await expect(volume(page)).toHaveText(cm3(72000 - cyl(6, 30)));
 });
 
+test("sizes can be typed while drawing, like AutoCAD's input boxes at the pointer", async ({ page }) => {
+  await sketchOnTop(page);
+  const boxes = page.getByTestId("typed-sizes");
+  // Circle: click the centre, type the diameter, Enter.
+  await page.getByRole("button", { name: "Circle tool" }).click();
+  await clickAt(page, 15, 20);
+  await page.mouse.move(...(await at(page, 19, 20)));
+  await expect(page.getByTestId("typed-diameter")).toContainText("8 mm"); // follows the pointer until typed
+  await page.keyboard.type("12.5");
+  await expect(page.getByTestId("typed-diameter")).toContainText("12.5 mm");
+  await page.keyboard.press("Enter");
+  await expect(boxes).toHaveCount(0);
+  await expect(field(page, "Circle diameter")).toHaveValue("12.5");
+
+  // Rectangle: first corner, width, Tab, height, Enter. It goes towards the pointer.
+  await page.getByRole("button", { name: "Rectangle tool" }).click();
+  await clickAt(page, 30, 5);
+  await page.mouse.move(...(await at(page, 40, 15)));
+  await page.keyboard.type("22");
+  await page.keyboard.press("Tab");
+  await expect(page.getByTestId("typed-height")).toHaveAttribute("data-active", "true");
+  await page.keyboard.type("14");
+  await page.screenshot({ path: `${OUT}sketch-typed-sizes.png` });
+  await page.keyboard.press("Enter");
+  await expect(field(page, "Rectangle width")).toHaveValue("22");
+  await expect(field(page, "Rectangle height")).toHaveValue("14");
+  await expect(field(page, "Rectangle left edge")).toHaveValue("30");
+  await expect(field(page, "Rectangle bottom edge")).toHaveValue("5");
+
+  await expect(page.getByTestId("sketch-profile")).toHaveCount(2);
+  // Outline: a length and an angle for each side; Enter with nothing typed closes it.
+  await page.getByRole("button", { name: "Outline tool" }).click();
+  await clickAt(page, 5, 30);
+  for (const [length, angle] of [
+    ["10", "0"],
+    ["5", "90"],
+  ]) {
+    await page.keyboard.type(length!);
+    await page.keyboard.press("Tab");
+    await page.keyboard.type(angle!);
+    await page.keyboard.press("Enter");
+  }
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("sketch-profile")).toHaveCount(3);
+
+  await page.getByRole("button", { name: "Cut in" }).click();
+  await field(page, "Sketch depth").fill("2");
+  await page.getByRole("button", { name: "Done" }).click();
+  await current(page);
+  await expect(volume(page)).toHaveText(cm3(72000 - (cyl(12.5, 2) + 22 * 14 * 2 + ((10 * 5) / 2) * 2)));
+});
+
 test("a sketch can be edited again, and Cancel leaves the design alone", async ({ page }) => {
   await sketchOnTop(page);
   await page.getByRole("button", { name: "Rectangle tool" }).click();
@@ -166,6 +230,7 @@ test("a bracket drawn on the plate, saved and exported as a watertight STL", asy
   await page.screenshot({ path: `${OUT}sketch-bracket.png` });
 
   const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Print Studio" }).click();
   await page.getByRole("button", { name: "Export STL" }).click();
   const file = `${OUT}app-export-sketch.stl`;
   mkdirSync(OUT, { recursive: true });

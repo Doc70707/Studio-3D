@@ -1,6 +1,6 @@
 {
   "name": "@studio3d/desktop",
-  "version": "0.10.0",
+  "version": "0.47.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.137.0",
     "@studio3d/document": "0.1.0",
     "@studio3d/geometry": "0.1.0",
     "@studio3d/viewport": "0.1.0",

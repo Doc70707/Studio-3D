@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { MAX_STEPS, MERGE_WINDOW_MS, canRedo, canUndo, record, redo, startHistory, undo } from "./history";
+import {
+  GROUP_KEY,
+  MAX_STEPS,
+  MERGE_WINDOW_MS,
+  canRedo,
+  canUndo,
+  record,
+  redo,
+  startHistory,
+  undo,
+  withdraw,
+} from "./history";
 import { newDocument, type ProjectDocument } from "./model";
 
 const withWidth = (doc: ProjectDocument, width: number): ProjectDocument => ({
@@ -32,6 +43,33 @@ describe("undo / redo", () => {
     for (const [i, w] of [1, 12, 120].entries()) h = record(h, withWidth(h.present, w), "box.width", i * 200);
     expect(h.past).toHaveLength(1);
     expect(undo(h).present).toBe(d0);
+  });
+
+  it("the parts of one action are one step however long it takes, until something else happens", () => {
+    const d0 = newDocument();
+    let h = startHistory(d0);
+    const key = `${GROUP_KEY}blurry-1`;
+    h = record(h, withWidth(h.present, 70), key, 0);
+    h = record(h, withWidth(h.present, 80), key, 30_000);
+    expect(h.past).toHaveLength(1);
+    expect(undo(h).present).toBe(d0);
+    h = record(h, withWidth(h.present, 90), null, 30_001);
+    h = record(h, withWidth(h.present, 100), key, 30_002);
+    expect(h.past).toHaveLength(3);
+  });
+
+  it("a group that didn't work can be withdrawn without a trace, but only while it is the last step", () => {
+    const d0 = newDocument();
+    let h = startHistory(d0);
+    const key = `${GROUP_KEY}blurry-2`;
+    h = record(h, withWidth(h.present, 70), key, 0);
+    h = record(h, withWidth(h.present, 80), key, 10);
+    const back = withdraw(h, key);
+    expect(back.present).toBe(d0);
+    expect(canUndo(back)).toBe(false);
+    expect(canRedo(back)).toBe(false);
+    const after = record(h, withWidth(h.present, 90), null, 20);
+    expect(withdraw(after, key)).toBe(after);
   });
 
   it("a pause, or a different field, starts a new step", () => {

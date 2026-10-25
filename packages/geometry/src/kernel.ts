@@ -2,12 +2,14 @@
 // Everything else uses the plain data it returns, so the kernel can be swapped later.
 import {
   setOC,
+  getOC,
+  asPnt,
+  iterTopo,
   draw,
   drawCircle,
   drawRectangle,
   makeBaseBox,
   makeCylinder,
-  makeCompound,
   makeSphere,
   makeVertex,
   measureArea,
@@ -15,14 +17,33 @@ import {
   measureVolume,
   Plane,
   type Drawing,
+  type Edge,
+  type Face,
   type Shape3D,
 } from "replicad";
 import type { OpenCascadeInstance } from "replicad-opencascadejs";
 import {
+  EDGE_SETS,
+  isCopyStep,
+  isCopyable,
+  isEdgeStep,
+  patternMoves,
   hasErrors,
   holeEdgeIssues,
+  currentFace,
+  holeAxis,
+  cross,
+  dot,
+  normalize,
+  type Vec3,
   threadOf,
   threadVolume,
+  boreDiameter,
+  bottomRadius,
+  drillPointDepth,
+  headDepth,
+  headOf,
+  modelledThread,
   shapeSize,
   shapeVolume,
   validateDocument,
@@ -30,17 +51,23 @@ import {
   add3,
   nestingDepths,
   profileArea,
+  profileMoment,
+  yDirOf,
   scale,
   type BoxFeature,
   type Profile,
   type SketchFeature,
   type HoleFeature,
   type HollowFeature,
+  type EdgeFeature,
+  PICK_TOLERANCE,
+  type MirrorFeature,
+  type PatternFeature,
   type Issue,
   type ProjectDocument,
   type ShapeFeature,
 } from "@studio3d/document";
-import type { Measurements, MeshData } from "./protocol";
+import type { EdgeInfo, FaceInfo, Measurements, MeshData } from "./protocol";
 import { makeThread } from "./threads";
 
 export function useKernel(oc: OpenCascadeInstance): void {
@@ -59,6 +86,8 @@ export type BuildResult =
 export interface Piece {
   id: string;
   shape: Shape3D;
+  /** A hollow, fillet or chamfer: the whole part after that step, which explains the faces the step made. */
+  modifier?: boolean;
 }
 
 /** What the finished box must measure. Used to catch the kernel silently returning the wrong shape. */
@@ -75,6 +104,15 @@ class ShapeCheckFailed extends Error {
   }
 }
 
+/** A shape's size along x, y and z: a turned box takes more room across and front to back. */
+function turnedSize(s: ShapeFeature): [number, number, number] {
+  const [w, d, h] = shapeSize(s);
+  if (s.type !== "box" || !s.rotation) return [w, d, h];
+  const a = (s.rotation * Math.PI) / 180;
+  const [c, n] = [Math.abs(Math.cos(a)), Math.abs(Math.sin(a))];
+  return [w * c + d * n, w * n + d * c, h];
+}
+
 /** Makes one shape in place on the plate, without any checks. */
 function makeRaw(s: ShapeFeature): Shape3D {
   switch (s.type) {
@@ -85,11 +123,12 @@ function makeRaw(s: ShapeFeature): Shape3D {
         shape = solid.shell(s.wall, (f) => f.inPlane("XY", s.height));
         solid.delete();
       }
-      return shape.translate([s.x, s.y, s.z]);
+      const placed = shape.translate([s.x, s.y, s.z]);
+      return s.rotation ? placed.rotate(s.rotation, [s.x, s.y, 0], [0, 0, 1]) : placed;
     }
     case "cylinder": {
       const thread = threadOf(s);
-      if (thread) return makeThread(thread, s.height).translate([s.x, s.y, s.z]);
+      if (thread) return makeThread(thread, s.height, s.hand === "left").translate([s.x, s.y, s.z]);
       return makeCylinder(s.diameter / 2, s.height, [s.x, s.y, s.z], [0, 0, 1]);
     }
     case "tube": {
@@ -131,11 +170,13 @@ export function makeShape(s: ShapeFeature): Shape3D {
   const expected = shapeVolume(s);
   const bb = shape.boundingBox;
   const size = [bb.width, bb.height, bb.depth];
-  const want = shapeSize(s);
+  const want = turnedSize(s);
   const tol = tolerance(s);
+  // A turned box's bounds come from the kernel's box round its slanted sides, which isn't exact to a millionth.
+  const exact = tol === 1e-6 && !(s.type === "box" && s.rotation);
   const ok =
     Math.abs(volume - expected) <= tol * expected &&
-    size.every((v, i) => Math.abs(v - want[i]!) <= (tol === 1e-6 ? 1e-6 * Math.max(1, want[i]!) : 1e-2));
+    size.every((v, i) => Math.abs(v - want[i]!) <= (exact ? 1e-6 * Math.max(1, want[i]!) : 1e-2));
   if (!ok) {
     shape.delete();
     throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
@@ -154,12 +195,30 @@ export function buildBox(b: BoxFeature): BuildResult {
   }
 }
 
-/** The most material a hole can remove: a full cylinder of its diameter and depth. */
+/**
+ * The most material a hole can remove, worked out from its sizes: its bore all the way down, plus the ring of a
+ * counterbore or the cone of a countersink; for a modelled thread, the thread plus the plain hole below it.
+ */
 export function maxHoleVolume(h: HoleFeature, partHeight: number): number {
+  const tip = drillPointDepth(h);
+  return holeBodyVolume(h, partHeight) + (Math.PI * bottomRadius(h) ** 2 * tip) / 3;
+}
+
+function holeBodyVolume(h: HoleFeature, partHeight: number): number {
   const depth = h.depth === 0 ? partHeight : h.depth;
-  const thread = threadOf(h);
-  if (thread) return threadVolume(thread, depth) * (1 + tolerance(h));
-  return Math.PI * (h.diameter / 2) ** 2 * depth;
+  const thread = modelledThread(h) ? threadOf(h) : null;
+  if (thread) {
+    const threaded = Math.min(h.threadDepth ?? depth, depth);
+    return threadVolume(thread, threaded) * (1 + tolerance(h)) + Math.PI * thread.minor ** 2 * (depth - threaded);
+  }
+  const r = boreDiameter(h) / 2;
+  const bore = Math.PI * r * r * depth;
+  const head = headOf(h);
+  if (!head) return bore;
+  const R = head.diameter / 2;
+  const down = headDepth(h);
+  if (head.kind === "counterbore") return bore + Math.PI * (R * R - r * r) * down;
+  return bore + (Math.PI * down * (R * R + R * r + r * r)) / 3 - Math.PI * r * r * down;
 }
 
 interface Part {
@@ -252,26 +311,50 @@ function drawProfile(p: Profile): Drawing {
  * area times its length before the outlines are joined.
  */
 export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
+  if (s.revolve !== undefined) return makeRevolveTool(s);
   const cut = s.mode === "cut";
   const extra = cut ? 1 : 0;
   const length = (cut && s.depth === 0 ? partSize + 2 : s.depth) + extra;
   const origin = add3(s.plane.origin, scale(s.plane.normal, extra));
+  return joinOutlines(s, (p) => [
+    drawProfile(p)
+      .sketchOnPlane(new Plane(origin, s.plane.xDir, s.plane.normal))
+      .extrude(cut ? -length : length) as Shape3D,
+    profileArea(p) * length,
+  ]);
+}
+
+/**
+ * Spins a revolve's outlines round the drawing's up line through its (0, 0). Each outline is checked against
+ * its exact volume (Pappus: the angle times its area times how far its centre is from the line).
+ */
+function makeRevolveTool(s: SketchFeature): Tool {
+  const angle = s.revolve!;
+  const plane = new Plane(s.plane.origin, s.plane.xDir, s.plane.normal);
+  return joinOutlines(s, (p) => [
+    drawProfile(p).sketchOnPlane(plane).revolve(yDirOf(s.plane), { origin: s.plane.origin, angle }) as Shape3D,
+    ((angle * Math.PI) / 180) * profileMoment(p),
+  ]);
+}
+
+/**
+ * Makes each outline's solid, checks it against the volume it must have, and joins them: outlines on their own
+ * add, one drawn inside another is a hole in it, and an island in a hole adds again.
+ */
+function joinOutlines(s: SketchFeature, make: (p: Profile) => [Shape3D, number]): Tool {
   const depths = nestingDepths(s.profiles);
-  // Outlines on their own add; one drawn inside another is a hole in it; an island in a hole adds again.
   const order = s.profiles.map((p, i) => ({ p, depth: depths[i]! })).sort((a, b) => a.depth - b.depth);
+  const wrong = () => new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
   let tool: Shape3D | null = null;
   let most = 0;
   let biggest = 0;
   let holes = 0;
   try {
     for (const { p, depth } of order) {
-      const solid = drawProfile(p)
-        .sketchOnPlane(new Plane(origin, s.plane.xDir, s.plane.normal))
-        .extrude(cut ? -length : length) as Shape3D;
-      const want = profileArea(p) * length;
+      const [solid, want] = make(p);
       if (Math.abs(measureVolume(solid) - want) > 1e-6 * want) {
         solid.delete();
-        throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
+        throw wrong();
       }
       if (depth % 2 === 0) {
         most += want;
@@ -294,7 +377,7 @@ export function makeSketchTool(s: SketchFeature, partSize: number): Tool {
   // Joined outlines can't be bigger than all of them together, or smaller than the biggest minus every hole.
   if (v > most * (1 + 1e-6) || v < (biggest - holes) * (1 - 1e-6) - 1e-9) {
     tool.delete();
-    throw new ShapeCheckFailed(`${s.name} came out wrong, so your last good version was kept.`, s.id);
+    throw wrong();
   }
   if (v <= 1e-9 * most) {
     tool.delete();
@@ -310,26 +393,150 @@ function partSpan(part: Part | null): number {
   return Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
 }
 
+/** How far the part's bounding box reaches from `point` in `direction`: the deepest a hole can go there. */
+function reachInto(point: Vec3, direction: Vec3, min: number[], max: number[]): number {
+  let most = 0;
+  for (const x of [min[0]!, max[0]!])
+    for (const y of [min[1]!, max[1]!])
+      for (const z of [min[2]!, max[2]!])
+        most = Math.max(most, dot([x - point[0], y - point[1], z - point[2]], direction));
+  return most;
+}
+
+/** Turns a solid made along +Z so that +Z points along `n`, turning about the origin. */
+function pointAlong(shape: Shape3D, n: Vec3): Shape3D {
+  if (n[2] > 1 - 1e-9) return shape;
+  if (n[2] < -1 + 1e-9) return shape.rotate(180, [0, 0, 0], [1, 0, 0]);
+  return shape.rotate((Math.acos(n[2]) * 180) / Math.PI, [0, 0, 0], normalize(cross([0, 0, 1], n)));
+}
+
+/** Where a hole on a face drills, and how deep it can go: its own depth, or right through the part. */
+function faceHole(h: HoleFeature & { face: NonNullable<HoleFeature["face"]> }, doc: ProjectDocument, part: Part) {
+  const [min, max] = part.shape.boundingBox.bounds;
+  const face = currentFace(doc, h.face);
+  const { point, direction } = holeAxis(face, h.x, h.y);
+  return { face, point, direction, reach: reachInto(point, direction, min, max) };
+}
+
+/** The solid a hole cuts. */
+function holeTool(h: HoleFeature, doc: ProjectDocument, part: Part): Shape3D {
+  const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
+  const [min, max] = part.shape.boundingBox.bounds;
+  if (h.face) {
+    // Square into the face: from the bottom of the hole (or past the far side of the part) out to 1 mm above the face.
+    const { point, direction, reach } = faceHole({ ...h, face: h.face }, doc, part);
+    const deep = h.depth === 0 ? reach + extra : h.depth;
+    return pointAlong(localHoleTool(h, deep, extra), scale(direction, -1)).translate(point);
+  }
+  // From the top: down to its depth, or to 1 mm below the part.
+  const deep = h.depth === 0 ? max[2]! - min[2]! + extra : h.depth;
+  return localHoleTool(h, deep, extra).translate([h.x, h.y, max[2]!]);
+}
+
+/**
+ * A hole's solid made with its face at z = 0, going `deep` down into -z and `extra` up out of the face.
+ * - A modelled thread runs from its thread depth up; below it the hole carries on at the thread's smallest
+ *   diameter, so there's no step.
+ * - A plain, clearance or simplified threaded hole is a cylinder.
+ * - A counterbore or countersink is the hole's side profile spun round its axis.
+ */
+function localHoleTool(h: HoleFeature, deep: number, extra: number): Shape3D {
+  const thread = modelledThread(h) ? threadOf(h) : null;
+  // A blind hole's drill point: the 118° cone below its depth (0 for a flat bottom or a through hole).
+  const tip = drillPointDepth(h);
+  if (thread) {
+    const threaded = Math.min(h.threadDepth ?? deep, deep);
+    // A threaded tool is made in 5 mm steps of length (any extra pokes out of the face, cutting nothing), so a
+    // thread already built is reused while the part or the hole's depth changes a little.
+    const tool = makeThread(thread, Math.ceil((threaded + extra) / 5) * 5, h.hand === "left").translate([
+      0,
+      0,
+      -threaded,
+    ]);
+    if (threaded >= deep - 1e-9 && tip === 0) return tool;
+    // Below the thread: the plain hole at the thread's smallest diameter, ending in the drill point if it has one.
+    const top = Math.min(threaded, deep);
+    const rest =
+      tip === 0
+        ? makeCylinder(thread.minor, deep - threaded, [0, 0, -deep], [0, 0, 1])
+        : (draw([0, -deep - tip])
+            .lineTo([thread.minor, -deep])
+            .lineTo([thread.minor, -top + 0.01])
+            .lineTo([0, -top + 0.01])
+            .close()
+            .sketchOnPlane("XZ")
+            .revolve([0, 0, 1]) as Shape3D);
+    try {
+      return tool.fuse(rest);
+    } finally {
+      tool.delete();
+      rest.delete();
+    }
+  }
+  const r = boreDiameter(h) / 2;
+  const head = headOf(h);
+  if (!head && tip === 0) return makeCylinder(r, deep + extra, [0, 0, -deep], [0, 0, 1]);
+  // The hole's side profile, from the bottom (or the drill point's tip) up, spun round its axis.
+  const start = draw([0, -deep - tip]).lineTo([r, -deep]);
+  if (!head)
+    return start.lineTo([r, extra]).lineTo([0, extra]).close().sketchOnPlane("XZ").revolve([0, 0, 1]) as Shape3D;
+  const R = head.diameter / 2;
+  const down = headDepth(h);
+  const pen = start.lineTo([r, -down]);
+  const side = head.kind === "counterbore" ? pen.lineTo([R, -down]) : pen.lineTo([R, 0]);
+  return side.lineTo([R, extra]).lineTo([0, extra]).close().sketchOnPlane("XZ").revolve([0, 0, 1]) as Shape3D;
+}
+
 /**
  * Drills one hole straight down from the top of the part and checks the result.
  * The cut must remove some material but never more than the hole's own cylinder.
  */
-function drill(part: Part, h: HoleFeature, issues: Issue[], keep?: Piece[]): Part {
+function drill(part: Part, h: HoleFeature, doc: ProjectDocument, issues: Issue[], keep?: Piece[]): Part {
   const bb = part.shape.boundingBox;
   const [min, max] = bb.bounds;
-  const height = max[2] - min[2];
-  const edge = holeEdgeIssues(h, min, max, height);
-  if (hasErrors(edge)) throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
-  issues.push(...edge);
+  let height = max[2] - min[2];
+  if (h.face) {
+    // The face's own edges were checked with the document; here the depth is checked against the part.
+    const { reach } = faceHole({ ...h, face: h.face }, doc, part);
+    if (h.depth > reach + 1e-9)
+      throw new ShapeCheckFailed(
+        `The part is only ${fmt(reach)} deep under ${h.name}. Use ${fmt(reach)} or less, or 0 to go all the way through.`,
+        h.id,
+        "depth",
+      );
+    height = reach;
+  } else {
+    const edge = holeEdgeIssues(h, min, max, height);
+    if (hasErrors(edge)) throw new ShapeCheckFailed(edge[0]!.message, h.id, edge[0]!.field);
+    issues.push(...edge);
+  }
+  // A through hole's thread and head are checked against how deep the part is under it.
+  if (modelledThread(h) && h.threadDepth !== undefined && h.threadDepth > height + 1e-9)
+    throw new ShapeCheckFailed(
+      `The part is only ${fmt(height)} deep under ${h.name}, so the thread can't go deeper than that.`,
+      h.id,
+      "threadDepth",
+    );
+  const tip = drillPointDepth(h);
+  if (tip > 0 && h.depth + tip > height - 1e-9)
+    throw new ShapeCheckFailed(
+      `The drill point under ${h.name} would reach ${fmt(h.depth + tip)} deep, but the part is only ${fmt(height)} deep there. ` +
+        `Make the hole shallower, give it a flat bottom, or make it a through hole (depth 0).`,
+      h.id,
+      "depth",
+    );
+  const head = headOf(h);
+  if (head && headDepth(h) >= height - 1e-9) {
+    const name = head.kind === "counterbore" ? "counterbore" : "countersink";
+    throw new ShapeCheckFailed(
+      `The ${name} on ${h.name} reaches ${fmt(headDepth(h))} deep, but the part is only ${fmt(height)} deep there. ` +
+        `Make the ${name} smaller.`,
+      h.id,
+      head.kind === "counterbore" ? "headDepth" : "headDiameter",
+    );
+  }
 
-  const extra = 1; // the tool pokes 1 mm past the faces it cuts, so no paper-thin skin is left behind
-  const bottom = h.depth === 0 ? min[2] - extra : max[2] - h.depth;
-  const thread = threadOf(h);
-  // A threaded tool is made in 5 mm steps of length (any extra pokes out of the top, cutting nothing), so a thread
-  // already built is reused while the part's height or the hole's depth changes a little.
-  const tool = thread
-    ? makeThread(thread, Math.ceil((max[2] + extra - bottom) / 5) * 5).translate([h.x, h.y, bottom])
-    : makeCylinder(h.diameter / 2, max[2] + extra - bottom, [h.x, h.y, bottom], [0, 0, 1]);
+  const tool = holeTool(h, doc, part);
   let result: Shape3D;
   try {
     result = part.shape.cut(tool);
@@ -429,6 +636,143 @@ export function hollow(part: Part, h: HollowFeature): Part {
   return { shape: result, volume, pieces: result.solids.length };
 }
 
+/**
+ * Whether an edge belongs to a fillet's or chamfer's set, judged from where it lies on the part. A picked edge is the
+ * one whose middle is where the picked edge's middle was.
+ */
+function edgeChooser(f: EdgeFeature, partMin: number[], partMax: number[]): (e: Edge) => boolean {
+  const set = f.edges;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  return (e) => {
+    if (set === "all") return true;
+    if (set === "picked") {
+      const m = e.pointAt(0.5);
+      const at = [m.x, m.y, m.z];
+      m.delete();
+      return (f.picked ?? []).some((p) => Math.hypot(p[0] - at[0]!, p[1] - at[1]!, p[2] - at[2]!) < PICK_TOLERANCE);
+    }
+    const [lo, hi] = e.boundingBox.bounds;
+    if (set === "top") return near(lo[2]!, partMax[2]!) && near(hi[2]!, partMax[2]!);
+    if (set === "bottom") return near(lo[2]!, partMin[2]!) && near(hi[2]!, partMin[2]!);
+    // Upright: a straight edge with no sideways extent.
+    return e.geomType === "LINE" && near(lo[0]!, hi[0]!) && near(lo[1]!, hi[1]!) && hi[2]! - lo[2]! > 1e-6;
+  };
+}
+
+/**
+ * Rounds (fillet) or bevels (chamfer) the chosen edges. The result must be one solid per piece as before, no bigger
+ * than the part, and its volume may change by at most what a cut of that size along every chosen edge could take
+ * or add (a generous bound: the exact amounts are checked in the tests).
+ */
+export function edgeStep(part: Part, f: EdgeFeature): Part {
+  const [min, max] = part.shape.boundingBox.bounds;
+  const chosen = edgeChooser(f, min, max);
+  const edges = part.shape.edges;
+  const picked = edges.filter(chosen);
+  const length = picked.reduce((a, e) => a + e.length, 0);
+  edges.forEach((e) => e.delete());
+  const what = f.type === "fillet" ? "round" : "bevel";
+  const set = EDGE_SETS.find((x) => x.edges === f.edges)!.label.toLowerCase();
+  if (f.edges === "picked" && picked.length < (f.picked?.length ?? 0)) {
+    const lost = (f.picked?.length ?? 0) - picked.length;
+    throw new ShapeCheckFailed(
+      `${lost === 1 ? "A picked edge has" : `${lost} picked edges have`} moved or gone after an earlier change. ` +
+        `Pick the edges again.`,
+      f.id,
+      "edges",
+    );
+  }
+  if (!picked.length)
+    throw new ShapeCheckFailed(`The part has no ${set} to ${what}. Choose other edges.`, f.id, "edges");
+
+  let result: Shape3D;
+  try {
+    const size = (e: Edge) => (chosen(e) ? f.size : null);
+    result = f.type === "fillet" ? part.shape.fillet(size) : part.shape.chamfer(size);
+  } catch {
+    throw new ShapeCheckFailed(cantEdge(f, set), f.id, "size");
+  }
+  const volume = measureVolume(result);
+  const pieces = result.solids.length;
+  const [rmin, rmax] = result.boundingBox.bounds;
+  const inside = [0, 1, 2].every((i) => rmin[i]! >= min[i]! - 1e-4 && rmax[i]! <= max[i]! + 1e-4);
+  const most = 4 * length * f.size * f.size + 1e-6 * part.volume;
+  if (!(volume > 0) || pieces !== part.pieces || !inside || Math.abs(volume - part.volume) > most) {
+    result.delete();
+    throw new ShapeCheckFailed(cantEdge(f, set), f.id, "size");
+  }
+  return { shape: result, volume, pieces };
+}
+
+/** The solid an earlier step adds or cuts, made again where it stood, with the range its volume must fall in. */
+function sourceTool(
+  src: ShapeFeature | HoleFeature | SketchFeature,
+  part: Part,
+  doc: ProjectDocument,
+): Tool & { mode: "add" | "cut" } {
+  if (src.type === "hole") {
+    const shape = holeTool(src, doc, part);
+    return { shape, least: 0, most: measureVolume(shape) * (1 + 1e-6), mode: "cut" };
+  }
+  if (src.type === "sketch") return { ...makeSketchTool(src, partSpan(part)), mode: src.mode };
+  const shape = makeShape(src);
+  const v = shapeVolume(src);
+  const tol = tolerance(src);
+  return { shape, least: v * (1 - tol), most: v * (1 + tol), mode: src.mode };
+}
+
+/**
+ * Adds or cuts copies of an earlier step: moved in a grid, turned round an upright line, or mirrored. Each copy is
+ * checked like the original would be (an added copy adds no more than its own volume; a cut takes no more).
+ */
+export function copyStep(
+  part: Part,
+  f: PatternFeature | MirrorFeature,
+  doc: ProjectDocument,
+  issues: Issue[],
+  keep?: Piece[],
+): Part {
+  const src = doc.features.find((x) => x.id === f.source);
+  if (!src || !isCopyable(src))
+    throw new ShapeCheckFailed("Choose an earlier shape, hole or sketch to copy.", f.id, "source");
+  const tool = sourceTool(src, part, doc);
+  const copies: Shape3D[] = [];
+  try {
+    if (f.type === "mirror")
+      copies.push(
+        f.axis === "x" ? tool.shape.clone().mirror("YZ", [f.at, 0, 0]) : tool.shape.clone().mirror("XZ", [0, f.at, 0]),
+      );
+    else
+      for (const m of patternMoves(f))
+        copies.push(
+          m.turn
+            ? tool.shape.clone().rotate(m.turn, [f.cx, f.cy, 0], [0, 0, 1])
+            : tool.shape.clone().translate([m.by[0], m.by[1], 0]),
+        );
+  } finally {
+    tool.shape.delete();
+  }
+  let current = part;
+  try {
+    while (copies.length) {
+      const copy = copies.shift()!;
+      const step = { id: f.id, name: f.name, mode: tool.mode };
+      const next = applyTool(current, { ...tool, shape: copy }, step, issues, keep);
+      if (current !== part) current.shape.delete();
+      current = next;
+    }
+  } catch (e) {
+    copies.forEach((c) => c.delete());
+    if (current !== part) current.shape.delete();
+    throw e;
+  }
+  return current;
+}
+
+const cantEdge = (f: EdgeFeature, set: string) =>
+  `${f.name} couldn't ${f.type === "fillet" ? "round" : "bevel"} the ${set} by ${fmt(f.size)}, so your last good ` +
+  "version was kept. It is probably bigger than a face next to one of those edges: try a smaller size.";
+
 /** Why a hollow failed, in words that point at what to change. */
 const cantHollow = (h: HollowFeature) =>
   `${h.name} couldn't be made with ${fmt(h.wall)} walls, so your last good version was kept. ` +
@@ -477,9 +821,12 @@ export function buildDocument(doc: ProjectDocument, keepPieces = false): BuildRe
   for (const f of doc.features) {
     try {
       let next: Part;
-      if (f.type === "hole") next = drill(part!, f, issues, keep);
-      else if (f.type === "hollow") next = hollow(part!, f);
-      else if (f.type === "sketch") {
+      if (f.type === "hole") next = drill(part!, f, doc, issues, keep);
+      else if (isCopyStep(f)) next = copyStep(part!, f, doc, issues, keep);
+      else if (f.type === "hollow" || isEdgeStep(f)) {
+        next = f.type === "hollow" ? hollow(part!, f) : edgeStep(part!, f);
+        keep?.push({ id: f.id, shape: next.shape.clone(), modifier: true });
+      } else if (f.type === "sketch") {
         const tool = makeSketchTool(f, partSpan(part));
         if (part) next = applyTool(part, tool, f, issues, keep);
         else {
@@ -520,17 +867,16 @@ const ON_SURFACE = 1e-3;
  * A face belongs to the last step whose solid has the face's surface on its own outside: each corner of the face's
  * biggest triangle lies exactly on that solid's surface (corners are on the exact surface, unlike the middle of a
  * triangle on a curve), and so does the triangle's middle, within the display's 0.05 mm accuracy.
- * Faces no step's solid explains are the inside walls a hollow made, so they belong to the hollow.
+ * Faces no shape or sketch explains were made by a hollow (its inside walls), a fillet or a chamfer: they belong to
+ * the first of those after which the face exists.
  */
-export function faceOwners(mesh: MeshData, pieces: Piece[], doc: ProjectDocument): string[] {
-  const hollowId = doc.features.find((f) => f.type === "hollow")?.id ?? "";
+export function faceOwners(mesh: MeshData, pieces: Piece[]): string[] {
   const surfaces = pieces.map((p) => {
-    const faces = p.shape.faces;
-    const shell = makeCompound(faces);
-    faces.forEach((f) => f.delete());
     const [lo, hi] = p.shape.boundingBox.bounds;
-    return { id: p.id, shell, lo, hi, query: new DistanceQuery(shell) };
+    return { id: p.id, modifier: !!p.modifier, lo, hi, faces: faceIndex(p.shape) };
   });
+  const steps = surfaces.filter((s) => !s.modifier);
+  const modifiers = surfaces.filter((s) => s.modifier);
   const owners: string[] = [];
   try {
     const n = mesh.faces.length / 2;
@@ -551,34 +897,99 @@ export function faceOwners(mesh: MeshData, pieces: Piece[], doc: ProjectDocument
       }
       const pts = [corner(best), corner(best + 1), corner(best + 2)];
       const mid = [0, 1, 2].map((k) => (pts[0]![k]! + pts[1]![k]! + pts[2]![k]!) / 3) as [number, number, number];
-      let owner = hollowId;
-      for (let p = surfaces.length - 1; p >= 0; p--) {
-        const s = surfaces[p]!;
+      const on = (s: (typeof surfaces)[number]) => {
         const inside = (q: number[]) => q.every((v, k) => v >= s.lo[k]! - 0.1 && v <= s.hi[k]! + 0.1);
-        if (!inside(mid)) continue;
-        if (distanceTo(s.query, mid) > MESH.tolerance + ON_SURFACE) continue;
-        if (pts.every((q) => distanceTo(s.query, q) <= ON_SURFACE)) {
-          owner = s.id;
-          break;
-        }
-      }
+        if (!inside(mid)) return false;
+        if (!within(s.faces, mid, MESH.tolerance + ON_SURFACE)) return false;
+        return pts.every((q) => within(s.faces, q, ON_SURFACE));
+      };
+      // The last shape or sketch whose own surface has the face; failing that, the first hollow, fillet or chamfer
+      // after which the face exists (its inside walls, rounded edges or bevels).
+      const owner = [...steps].reverse().find(on)?.id ?? modifiers.find(on)?.id ?? "";
       owners.push(owner);
     }
   } finally {
-    surfaces.forEach((s) => {
-      s.query.delete();
-      s.shell.delete();
-    });
+    surfaces.forEach((s) =>
+      s.faces.forEach((x) => {
+        x.query?.delete();
+        x.projector?.delete();
+        x.face.delete();
+      }),
+    );
   }
   return owners;
 }
 
-function distanceTo(query: DistanceQuery, at: [number, number, number]): number {
-  const v = makeVertex(at);
+/**
+ * A solid's faces, each with its bounding box, for asking how far a point is from the solid's surface. Only the faces
+ * whose boxes reach the point are measured. Flat and simple round faces are measured exactly. Free-form faces (a
+ * thread's tooth) are measured against their surface with a projector set up once per face, which is far quicker
+ * than a full shape-to-shape distance each time; the exact distance is still used when the point doesn't project
+ * inside the face's surface patch.
+ */
+interface IndexedFace {
+  lo: number[];
+  hi: number[];
+  face: Face;
+  query: DistanceQuery | null;
+  projector: OcProjector | null | undefined;
+}
+
+type OcProjector = {
+  Perform(p: unknown): void;
+  NbPoints(): number;
+  LowerDistance(): number;
+  delete(): void;
+};
+
+const FREE_FORM = new Set(["BSPLINE_SURFACE", "BEZIER_SURFACE", "OFFSET_SURFACE", "OTHER_SURFACE"]);
+
+function faceIndex(shape: Shape3D): IndexedFace[] {
+  return shape.faces.map((face) => {
+    const [lo, hi] = face.boundingBox.bounds;
+    return { lo, hi, face, query: null, projector: FREE_FORM.has(face.geomType) ? undefined : null };
+  });
+}
+
+function projectorFor(f: IndexedFace): OcProjector | null {
+  if (f.projector !== undefined) return f.projector;
+  const oc = getOC();
+  const surface = oc.BRep_Tool.Surface(f.face.wrapped);
+  const { uMin, uMax, vMin, vMax } = f.face.UVBounds;
+  const projector = new oc.GeomAPI_ProjectPointOnSurf() as unknown as OcProjector & {
+    Init(...args: unknown[]): void;
+  };
+  projector.Init(surface, uMin, uMax, vMin, vMax, oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad);
+  (surface as unknown as { delete(): void }).delete();
+  f.projector = projector;
+  return projector;
+}
+
+/** Whether a point is within `tolerance` of any of the faces. */
+function within(faces: IndexedFace[], at: [number, number, number], tolerance: number): boolean {
+  const pad = tolerance + 1e-6;
+  let v: ReturnType<typeof makeVertex> | null = null;
+  let p: { delete(): void } | null = null;
   try {
-    return query.distanceTo(v);
+    for (const f of faces) {
+      if (!at.every((c, k) => c >= f.lo[k]! - pad && c <= f.hi[k]! + pad)) continue;
+      const projector = projectorFor(f);
+      if (projector) {
+        p ??= asPnt(at);
+        projector.Perform(p);
+        if (projector.NbPoints() > 0) {
+          if (projector.LowerDistance() <= tolerance) return true;
+          continue;
+        }
+      }
+      v ??= makeVertex(at);
+      f.query ??= new DistanceQuery(f.face);
+      if (f.query.distanceTo(v) <= tolerance) return true;
+    }
+    return false;
   } finally {
-    v.delete();
+    v?.delete();
+    p?.delete();
   }
 }
 
@@ -596,6 +1007,7 @@ export function measure(shape: Shape3D): Measurements {
     size: [bb.width, bb.height, bb.depth],
     min: [min[0], min[1], min[2]],
     max: [max[0], max[1], max[2]],
+    solids: [...iterTopo(shape.wrapped, "solid")].length,
   };
 }
 
@@ -609,7 +1021,98 @@ export function tessellate(shape: Shape3D): MeshData {
     edges: new Float32Array(e.lines),
     faces: new Uint32Array(m.faceGroups.flatMap((g) => [g.start, g.count])),
     owners: [],
+    edgeInfo: edgesWithSeams(shape),
+    faceInfo: shape.faces.map(faceInfo),
   };
+}
+
+/** Every edge for snapping and picking, with the seams of round faces marked. */
+function edgesWithSeams(shape: Shape3D): EdgeInfo[] {
+  const oc = getOC();
+  const seams: Edge[] = [];
+  for (const face of shape.faces)
+    for (const edge of face.edges) if (oc.BRep_Tool.IsClosed(edge.wrapped, face.wrapped)) seams.push(edge);
+  return shape.edges.map((edge) => {
+    const info = edgeInfo(edge);
+    return seams.some((s) => s.isSame(edge)) ? { ...info, seam: true } : info;
+  });
+}
+
+type P3 = [number, number, number];
+const xyz = (v: { x: number; y: number; z: number }): P3 => [v.x, v.y, v.z];
+const gp = (p: { X(): number; Y(): number; Z(): number }): P3 => [p.X(), p.Y(), p.Z()];
+
+/** One edge for snapping: its ends and middle, points along it, and a circle's centre, radius and axis. */
+function edgeInfo(edge: Edge): EdgeInfo {
+  const type = edge.geomType;
+  const kind = type === "LINE" ? "line" : type === "CIRCLE" ? "circle" : "other";
+  const steps = kind === "line" ? 1 : 48;
+  const points: P3[] = [];
+  for (let i = 0; i <= steps; i++) points.push(xyz(edge.pointAt(i / steps)));
+  const info: EdgeInfo = {
+    kind,
+    start: xyz(edge.startPoint),
+    end: xyz(edge.endPoint),
+    middle: xyz(edge.pointAt(0.5)),
+    closed: edge.isClosed,
+    points,
+  };
+  if (kind === "circle") {
+    // The adaptor is replicad's own handle on the curve; the circle it describes is plain numbers once read.
+    const adaptor = (edge as unknown as { _geomAdaptor(): { Circle(): GpCircle; delete(): void } })._geomAdaptor();
+    const c = adaptor.Circle();
+    info.centre = gp(c.Location());
+    info.radius = c.Radius();
+    info.axis = gp(c.Axis().Direction());
+    c.delete();
+    adaptor.delete();
+  }
+  return info;
+}
+
+interface GpXYZ {
+  X(): number;
+  Y(): number;
+  Z(): number;
+}
+interface GpCircle {
+  Location(): GpXYZ;
+  Radius(): number;
+  Axis(): { Location(): GpXYZ; Direction(): GpXYZ };
+  delete(): void;
+}
+
+/** One face for snapping and picking: its centre of area, and for a cylinder its axis and which side is solid. */
+function faceInfo(face: Face): FaceInfo {
+  const type = face.geomType;
+  const info: FaceInfo = {
+    kind: type === "PLANE" ? "plane" : type === "CYLINDRE" ? "cylinder" : "other",
+    centre: xyz(face.center),
+  };
+  if (info.kind === "cylinder") {
+    const adaptor = (face as unknown as { _geomAdaptor(): { Cylinder(): GpCylinder; delete(): void } })._geomAdaptor();
+    const cyl = adaptor.Cylinder();
+    const ax = cyl.Axis();
+    const point = gp(ax.Location());
+    const direction = gp(ax.Direction());
+    info.axis = { point, direction };
+    info.radius = cyl.Radius();
+    cyl.delete();
+    adaptor.delete();
+    // On a hole the face's outward normal points back towards the axis.
+    const b = face.UVBounds;
+    const on = xyz(face.pointOnSurface((b.uMin + b.uMax) / 2, (b.vMin + b.vMax) / 2));
+    const n = xyz(face.normalAt(on));
+    const t = (on[0] - point[0]) * direction[0] + (on[1] - point[1]) * direction[1] + (on[2] - point[2]) * direction[2];
+    const out = [0, 1, 2].map((i) => on[i]! - point[i]! - t * direction[i]!);
+    info.inside = out[0]! * n[0] + out[1]! * n[1] + out[2]! * n[2] < 0;
+  }
+  return info;
+}
+interface GpCylinder {
+  Axis(): { Location(): GpXYZ; Direction(): GpXYZ };
+  Radius(): number;
+  delete(): void;
 }
 
 export async function exportStl(shape: Shape3D): Promise<ArrayBuffer> {

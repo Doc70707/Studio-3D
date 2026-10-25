@@ -161,6 +161,16 @@ export const PLATE_PLANE: SketchPlane = {
   normal: [0, 0, 1],
 };
 
+/**
+ * The upright drawing surface a revolve is drawn on: it faces the front, x runs left to right and up in the
+ * drawing is up in the world. The outline spins round the drawing's up line through (0, 0).
+ */
+export const SPIN_PLANE: SketchPlane = {
+  origin: [0, 0, 0],
+  xDir: [1, 0, 0],
+  normal: [0, -1, 0],
+};
+
 /** Signed area of a closed outline (positive when its corners go anticlockwise). */
 export function polygonArea(points: Point2[]): number {
   let a = 0;
@@ -181,6 +191,29 @@ export function profileArea(p: Profile): number {
       return Math.PI * (p.diameter / 2) ** 2;
     case "polygon":
       return Math.abs(polygonArea(p.points));
+  }
+}
+
+/**
+ * How far a profile's area sits from the drawing's up line (x = 0): its area times the x of its centre. Spinning
+ * the profile all the way round makes a solid of 2π times this (Pappus's theorem).
+ */
+export function profileMoment(p: Profile): number {
+  switch (p.kind) {
+    case "rectangle":
+      return p.width * p.height * (p.x + p.width / 2);
+    case "circle":
+      return Math.PI * (p.diameter / 2) ** 2 * p.x;
+    case "polygon": {
+      const pts = p.points;
+      let m = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const [x0, y0] = pts[i]!;
+        const [x1, y1] = pts[(i + 1) % pts.length]!;
+        m += (x0 + x1) * (x0 * y1 - x1 * y0);
+      }
+      return (Math.sign(polygonArea(pts)) * m) / 6;
+    }
   }
 }
 

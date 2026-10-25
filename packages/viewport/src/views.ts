@@ -3,9 +3,12 @@
 
 export type Vec3 = readonly [number, number, number];
 
-export type StandardView = "top" | "front" | "right" | "iso";
+export type StandardView = "top" | "bottom" | "front" | "back" | "left" | "right" | "iso";
 
-export const STANDARD_VIEWS: readonly StandardView[] = ["top", "front", "right", "iso"];
+export const STANDARD_VIEWS: readonly StandardView[] = ["top", "bottom", "front", "back", "left", "right", "iso"];
+
+/** Perspective shows depth (far things smaller); orthographic keeps parallel edges parallel, like a drawing. */
+export type Projection = "perspective" | "orthographic";
 
 export interface Bounds {
   min: Vec3;
@@ -28,8 +31,14 @@ export function viewDirection(view: StandardView): Vec3 {
   switch (view) {
     case "top":
       return [0, 0, 1];
+    case "bottom":
+      return [0, 0, -1];
     case "front":
       return [0, -1, 0];
+    case "back":
+      return [0, 1, 0];
+    case "left":
+      return [-1, 0, 0];
     case "right":
       return [1, 0, 0];
     case "iso":
@@ -37,9 +46,14 @@ export function viewDirection(view: StandardView): Vec3 {
   }
 }
 
-/** Looking straight down Z needs a different "up" so the camera isn't degenerate. */
+/**
+ * Which way is up on screen. Looking straight down or up Z needs a different "up" so the camera isn't degenerate;
+ * from below, the front is at the top so that left and right stay the right way round.
+ */
 export function viewUp(view: StandardView): Vec3 {
-  return view === "top" ? [0, 1, 0] : [0, 0, 1];
+  if (view === "top") return [0, 1, 0];
+  if (view === "bottom") return [0, -1, 0];
+  return [0, 0, 1];
 }
 
 export function boundsCenter(b: Bounds): Vec3 {
@@ -71,4 +85,18 @@ export function placeCamera(view: StandardView, bounds: Bounds, verticalFovDeg: 
     position: [target[0] + dir[0] * d, target[1] + dir[1] * d, target[2] + dir[2] * d],
     up: viewUp(view),
   };
+}
+
+/**
+ * Half the height of what an orthographic camera shows so that, at the target, it frames exactly what a
+ * perspective camera with this field of view shows from `distance` away. Switching projection then keeps the part
+ * the same size on screen.
+ */
+export function orthoHalfHeight(distance: number, verticalFovDeg: number): number {
+  return distance * Math.tan((verticalFovDeg * Math.PI) / 360);
+}
+
+/** The distance a perspective camera needs to show what an orthographic one shows (half-height / zoom). */
+export function perspectiveDistance(halfHeight: number, zoom: number, verticalFovDeg: number): number {
+  return halfHeight / zoom / Math.tan((verticalFovDeg * Math.PI) / 360);
 }
